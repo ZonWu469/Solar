@@ -343,11 +343,43 @@ namespace Solar.Tests
                                    && System.Math.Abs(stages[0].DeltaV - expectDv) < 1.0;
                 Check("separate radial dV", hasSepStage);
 
+                // the separate radial-booster stage must report its fuel + capacity (drives the HUD fuel
+                // bar) -- the old segment-derived StageFuelFrac ignored radial fuel and read 0.
+                bool sepFuelBar = stages.Count >= 1
+                                  && System.Math.Abs(stages[0].Fuel - fuel) < 1.0
+                                  && System.Math.Abs(stages[0].FuelCap - fuel) < 1.0;
+                Check("separate radial fuel bar", sepFuelBar);
+
                 // BurnTime over the full stage list must be finite and consistent for the total dV.
                 double totalDv = 0; foreach (var st in stages) totalDv += st.DeltaV;
                 var inst = new Vessels.VesselDesign { Stack = stack }.Instantiate();
                 double bt = Vessels.Staging.BurnTime(inst, totalDv);
                 Check("separate radial burn-time", bt >= 0 && !double.IsNaN(bt));
+            }
+
+            // 19d. every decoupler shows up as a stage row flagged as a separation event, so a multi-decoupler
+            //      stack lists all its decouplers (a no-engine segment between decouplers still appears).
+            {
+                var names = new[] { "Pod Mk1", "Tank T400", "Terrier", "Decoupler",
+                                    "Tank T400", "Terrier", "Decoupler", "Tank T400", "Terrier" };
+                var stack = new System.Collections.Generic.List<Parts.PartDef>();
+                foreach (var n in names) stack.Add(Parts.PartCatalog.Get(n));
+                var stages = Vessels.Staging.ComputeStages(stack);
+                int decouplerCount = 0; foreach (var n in names) if (n == "Decoupler") decouplerCount++;
+                int decRows = 0; foreach (var st in stages) if (st.Decouples) decRows++;
+                Check("decouplers visible as stages", decRows == decouplerCount && decouplerCount == 2);
+            }
+
+            // 19e. an ordinarily-inline part (a parachute) can be radially mounted; it defaults to riding the
+            //      core (KEEP, not its own stage), materializes as a symmetric pair, and round-trips.
+            {
+                var entry = new Vessels.StackEntry(Parts.PartCatalog.Get("Tank T400"));
+                entry.AddRadial(Parts.PartCatalog.Get("Parachute"));   // not a booster -> Separate defaults false
+                bool ridesCore = entry.Mounts.Count == 1 && !entry.Mounts[0].Separate;
+                var host = new Parts.Part(entry.Def);
+                Vessels.VesselDesign.MaterializeRadials(entry, host);
+                bool pair = host.Radials.Count == 2 && host.Radials.TrueForAll(r => r.Def.Name == "Parachute");
+                Check("inline part radial-mountable", ridesCore && pair);
             }
 
             // 20. body catalog: the solar system builds from BodyCatalog with the parent hierarchy, the
@@ -578,8 +610,8 @@ namespace Solar.Tests
                 Check("colony base", refuelled && colonyOk);
             }
 
-            // 30. per-radial staging choice: staging jettisons only the radials flagged "separate"; the
-            //     "included" ones stay welded to their host part to ride the core stage.
+            // 30. per-radial staging choice (explicit stages): all radials ignite with their host at stage 0;
+            //     by default the "separate" ones drop at stage 1 while the "included" ones ride the core.
             {
                 var v = new Vessels.Vessel();
                 var host = new Parts.Part(Parts.PartCatalog.Get("Tank T400"));
@@ -588,12 +620,49 @@ namespace Solar.Tests
                 host.Radials.Add(new Parts.Part(Parts.PartCatalog.Get("Thumper-R")) { RadialSeparate = false });
                 host.Radials.Add(new Parts.Part(Parts.PartCatalog.Get("Thumper-R")) { RadialSeparate = false });
                 v.Parts.Add(host);
-                v.EnginesIgnited = true;                                  // skip the ignite press
 
-                var debris = Vessels.Staging.FireNext(v);                 // jettison the separate radials
+                var first = Vessels.Staging.FireNext(v);                  // stage 0: ignite all radials, drop nothing
+                bool ignitedNoDrop = first == null && host.Radials.Count == 4 && host.Radials.TrueForAll(r => r.Ignited);
+                var debris = Vessels.Staging.FireNext(v);                 // stage 1: jettison the separate radials
                 bool droppedSeparate = debris != null && debris.Parts.Count == 2;
                 bool keptIncluded = host.Radials.Count == 2 && host.Radials.TrueForAll(r => !r.RadialSeparate);
-                Check("radial staging", droppedSeparate && keptIncluded);
+                Check("radial staging", ignitedNoDrop && droppedSeparate && keptIncluded);
+            }
+
+            // 30b. explicit KSP staging: default geometry puts the bottom engine at stage 0; firing stages in
+            //      order ignites the right engine and decouples the right segment (sequence respected).
+            {
+                var vd = new Vessels.VesselDesign();
+                foreach (var n in new[] { "Pod Mk1", "Tank T400", "Terrier", "Decoupler", "Tank T800", "Swivel" })
+                    vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get(n)));
+                var v = vd.Instantiate();   // assigns default stages
+                var bottomEng = v.Parts[5]; var topEng = v.Parts[2]; var dec = v.Parts[3];
+                bool stages = bottomEng.Def.Name == "Swivel" && bottomEng.Stage == 0
+                              && dec.Def.Name == "Decoupler" && dec.Stage == 1 && topEng.Stage == 1;
+
+                Vessels.Staging.FireNext(v);                       // stage 0: light the bottom engine only
+                bool lit0 = bottomEng.Ignited && !topEng.Ignited && v.Parts.Count == 6;
+                var debris = Vessels.Staging.FireNext(v);          // stage 1: decouple bottom, light upper engine
+                bool decoupled = debris != null && debris.Parts.Exists(p => p.Def.Name == "Swivel")
+                                 && v.Parts.Exists(p => p.Def.Name == "Terrier" && p.Ignited)
+                                 && !v.Parts.Exists(p => p.Def.Name == "Swivel");
+                Check("explicit staging order", stages && lit0 && decoupled);
+            }
+
+            // 30c. re-tagging a part's stage changes when it fires: move the bottom engine to stage 1 and it
+            //      no longer ignites on the first stage.
+            {
+                var vd = new Vessels.VesselDesign();
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Pod Mk1")));
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Tank T400")));
+                var eng = new Vessels.StackEntry(Parts.PartCatalog.Get("Terrier")) { Stage = 1 };  // explicit, not 0
+                vd.Stack.Add(eng);
+                var v = vd.Instantiate();
+                Vessels.Staging.FireNext(v);                       // stage 0
+                bool notLit = !v.Parts[2].Ignited;
+                Vessels.Staging.FireNext(v);                       // stage 1
+                bool litNow = v.Parts[2].Ignited;
+                Check("stage re-tag", v.Parts[2].Stage == 1 && notLit && litNow);
             }
 
             // 31. the "Internal_" sandbox cheat unlocks the whole tech tree; an ordinary name does not.
@@ -645,6 +714,50 @@ namespace Solar.Tests
                     Check("design library round-trip", nameOk && shapeOk);
                 }
                 else Check("design library round-trip", false);
+            }
+
+            // 33b. explicit stage tags survive the DesignState save/load round-trip (axial part + radial mount).
+            {
+                var vd = new Vessels.VesselDesign { Name = "Stage Test" };
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Pod Mk1")));
+                var core = new Vessels.StackEntry(Parts.PartCatalog.Get("Tank T400")) { Stage = 3 };
+                core.AddRadial(Parts.PartCatalog.Get("Thumper-R"), separate: true);
+                core.Mounts[0].Stage = 5;
+                vd.Stack.Add(core);
+
+                var vd2 = new Vessels.VesselDesign();
+                DesignState.From(vd).ApplyTo(vd2);
+                bool tagsOk = vd2.Stack.Count == 2 && vd2.Stack[1].Stage == 3
+                              && vd2.Stack[1].Mounts.Count == 1 && vd2.Stack[1].Mounts[0].Stage == 5;
+                // and the runtime Part carries the tag from Instantiate
+                var inst = vd.Instantiate();
+                bool runtimeOk = inst.Parts.Count == 2 && inst.Parts[1].Stage == 3
+                                 && inst.Parts[1].Radials.Count == 2 && inst.Parts[1].Radials[0].Stage == 5;
+                Check("stage tag round-trip", tagsOk && runtimeOk);
+            }
+
+            // 33c. regression: total delta-v of a default-staged linear stack is a sane positive value and a
+            //      heavier upper stage doesn't exceed an obviously-wrong bound (guards the new dV simulation).
+            {
+                var stack = new System.Collections.Generic.List<Parts.PartDef>();
+                foreach (var n in new[] { "Pod Mk1", "Tank T400", "Terrier", "Decoupler", "Tank T800", "Swivel" })
+                    stack.Add(Parts.PartCatalog.Get(n));
+                var stages = Vessels.Staging.ComputeStages(stack);
+                double totalDv = 0; int withThrust = 0;
+                foreach (var st in stages) { totalDv += st.DeltaV; if (st.DeltaV > 0) withThrust++; }
+                // two engine stages, each producing real dV; a two-stage Terrier/Swivel rocket is a few km/s
+                Check("staging dV sane", withThrust == 2 && totalDv > 2000 && totalDv < 12000);
+            }
+
+            // 33d. a parachute (which defaults to the last stage, above the top engine) must not steal the
+            //      final burn's fuel: the single engine stage still reports real delta-v.
+            {
+                var stack = new System.Collections.Generic.List<Parts.PartDef>();
+                foreach (var n in new[] { "Parachute", "Pod Mk1", "Tank T400", "Terrier" })
+                    stack.Add(Parts.PartCatalog.Get(n));
+                var stages = Vessels.Staging.ComputeStages(stack);
+                double engDv = 0; foreach (var st in stages) engDv = System.Math.Max(engDv, st.DeltaV);
+                Check("parachute keeps final burn dV", engDv > 1000);
             }
 
             string res = $"Physics self-test: {pass}/{total} PASS";

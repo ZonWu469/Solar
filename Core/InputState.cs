@@ -35,6 +35,7 @@ namespace Solar.Core
 
         public Vector2 MousePos => new Vector2(_m.X, _m.Y);
         public bool LeftDown => _m.LeftButton == ButtonState.Pressed;
+        public bool MiddleDown => _m.MiddleButton == ButtonState.Pressed;
         public bool LeftClick => _m.LeftButton == ButtonState.Pressed && _mPrev.LeftButton == ButtonState.Released;
         public bool RightClick => _m.RightButton == ButtonState.Pressed && _mPrev.RightButton == ButtonState.Released;
         public int WheelDelta => _m.ScrollWheelValue - _mPrev.ScrollWheelValue;

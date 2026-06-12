@@ -90,6 +90,11 @@ namespace Solar.Parts
             new PartDef { Name = "Cargo Truss",       Id = "cargo-truss",        Kind = PartKind.StructuralBay, DryMass = 100, Width = 1.7, Height = 2.5, CdA = 0.2, Tint = new Color(160, 165, 175) },
             new PartDef { Name = "Stack Bi-Adapter",  Id = "stack-bi-adapter",   Kind = PartKind.StructuralBay, DryMass = 200, Width = 1.7, Height = 1.2, CdA = 0.25, Tint = new Color(150, 155, 170) },
             new PartDef { Name = "Stack Tri-Adapter", Id = "stack-tri-adapter",  Kind = PartKind.StructuralBay, DryMass = 350, Width = 2.3, Height = 1.5, CdA = 0.35, Tint = new Color(145, 150, 165) },
+            // beams & platforms (structural connectors; mount inline or radially with Alt)
+            new PartDef { Name = "I-Beam",           Id = "i-beam",            Kind = PartKind.StructuralBay, DryMass = 60,  Width = 0.4, Height = 2.6, CdA = 0.08, Tint = new Color(150, 155, 165) },
+            new PartDef { Name = "Long I-Beam",      Id = "long-i-beam",       Kind = PartKind.StructuralBay, DryMass = 110, Width = 0.4, Height = 4.8, CdA = 0.12, Tint = new Color(150, 155, 165) },
+            new PartDef { Name = "Flat Platform",    Id = "flat-platform",     Kind = PartKind.StructuralBay, DryMass = 180, Width = 2.8, Height = 0.4, CdA = 0.30, Tint = new Color(158, 163, 173) },
+            new PartDef { Name = "Heavy Platform",   Id = "heavy-platform",    Kind = PartKind.StructuralBay, DryMass = 420, Width = 3.6, Height = 0.5, CdA = 0.45, Tint = new Color(152, 157, 167) },
             // ---- NEW: engines ----
             new PartDef { Name = "Aerospike",         Id = "aerospike",          Kind = PartKind.Engine,  DryMass = 1200, Thrust = 180_000, Isp = 345, Width = 1.7, Height = 2.0, CdA = 0.4, Tint = new Color(130, 135, 140) },
             new PartDef { Name = "Nuclear Lightbulb", Id = "nuclear-lightbulb",  Kind = PartKind.Engine,  DryMass = 5000, Thrust = 120_000, Isp = 1500, Width = 2.3, Height = 4.0, CdA = 0.5, Tint = new Color(180, 140, 80) },

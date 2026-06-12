@@ -12,6 +12,9 @@ namespace Solar.Vessels
         /// <summary>true = the mount jettisons as its own stage (a spent booster you drop); false = it stays
         /// attached and rides its host part's stage ("included in another stage").</summary>
         public bool Separate = true;
+        /// <summary>Stage at which this (separate) mount is jettisoned; -1 = derive from geometry. Ignored
+        /// when <see cref="Separate"/> is false (the mount then rides its host and drops with it).</summary>
+        public int Stage = -1;
         public PartDef Root => Parts.Count > 0 ? Parts[0] : null;
         public RadialMount() { }
         public RadialMount(PartDef root, bool separate = true) { if (root != null) Parts.Add(root); Separate = separate; }
@@ -25,6 +28,9 @@ namespace Solar.Vessels
         public PartDef Def;
         public List<ModuleDef> Modules = new();
         public List<RadialMount> Mounts = new();
+        /// <summary>Activation stage for this axial part (0 fires first); -1 = derive from geometry on
+        /// launch. Mirrors the runtime <see cref="Solar.Parts.Part.Stage"/>; persisted with the design.</summary>
+        public int Stage = -1;
         /// <summary>Names of crew assigned to this part's seats in the editor (resolved against the
         /// savegame roster at launch).</summary>
         public List<string> CrewNames = new();
@@ -105,6 +111,7 @@ namespace Solar.Vessels
                         {
                             RadialSeparate = mount.Separate,
                             RadialMountId = mi, RadialSide = side, RadialSlot = slot,
+                            Stage = mount.Stage,   // drop stage for a separate mount (-1 => derive)
                         });
             }
         }
@@ -118,7 +125,7 @@ namespace Solar.Vessels
             var d = new VesselDesign { Name = string.IsNullOrWhiteSpace(name) ? "Ship 1" : name };
             foreach (var p in v.Parts)
             {
-                var e = new StackEntry(p.Def);
+                var e = new StackEntry(p.Def) { Stage = p.Stage };
                 foreach (var m in p.Modules) e.Modules.Add(m.Def);
 
                 // Tagged radials (post-change): group by mount id, keep one side, order by slot.
@@ -136,7 +143,7 @@ namespace Solar.Vessels
                     int side0 = int.MaxValue;
                     foreach (var r in group) if (r.RadialSide >= 0 && r.RadialSide < side0) side0 = r.RadialSide;
                     group.Sort((a, b) => a.RadialSlot.CompareTo(b.RadialSlot));
-                    var mount = new RadialMount { Separate = group[0].RadialSeparate };
+                    var mount = new RadialMount { Separate = group[0].RadialSeparate, Stage = group[0].Stage };
                     foreach (var r in group)
                         if (r.RadialSide == side0 || r.RadialSide < 0) mount.Parts.Add(r.Def);
                     if (mount.Parts.Count > 0) e.Mounts.Add(mount);
@@ -156,7 +163,7 @@ namespace Solar.Vessels
             var boarded = new HashSet<CrewMember>();
             foreach (var e in Stack)
             {
-                var p = new Part(e.Def);
+                var p = new Part(e.Def) { Stage = e.Stage };
                 foreach (var m in e.Modules) p.Modules.Add(new ModuleInstance(m));
                 MaterializeRadials(e, p);
                 // board assigned crew from the roster, capped at this part's seats (no double-boarding)
@@ -172,6 +179,7 @@ namespace Solar.Vessels
             v.ElectricCharge = v.EcCapacity;
             v.Monoprop = v.MonopropCapacity;
             v.Water = v.WaterCapacity; v.Oxygen = v.OxygenCapacity; v.Food = v.FoodCapacity;
+            Staging.AssignDefaultStages(v.Parts);   // fill any stage tags the design left to geometry
             return v;
         }
     }

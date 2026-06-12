@@ -115,6 +115,7 @@ namespace Solar.Scenes
             _vessel.Heading = Math.PI / 2;
             _vessel.Landed = true;
             _vessel.OnRails = false;
+            _vessel.Throttle = 1.0;   // pad launch starts at full throttle so firing the first stage lifts off
             _lastBody = earth;
             _mapZoom = earth.SoiRadius * 2.4 / Math.Min(Ctx.W, Ctx.H);
             SpawnOthers();
@@ -129,6 +130,11 @@ namespace Solar.Scenes
                 if (s.Name == _shipName || s.Destroyed) continue;
                 var v = s.ToVessel(Ctx.Universe, Ctx.State.Roster);
                 if (v.Body == null) continue;
+                // skip a ship sitting on the same spot as the active vessel (e.g. another ship saved landed
+                // on the launch pad): it would render right on top of ours and read as stray parts. It's
+                // still persisted by PersistOthers, so this only suppresses the overlapping spawn/render.
+                if (_vessel != null && v.Body == _vessel.Body && v.Landed && _vessel.Landed
+                    && (v.Position - _vessel.Position).Length < 100.0) continue;
                 if (!v.Landed && !v.OnRails) v.GoOnRails(Ctx.Clock.UT);
                 _others.Add(new TrackedShip { Name = s.Name, V = v });
             }
@@ -283,18 +289,7 @@ namespace Solar.Scenes
                     if (inp.Down(Keys.J)) rx -= 1;
                     _vessel.RcsCommand = new Vec2d(rx, ry);
                 }
-                if (inp.Pressed(Keys.Space))
-                {
-                    bool wasOnRails = _vessel.OnRails;
-                    if (wasOnRails) _vessel.GoOffRails(clock.UT);
-                    var debris = Staging.FireNext(_vessel);
-                    if (debris != null)
-                    {
-                        _debris.Add(debris);
-                        if (_debris.Count > MaxDebris) _debris.RemoveAt(0);
-                    }
-                    if (wasOnRails) { _vessel.GoOnRails(clock.UT); RefreshPrediction(clock.UT); }
-                }
+                if (inp.Pressed(Keys.Space)) FireNextStage();
             }
 
             // ---------- simulation ----------
@@ -860,6 +855,23 @@ namespace Solar.Scenes
 
         /// <summary>Bottom-left readout telling the player what the fitted instruments can collect here and
         /// whether an antenna will transmit it — so the science economy is legible in flight.</summary>
+        /// <summary>Fire the next stage (ignite the bottom segment, then decouple/jettison on later calls),
+        /// dropping off rails for the discrete event and back on if it was coasting. Shared by the [Space]
+        /// key and clicking the active row in the HUD stage list.</summary>
+        private void FireNextStage()
+        {
+            double ut = Ctx.Clock.UT;
+            bool wasOnRails = _vessel.OnRails;
+            if (wasOnRails) _vessel.GoOffRails(ut);
+            var debris = Staging.FireNext(_vessel);
+            if (debris != null)
+            {
+                _debris.Add(debris);
+                if (_debris.Count > MaxDebris) _debris.RemoveAt(0);
+            }
+            if (wasOnRails) { _vessel.GoOnRails(ut); RefreshPrediction(ut); }
+        }
+
         private void DrawScienceStatus(PrimitiveBatch pb, Microsoft.Xna.Framework.Graphics.SpriteBatch sb, double ut)
         {
             var v = _vessel;
@@ -879,7 +891,8 @@ namespace Solar.Scenes
 
             var f = Ctx.Font;
             double signal = v.SignalStrength(ut, Ctx.Universe, OtherVessels());
-            var r = new Rectangle(10, Ctx.H - 168, 256, 68);
+            // right side, bottom-anchored, so the bottom-left stage list stays unobstructed
+            var r = new Rectangle(Ctx.W - 256 - 10, Ctx.H - 168, 256, 68);
             UiDraw.Panel(pb, r);
             // running total is always shown (milestones pay out even with no instruments)
             sb.DrawString(f, $"SCIENCE: {Ctx.State.Science:0}", new Vector2(r.X + 10, r.Y + 8), new Color(150, 230, 150));
@@ -1244,6 +1257,7 @@ namespace Solar.Scenes
 
             var hud = Hud.Draw(Ctx, _vessel, _pred, _map, FocusName(), NextNode(ut), BurnDirAngle(ut), _burnSpent, _nodes.Count, BuildNavMarkers(ut));
             if (hud.WarpToUT.HasValue) _warpTo = hud.WarpToUT;
+            if (hud.FireStage) FireNextStage();
 
             DrawTargetPanel(pb, sb, ut);
             DrawTargetWindow(pb, sb);

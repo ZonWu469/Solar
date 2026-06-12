@@ -88,6 +88,14 @@ namespace Solar.UI
             return scroll;
         }
 
+        /// <summary>Draw text at a reduced scale (the bundled SpriteFont has a single baked size, so
+        /// smaller UI text is done by scaling). Returns the rendered width so callers can lay out beside it.</summary>
+        public static float SmallText(SpriteBatch sb, SpriteFont f, string text, Vector2 pos, Color c, float scale = 0.8f)
+        {
+            sb.DrawString(f, text, pos, c, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+            return f.MeasureString(text).X * scale;
+        }
+
         public static void Bar(PrimitiveBatch pb, Rectangle r, float frac, Color fill)
         {
             pb.FillRect(r, new Color(20, 26, 38, 220));

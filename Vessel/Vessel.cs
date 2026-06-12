@@ -23,6 +23,7 @@ namespace Solar.Vessels
         public bool Landed;
         public bool Destroyed;
         public bool EnginesIgnited;  // first stage has been fired
+        public int CurrentStage;     // next stage index to fire (0 = first); advanced by Staging.FireNext
         public bool IsDebris;
 
         // RCS translation: per-frame body-frame command (set by the flight scene from input),

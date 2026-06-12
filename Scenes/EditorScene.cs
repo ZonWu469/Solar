@@ -38,8 +38,14 @@ namespace Solar.Scenes
         private float _statsScroll;
         private bool _statsDrag;
         private float _statsContentH;    // last frame's measured body height, used to clamp
+        // build-area view: zoom multiplies the auto-fit scale, panY shifts the centered stack
+        private float _zoom = 1f;
+        private float _panY = 0f;
+        private bool _stackPan;          // middle-button vertical drag in progress
+        private float _lastMouseY;
         // hover tooltip (deferred so it paints on top of every panel)
         private PartDef _tooltipDef;
+        private StackEntry _tooltipEntry;   // set when hovering a placed part, so the tooltip shows its fitted modules
         private Vector2 _tooltipAt;
         // screen rects of radial sub-stack parts, rebuilt each frame by DrawRadials for hit-testing
         private readonly List<(int stackIndex, int mountIndex, int partIndex, Rectangle rect)> _radialHits = new();
@@ -150,12 +156,12 @@ namespace Solar.Scenes
             }
             else
             {
-                _tooltipDef = null;
+                _tooltipDef = null; _tooltipEntry = null;
                 if (UiDraw.Button(pb, sb, f, new Rectangle(PaletteW + 180, 38, 110, 26), "R&D  [R]", inp)) _showRnd = true;
                 DrawPalette(pb, sb, f, inp, h);
                 DrawStack(pb, sb, f, inp, w, h);
                 DrawStats(pb, sb, f, inp, w, h);
-                if (_tooltipDef != null) DrawTooltip(pb, sb, f, _tooltipDef, _tooltipAt, w, h);
+                if (_tooltipDef != null) DrawTooltip(pb, sb, f, _tooltipDef, _tooltipEntry, _tooltipAt, w, h);
             }
 
             pb.End();
@@ -241,10 +247,14 @@ namespace Solar.Scenes
                         bool isHeld = _held == def;
                         pb.FillRect(r, isHeld ? new Color(60, 95, 140, 230) : hover ? new Color(45, 70, 105, 230) : new Color(24, 36, 56, 220));
                         pb.RectOutline(r, 1, isHeld ? UiDraw.Accent : UiDraw.PanelBorder);
-                        pb.FillRect(r.X + 5, r.Y + 8, 8, 26, def.Tint);
-                        sb.DrawString(f, def.Name, new Vector2(r.X + 20, r.Y + 4), Color.White);
-                        sb.DrawString(f, def.StatLine, new Vector2(r.X + 20, r.Y + 22), UiDraw.TextDim);
-                        if (hover) { _tooltipDef = def; _tooltipAt = inp.MousePos; }
+                        // icon box (texture or procedural-shape placeholder), then name + small stat line
+                        var iconBox = new Rectangle(r.X + 4, r.Y + 4, 34, 34);
+                        pb.FillRect(iconBox, new Color(14, 20, 32, 220));
+                        DrawPartIcon(pb, def, new Rectangle(iconBox.X + 2, iconBox.Y + 2, iconBox.Width - 4, iconBox.Height - 4), Ctx.Textures);
+                        pb.RectOutline(iconBox, 1, new Color(50, 66, 92));
+                        sb.DrawString(f, def.Name, new Vector2(r.X + 46, r.Y + 4), Color.White);
+                        UiDraw.SmallText(sb, f, def.StatLine, new Vector2(r.X + 46, r.Y + 24), UiDraw.TextDim, 0.8f);
+                        if (hover) { _tooltipDef = def; _tooltipEntry = null; _tooltipAt = inp.MousePos; }
                         if (hover && inp.LeftClick) { _held = def; _selected = -1; }
                     }
                     yc += partRow;
@@ -276,6 +286,24 @@ namespace Solar.Scenes
             return e;
         }
 
+        /// <summary>Effective activation stage of each axial stack entry: the player's explicit tags where
+        /// set, otherwise the geometry-derived defaults (shared with launch via <see cref="Staging.AssignDefaultStages"/>).
+        /// Used to draw the stage bands and the per-part stage controls.</summary>
+        private int[] EffectiveStages()
+        {
+            var parts = new List<Part>(Stack.Count);
+            foreach (var e in Stack)
+            {
+                var p = new Part(e.Def) { Stage = e.Stage };
+                VesselDesign.MaterializeRadials(e, p);
+                parts.Add(p);
+            }
+            Staging.AssignDefaultStages(parts);
+            var res = new int[parts.Count];
+            for (int i = 0; i < parts.Count; i++) res[i] = parts[i].Stage;
+            return res;
+        }
+
         // ---------- stack ----------
         private void DrawStack(Rendering.PrimitiveBatch pb, Microsoft.Xna.Framework.Graphics.SpriteBatch sb,
                                Microsoft.Xna.Framework.Graphics.SpriteFont f, InputState inp, int w, int h)
@@ -285,8 +313,40 @@ namespace Solar.Scenes
             double totalH = 0;
             foreach (var e in Stack) totalH += e.Def.Height;
 
-            float scale = (float)Math.Min(15.0, (h - 170) / Math.Max(totalH, 8));
-            float topY = (float)(h - totalH * scale) / 2f;
+            float baseScale = (float)Math.Min(15.0, (h - 170) / Math.Max(totalH, 8));
+
+            // build area = central column between the palette and stats panels; zoom/pan only react here
+            var buildRegion = new Rectangle(PaletteW, 0, w - PaletteW - StatsW, h);
+            bool overBuild = buildRegion.Contains((int)inp.MousePos.X, (int)inp.MousePos.Y);
+
+            // wheel zoom toward the cursor (gated on overBuild so the palette/stats wheel-scroll is unaffected)
+            if (overBuild && inp.WheelDelta != 0)
+            {
+                float oldScale = baseScale * _zoom;
+                float oldTopY = (float)(h - totalH * oldScale) / 2f + _panY;
+                float worldY = (inp.MousePos.Y - oldTopY) / Math.Max(oldScale, 1e-4f);
+                _zoom = Math.Clamp(_zoom * (inp.WheelDelta > 0 ? 1.1f : 1f / 1.1f), 0.3f, 8f);
+                float ns = baseScale * _zoom;
+                _panY = inp.MousePos.Y - (float)worldY * ns - (float)(h - totalH * ns) / 2f;
+            }
+
+            // middle-button drag pans vertically
+            if (overBuild && inp.MiddleDown && !_stackPan) { _stackPan = true; _lastMouseY = inp.MousePos.Y; }
+            if (_stackPan && inp.MiddleDown) { _panY += inp.MousePos.Y - _lastMouseY; _lastMouseY = inp.MousePos.Y; }
+            if (!inp.MiddleDown) _stackPan = false;
+
+            if (_zoom <= 1f) _panY = 0f;   // at/below fit, keep the stack centered
+
+            float scale = baseScale * _zoom;
+            // clamp pan so at least part of the stack stays on screen
+            float stackPx = (float)(totalH * scale);
+            float maxPan = Math.Max(0, stackPx / 2f + h * 0.4f);
+            _panY = Math.Clamp(_panY, -maxPan, maxPan);
+            float topY = (float)(h - totalH * scale) / 2f + _panY;
+
+            // zoom controls cluster (bottom-center of the build area); placement clicks ignore this strip
+            var zoomBtns = new Rectangle((int)(cx - 62), h - 46, 124, 30);
+            bool overZoom = zoomBtns.Contains((int)inp.MousePos.X, (int)inp.MousePos.Y);
 
             // gap boundaries (screen Y for insertion indices 0..Count)
             var gaps = new float[Stack.Count + 1];
@@ -294,17 +354,11 @@ namespace Solar.Scenes
             gaps[0] = gy;
             for (int i = 0; i < Stack.Count; i++) { gy += (float)(Stack[i].Def.Height * scale); gaps[i + 1] = gy; }
 
-            // stage bands: number bottom-first (a decoupler rides the stage below it, matching ComputeStages),
-            // then paint an alternating translucent band behind each stage's parts with an S{n} label.
+            // stage bands: each part's effective activation stage (explicit tags or geometry defaults),
+            // painted as an alternating translucent band behind each run of same-stage parts with an S{n} label.
             if (Stack.Count > 0)
             {
-                var stageOf = new int[Stack.Count];
-                int stg = 1;
-                for (int i = Stack.Count - 1; i >= 0; i--)
-                {
-                    stageOf[i] = stg;
-                    if (Stack[i].Def.Kind == PartKind.Decoupler) stg++;
-                }
+                var stageOf = EffectiveStages();
                 int s = 0;
                 while (s < Stack.Count)
                 {
@@ -336,7 +390,7 @@ namespace Solar.Scenes
                     pb.FillCircle(new Vector2(rect.Right + 8, rect.Center.Y), 4, new Color(120, 210, 255));
                 bool hover = rect.Contains((int)inp.MousePos.X, (int)inp.MousePos.Y);
                 if (hover) hoverPart = i;
-                if (hover && _held == null) { _tooltipDef = d; _tooltipAt = inp.MousePos; }
+                if (hover && _held == null) { _tooltipDef = d; _tooltipEntry = Stack[i]; _tooltipAt = inp.MousePos; }
                 if (i == _selected) pb.RectOutline(new Rectangle(rect.X - 3, rect.Y - 2, rect.Width + 6, rect.Height + 4), 1.5f, UiDraw.Accent);
                 else if (hover && _held == null) pb.RectOutline(new Rectangle(rect.X - 3, rect.Y - 2, rect.Width + 6, rect.Height + 4), 1, new Color(90, 110, 140));
                 if (hover && _held == null && inp.LeftClick) _selected = i;
@@ -351,9 +405,11 @@ namespace Solar.Scenes
             // placement: radial roots mount to a hovered part's sides; stackable parts append below an
             // existing radial sub-stack when hovered over one; otherwise everything inserts into an axial gap
             _hoverGap = -1;
-            if (_held != null && inp.MousePos.X > PaletteW && inp.MousePos.X < w - StatsW)
+            if (_held != null && inp.MousePos.X > PaletteW && inp.MousePos.X < w - StatsW && !overZoom)
             {
-                if (_held.Radial)
+                // any part can be side-mounted while holding Alt; inherently-radial parts always mount radially
+                bool radialMode = _held.Radial || inp.Down(Keys.LeftAlt) || inp.Down(Keys.RightAlt);
+                if (radialMode)
                 {
                     if (hoverPart >= 0)
                     {
@@ -403,10 +459,12 @@ namespace Solar.Scenes
                     }
                     _hoverGap = best;
                     pb.FillRect(cx - 90, gaps[best] - 2, 180, 4, new Color(120, 230, 140));
+                    var hint = "hold Alt + hover a part to mount " + _held.Name + " radially";
+                    sb.DrawString(f, hint, new Vector2(cx - f.MeasureString(hint).X / 2, topY - 22), new Color(110, 130, 160));
                     if (inp.LeftClick) Stack.Insert(best, NewEntry(_held));
                 }
             }
-            else if (_held == null && hitStack >= 0 && inp.LeftClick)
+            else if (_held == null && hitStack >= 0 && inp.LeftClick && !overZoom)
                 _selected = hitStack;   // click a radial part to select its host and open the radial panel
 
             if (Stack.Count == 0)
@@ -416,29 +474,52 @@ namespace Solar.Scenes
                 sb.DrawString(f, msg, new Vector2(cx - sz.X / 2, h / 2f), UiDraw.TextDim);
             }
 
+            // zoom controls: -  Fit  +  with the current factor above them
+            sb.DrawString(f, $"x{_zoom:0.0}", new Vector2(cx - f.MeasureString($"x{_zoom:0.0}").X / 2, zoomBtns.Y - 18), UiDraw.TextDim);
+            if (UiDraw.Button(pb, sb, f, new Rectangle(zoomBtns.X, zoomBtns.Y, 30, 30), "-", inp))
+                _zoom = Math.Clamp(_zoom / 1.25f, 0.3f, 8f);
+            if (UiDraw.Button(pb, sb, f, new Rectangle(zoomBtns.X + 34, zoomBtns.Y, 56, 30), "Fit", inp))
+                { _zoom = 1f; _panY = 0f; }
+            if (UiDraw.Button(pb, sb, f, new Rectangle(zoomBtns.X + 94, zoomBtns.Y, 30, 30), "+", inp))
+                _zoom = Math.Clamp(_zoom * 1.25f, 0.3f, 8f);
+
             if (_held != null)
                 sb.DrawString(f, _held.Name, inp.MousePos + new Vector2(14, 10), UiDraw.Accent);
         }
 
-        /// <summary>Full-stat hover tooltip for a part, drawn last so it floats over every panel. ASCII units.</summary>
+        /// <summary>Full-stat hover tooltip for a part, drawn last so it floats over every panel. ASCII units.
+        /// The title line is full-size; detail lines render small. When <paramref name="entry"/> is supplied
+        /// (hovering a placed part) its fitted modules are listed; otherwise the part's built-in
+        /// <see cref="PartDef.DefaultModules"/> are shown.</summary>
         private static void DrawTooltip(Rendering.PrimitiveBatch pb, Microsoft.Xna.Framework.Graphics.SpriteBatch sb,
-                                        Microsoft.Xna.Framework.Graphics.SpriteFont f, PartDef d, Vector2 mouse, int w, int h)
+                                        Microsoft.Xna.Framework.Graphics.SpriteFont f, PartDef d, StackEntry entry, Vector2 mouse, int w, int h)
         {
-            var lines = new List<string> { d.Name, d.Kind.ToString() };
+            const float small = 0.8f;
+            var detail = new List<string> { d.Kind.ToString() };
             double total = d.DryMass + d.FuelCapacity;
-            lines.Add(d.FuelCapacity > 0 ? $"Mass: {total / 1000:0.00} t  (dry {d.DryMass / 1000:0.00} t)"
-                                         : $"Mass: {d.DryMass / 1000:0.00} t");
+            detail.Add(d.FuelCapacity > 0 ? $"Mass: {total / 1000:0.00} t  (dry {d.DryMass / 1000:0.00} t)"
+                                          : $"Mass: {d.DryMass / 1000:0.00} t");
             if (d.Kind == PartKind.Engine || d.Kind == PartKind.SolidBooster)
             {
-                lines.Add($"Thrust: {d.Thrust / 1000:0} kN   Isp: {d.Isp:0} s");
-                lines.Add($"Flow: {d.FuelFlowAtMax:0.0} kg/s");
+                detail.Add($"Thrust: {d.Thrust / 1000:0} kN   Isp: {d.Isp:0} s");
+                detail.Add($"Flow: {d.FuelFlowAtMax:0.0} kg/s");
             }
-            if (d.FuelCapacity > 0) lines.Add($"Fuel: {d.FuelCapacity:0} kg");
-            lines.Add($"Size: {d.Width:0.0} x {d.Height:0.0} m");
+            if (d.FuelCapacity > 0) detail.Add($"Fuel: {d.FuelCapacity:0} kg");
+            detail.Add($"Size: {d.Width:0.0} x {d.Height:0.0} m   Drag (CdA): {d.CdA:0.00} m2");
+            if (d.Slots > 0) detail.Add($"Slots: {d.Slots}");
 
-            float lh = f.MeasureString("X").Y + 2;
-            float tw = 0; foreach (var ln in lines) tw = Math.Max(tw, f.MeasureString(ln).X);
-            int bw = (int)tw + 18, bh = (int)(lines.Count * lh) + 12;
+            // modules: actual fitted ones for a placed part, else the part's built-in loadout
+            var modules = new List<string>();
+            if (entry != null) foreach (var m in entry.Modules) modules.Add(m.SlotCost > 1 ? $"{m.Name} [{m.SlotCost}]" : m.Name);
+            else foreach (var name in d.DefaultModules) modules.Add(name);
+            if (modules.Count > 0) detail.Add("Modules: " + string.Join(", ", modules));
+            else if (d.Slots > 0) detail.Add("Modules: (none fitted)");
+
+            float lhTitle = f.MeasureString("X").Y + 2;
+            float lhSmall = f.MeasureString("X").Y * small + 2;
+            float tw = f.MeasureString(d.Name).X;
+            foreach (var ln in detail) tw = Math.Max(tw, f.MeasureString(ln).X * small);
+            int bw = (int)tw + 18, bh = (int)(lhTitle + detail.Count * lhSmall) + 12;
             int bx = (int)mouse.X + 16, by = (int)mouse.Y + 14;
             if (bx + bw > w - 4) bx = (int)mouse.X - bw - 12;   // flip left near the right edge
             if (by + bh > h - 4) by = h - 4 - bh;
@@ -446,11 +527,13 @@ namespace Solar.Scenes
 
             UiDraw.Panel(pb, new Rectangle(bx, by, bw, bh));
             float ty = by + 6;
-            for (int i = 0; i < lines.Count; i++)
+            sb.DrawString(f, d.Name, new Vector2(bx + 9, ty), Color.White);
+            ty += lhTitle;
+            for (int i = 0; i < detail.Count; i++)
             {
-                Color c = i == 0 ? Color.White : i == 1 ? UiDraw.Accent : UiDraw.TextDim;
-                sb.DrawString(f, lines[i], new Vector2(bx + 9, ty), c);
-                ty += lh;
+                Color c = i == 0 ? UiDraw.Accent : UiDraw.TextDim;
+                UiDraw.SmallText(sb, f, detail[i], new Vector2(bx + 9, ty), c, small);
+                ty += lhSmall;
             }
         }
 
@@ -512,6 +595,19 @@ namespace Solar.Scenes
         }
 
         /// <summary>Axis-aligned editor rendering of a part (screen coords, Y down, part spans [y, y+ph]).</summary>
+        /// <summary>Draw a part's icon (its texture, or the procedural shape fallback) fitted into
+        /// <paramref name="box"/> preserving the part's aspect ratio. Used by the palette so each entry
+        /// reads as a real part rather than a color swatch.</summary>
+        private static void DrawPartIcon(Rendering.PrimitiveBatch pb, PartDef d, Rectangle box, Rendering.TextureStore tex)
+        {
+            double aspect = d.Height > 0 ? d.Width / d.Height : 1.0;
+            float pw = box.Width, ph = box.Height;
+            if (aspect >= 1) ph = (float)(pw / aspect); else pw = (float)(ph * aspect);
+            float cx = box.X + box.Width / 2f;
+            float y = box.Y + (box.Height - ph) / 2f;
+            DrawPartShape(pb, d, cx, y, pw, ph, tex);
+        }
+
         private static void DrawPartShape(Rendering.PrimitiveBatch pb, PartDef d, float cx, float y, float pw, float ph, Rendering.TextureStore tex = null)
         {
             Color dark = Rendering.PlanetRenderer.Darken(d.Tint, 0.4f);
@@ -602,11 +698,11 @@ namespace Solar.Scenes
             var stages = Staging.ComputeStages(Stack);
             double totalDv = 0;
             foreach (var st in stages) totalDv += st.DeltaV;
-            Str("STAGING (bottom first)", x, y, UiDraw.TextDim); y += 22;
+            Str("STAGES (S0 fires first; select a part to re-stage)", x, y, UiDraw.TextDim); y += 22;
             for (int i = 0; i < stages.Count; i++)
             {
                 var st = stages[i];
-                Str($"S{st.Number}: {st.Engines}", x, y, Color.White);
+                Str($"S{st.Number}: {st.Engines}{(st.Decouples ? "  [decouple]" : "")}", x, y, Color.White);
                 string line = st.DeltaV > 0
                     ? $"   dV {st.DeltaV:0} m/s  TWR {st.Twr:0.00}  {st.BurnTime:0}s"
                     : "   (no thrust)";
@@ -747,18 +843,26 @@ namespace Solar.Scenes
                 Str($"RADIAL  {entry.Def.Name}", x, y, UiDraw.Accent); y += 20;
                 Str("STG = own stage   KEEP = rides core", x, y, UiDraw.TextDim); y += 18;
                 Str("Hold a part, hover a radial to stack below it", x, y, UiDraw.TextDim); y += 20;
-                int toggleMount = -1, delMount = -1, delPartMount = -1, delPart = -1;
+                int hostEff = EffectiveStages()[_selected];
+                int toggleMount = -1, delMount = -1, delPartMount = -1, delPart = -1, dropDelta = 0, dropMount = -1;
                 for (int mi = 0; mi < entry.Mounts.Count; mi++)
                 {
                     var mount = entry.Mounts[mi];
                     bool sep = mount.Separate;
                     Color modeCol = sep ? new Color(120, 210, 255) : new Color(150, 230, 150);
                     string root = mount.Root != null ? mount.Root.Name : "(empty)";
+                    int drop = mount.Stage >= 0 ? mount.Stage : hostEff + 1;   // effective drop stage
                     Str($"Mount {mi + 1}: {root} x2", x, y + 3, Color.White);
-                    Str(sep ? "own stage" : "on core", x + 14, y + 19, modeCol);
+                    Str(sep ? $"drop S{drop}" : "on core", x + 14, y + 19, modeCol);
                     if (Btn(new Rectangle(w - 110, (int)y, 44, 22), sep ? "STG" : "KEEP")) toggleMount = mi;
                     if (Btn(new Rectangle(w - 62, (int)y, 38, 22), "del")) delMount = mi;
-                    y += 40;
+                    // drop-stage steppers for a separate mount, on the second row
+                    if (sep)
+                    {
+                        if (Btn(new Rectangle(w - 110, (int)y + 22, 21, 20), "-", drop > 0)) { dropMount = mi; dropDelta = -1; }
+                        if (Btn(new Rectangle(w - 86, (int)y + 22, 21, 20), "+")) { dropMount = mi; dropDelta = 1; }
+                    }
+                    y += 44;
                     // sub-stack parts (skip the lone root to keep single-part mounts compact)
                     if (mount.Parts.Count > 1)
                         for (int pi = 0; pi < mount.Parts.Count; pi++)
@@ -769,14 +873,33 @@ namespace Solar.Scenes
                         }
                 }
                 if (toggleMount >= 0) entry.Mounts[toggleMount].Separate = !entry.Mounts[toggleMount].Separate;
+                else if (dropMount >= 0)
+                {
+                    var m = entry.Mounts[dropMount];
+                    int cur = m.Stage >= 0 ? m.Stage : hostEff + 1;
+                    m.Stage = Math.Max(0, cur + dropDelta);
+                }
                 else if (delPartMount >= 0) entry.RemoveFromMount(delPartMount, delPart);
                 else if (delMount >= 0) entry.RemoveRadial(delMount);
             }
 
-            // delete the selected part (and everything below it) — a button off the ship, not a right-click
+            // set the selected part's activation stage (independent KSP-style ordering) and delete it
             if (_selected >= 0 && _selected < Stack.Count)
             {
+                var sel = Stack[_selected];
+                int eff = EffectiveStages()[_selected];
                 y += 4;
+                Str($"STAGE: S{eff}   (when this part fires)", x, y, UiDraw.Accent); y += 22;
+                int halfW = (StatsW - 44 - 6) / 2;
+                if (Btn(new Rectangle((int)x, (int)y, halfW, 26), "- earlier", eff > 0))
+                    sel.Stage = Math.Max(0, eff - 1);
+                if (Btn(new Rectangle((int)x + halfW + 6, (int)y, halfW, 26), "+ later"))
+                    sel.Stage = eff + 1;
+                y += 30;
+                if (sel.Stage >= 0 && Btn(new Rectangle((int)x, (int)y, StatsW - 44, 22), "auto (clear stage)"))
+                    sel.Stage = -1;
+                if (sel.Stage >= 0) y += 26;
+                y += 6;
                 if (Btn(new Rectangle((int)x, (int)y, StatsW - 44, 28), "Delete part (+ below)"))
                 { RemoveCascade(_selected); }
                 y += 34;

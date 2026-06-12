@@ -13,6 +13,7 @@ namespace Solar.UI
     public struct HudResult
     {
         public double? WarpToUT;   // set when the "Warp to maneuver" button was clicked
+        public bool FireStage;     // set when the player clicked the stage list to fire the next stage
     }
 
     /// <summary>Target-relative navball cues, computed by the flight scene where target data lives.
@@ -242,22 +243,29 @@ namespace Solar.UI
                 int rows = Math.Min(stages.Count, 6);
                 var sp = new Rectangle(10, h - 30 - rows * 38 - 28, 300, rows * 38 + 36);
                 UiDraw.Panel(pb, sp);
-                sb.DrawString(f, $"STAGES  dV {TotalDeltaV(v):0} m/s  [Space] fire", new Vector2(sp.X + 8, sp.Y + 6), UiDraw.TextDim);
+                sb.DrawString(f, $"STAGES  dV {TotalDeltaV(v):0} m/s  [Space]/click fire", new Vector2(sp.X + 8, sp.Y + 6), UiDraw.TextDim);
                 float sy = sp.Y + 28;
                 for (int i = 0; i < rows; i++)
                 {
                     var st = stages[i];
-                    Color rc = i == 0 ? Color.White : UiDraw.TextDim;
+                    // the active (next-to-fire) row is clickable: clicking it fires the next stage, like [Space]
+                    var rowRect = new Rectangle(sp.X + 4, (int)sy - 4, sp.Width - 8, 34);
+                    bool active = i == 0;
+                    bool hover = active && rowRect.Contains((int)ctx.Input.MousePos.X, (int)ctx.Input.MousePos.Y);
+                    if (hover) pb.FillRect(rowRect, new Color(60, 95, 140, 120));
+                    if (hover && ctx.Input.LeftClick) result.FireStage = true;
+                    Color rc = active ? Color.White : UiDraw.TextDim;
                     // right-align the dV readout to the panel edge, then truncate the engine label so it can't reach it
                     string dvText = $"dV {st.DeltaV:0} m/s";
                     float dvX = sp.Right - 8 - f.MeasureString(dvText).X;
-                    sb.DrawString(f, dvText, new Vector2(dvX, sy), i == 0 ? UiDraw.Accent : UiDraw.TextDim);
-                    string label = $"S{st.Number} {st.Engines}";
+                    sb.DrawString(f, dvText, new Vector2(dvX, sy), active ? UiDraw.Accent : UiDraw.TextDim);
+                    string full = $"S{st.Number} {st.Engines}{(st.Decouples ? " [dec]" : "")}";
+                    string label = full;
                     float maxLabelW = dvX - (sp.X + 8) - 8;
                     while (label.Length > 3 && f.MeasureString(label).X > maxLabelW) label = label.Substring(0, label.Length - 1);
-                    if (label != $"S{st.Number} {st.Engines}") label = label.Substring(0, Math.Max(3, label.Length - 2)) + "..";
+                    if (label != full) label = label.Substring(0, Math.Max(3, label.Length - 2)) + "..";
                     sb.DrawString(f, label, new Vector2(sp.X + 8, sy), rc);
-                    UiDraw.Bar(pb, new Rectangle(sp.X + 8, (int)sy + 18, sp.Width - 16, 8), (float)StageFuelFrac(v, st), new Color(120, 200, 120));
+                    UiDraw.Bar(pb, new Rectangle(sp.X + 8, (int)sy + 18, sp.Width - 16, 8), (float)StageFuelFrac(st), new Color(120, 200, 120));
                     sy += 38;
                 }
             }
@@ -356,20 +364,11 @@ namespace Solar.UI
             return sum;
         }
 
-        private static double StageFuelFrac(Vessel v, StageStat st)
-        {
-            // fuel fraction of the stage's segment, by stage number from the bottom
-            var segs = v.Segments();
-            int idx = segs.Count - st.Number;
-            if (idx < 0 || idx >= segs.Count) return 0;
-            double fuel = 0, cap = 0;
-            for (int i = segs[idx].start; i <= segs[idx].end; i++)
-            {
-                fuel += v.Parts[i].Fuel;
-                cap += v.Parts[i].Def.FuelCapacity;
-            }
-            return cap > 0 ? fuel / cap : 0;
-        }
+        private static double StageFuelFrac(StageStat st)
+            // ComputeStages already aggregates the stage's live fuel and capacity (axial parts plus the
+            // radials that ride/drop with it), so use those directly — re-deriving from axial segments
+            // missed radial fuel and mis-mapped stage numbers once separate radial-booster stages exist.
+            => st.FuelCap > 0 ? st.Fuel / st.FuelCap : 0;
 
         private static string Situation(Vessel v, in OrbitalElements el)
         {

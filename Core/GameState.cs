@@ -89,11 +89,13 @@ namespace Solar.Core
     {
         public List<string> Parts = new();
         public bool Separate = true;
+        public int Stage = -1;   // drop stage (-1 = derive from geometry)
     }
 
     public sealed class PartEntryState
     {
         public string Def;
+        public int Stage = -1;   // activation stage (-1 = derive from geometry)
         public List<string> Modules = new();
         public List<RadialMountState> Mounts;   // current format (sub-stacks)
         public List<string> Radials;            // legacy: parallel single-part list, still read for old saves
@@ -121,14 +123,14 @@ namespace Solar.Core
             var d = new DesignState { Name = vd.Name, Entries = new() };
             foreach (var e in vd.Stack)
             {
-                var pe = new PartEntryState { Def = e.Def.Name };
+                var pe = new PartEntryState { Def = e.Def.Name, Stage = e.Stage };
                 foreach (var m in e.Modules) pe.Modules.Add(m.Name);
                 if (e.Mounts.Count > 0)
                 {
                     pe.Mounts = new();
                     foreach (var mount in e.Mounts)
                     {
-                        var ms = new RadialMountState { Separate = mount.Separate };
+                        var ms = new RadialMountState { Separate = mount.Separate, Stage = mount.Stage };
                         foreach (var rp in mount.Parts) ms.Parts.Add(rp.Name);
                         pe.Mounts.Add(ms);
                     }
@@ -149,13 +151,13 @@ namespace Solar.Core
                 {
                     var def = PartCatalog.Get(pe.Def);
                     if (def == null) continue;
-                    var entry = new StackEntry(def);
+                    var entry = new StackEntry(def) { Stage = pe.Stage };
                     if (pe.Modules != null)
                         foreach (var mn in pe.Modules) { var md = ModuleCatalog.Get(mn); if (md != null) entry.Modules.Add(md); }
                     if (pe.Mounts != null)
                         foreach (var ms in pe.Mounts)
                         {
-                            var mount = new RadialMount { Separate = ms.Separate };
+                            var mount = new RadialMount { Separate = ms.Separate, Stage = ms.Stage };
                             if (ms.Parts != null)
                                 foreach (var pn in ms.Parts) { var rdef = PartCatalog.Get(pn); if (rdef != null) mount.Parts.Add(rdef); }
                             if (mount.Parts.Count > 0) entry.Mounts.Add(mount);
@@ -191,6 +193,7 @@ namespace Solar.Core
         public double Fuel;
         public bool Ignited;
         public bool Deployed;
+        public int Stage = -1;               // activation stage (-1 = derive from geometry on load)
         public bool RadialSeparate = true;   // when this part is a radial attachment: own stage vs welded
         // design round-trip tags (see Part); default -1 keeps older saves regrouping as single-part mounts
         public int RadialMountId = -1, RadialSide = -1, RadialSlot = -1;
@@ -200,7 +203,7 @@ namespace Solar.Core
 
         public static PartState Of(Part p)
         {
-            var ps = new PartState { DefName = p.Def.Name, Fuel = p.Fuel, Ignited = p.Ignited, Deployed = p.Deployed,
+            var ps = new PartState { DefName = p.Def.Name, Fuel = p.Fuel, Ignited = p.Ignited, Deployed = p.Deployed, Stage = p.Stage,
                                      RadialSeparate = p.RadialSeparate, RadialMountId = p.RadialMountId, RadialSide = p.RadialSide, RadialSlot = p.RadialSlot };
             if (p.Modules.Count > 0)
             {
@@ -224,7 +227,7 @@ namespace Solar.Core
         {
             var def = PartCatalog.Get(DefName);
             if (def == null) return null;
-            var part = new Part(def) { Fuel = Fuel, Ignited = Ignited, Deployed = Deployed, RadialSeparate = RadialSeparate,
+            var part = new Part(def) { Fuel = Fuel, Ignited = Ignited, Deployed = Deployed, Stage = Stage, RadialSeparate = RadialSeparate,
                                        RadialMountId = RadialMountId, RadialSide = RadialSide, RadialSlot = RadialSlot };
             if (Modules != null)
                 foreach (var ms in Modules)
@@ -294,6 +297,7 @@ namespace Solar.Core
         public bool Landed;
         public bool Destroyed;
         public bool EnginesIgnited;
+        public int CurrentStage;     // next stage to fire, so a resumed ship stages correctly
         public double ElectricCharge;
         public double Monoprop;      // monopropellant for RCS translation
         public double LifeSupport;   // legacy single life-support pool (still read for old-save migration)
@@ -319,6 +323,7 @@ namespace Solar.Core
                 Landed = v.Landed,
                 Destroyed = v.Destroyed,
                 EnginesIgnited = v.EnginesIgnited,
+                CurrentStage = v.CurrentStage,
                 ElectricCharge = v.ElectricCharge,
                 Monoprop = v.Monoprop,
                 Water = v.Water,
@@ -360,6 +365,7 @@ namespace Solar.Core
                 Landed = Landed,
                 Destroyed = Destroyed,
                 EnginesIgnited = EnginesIgnited,
+                CurrentStage = CurrentStage,
                 ElectricCharge = ElectricCharge,
                 Monoprop = Monoprop,
                 Water = Water,
