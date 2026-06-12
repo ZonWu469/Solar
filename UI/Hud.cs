@@ -1,0 +1,384 @@
+using System;
+using System.Collections.Generic;
+using Microsoft.Xna.Framework;
+using Solar.Core;
+using Solar.Parts;
+using Solar.Physics;
+using Solar.Vessels;
+
+namespace Solar.UI
+{
+    /// <summary>Flight HUD: readouts, throttle, heading dial, stage list, warp/time display.</summary>
+    /// <summary>Actions the player triggered through the HUD this frame.</summary>
+    public struct HudResult
+    {
+        public double? WarpToUT;   // set when the "Warp to maneuver" button was clicked
+    }
+
+    /// <summary>Target-relative navball cues, computed by the flight scene where target data lives.
+    /// Angles are world angles (math convention); NaN means "not shown".</summary>
+    public struct NavMarkers
+    {
+        public bool Active;       // a target is selected
+        public double Target;     // world angle from vessel to target (anti-target is +pi)
+        public double RelPro;     // world angle of relative velocity (rel-retro is +pi)
+        public string Readout;    // distance + closing speed line under the navball
+        public int SasMode;       // 0 = off; >0 = active hold (for the navball label)
+        public string SasLabel;   // short hold-mode name, ASCII
+    }
+
+    public static class Hud
+    {
+        public static HudResult Draw(GameContext ctx, Vessel v, Prediction pred, bool mapMode, string focusName,
+                                Maneuver node = null, double burnDirAngle = double.NaN, double burnSpent = 0, int nodeCount = 0,
+                                NavMarkers nav = default)
+        {
+            var result = new HudResult();
+            var pb = ctx.Pb; var sb = ctx.Sb; var f = ctx.Font;
+            int w = ctx.W, h = ctx.H;
+
+            // ---- left readout panel ----
+            var panel = new Rectangle(10, 10, 256, 366);
+            UiDraw.Panel(pb, panel);
+            float ty = 18;
+            void Row(string label, string value, Color? c = null)
+            {
+                sb.DrawString(f, label, new Vector2(20, ty), UiDraw.TextDim);
+                sb.DrawString(f, value, new Vector2(110, ty), c ?? Color.White);
+                ty += 19;
+            }
+            // One life-support resource: time-to-empty while crewed, else a stocked percentage; storage of
+            // zero shows "none" (that resource is the death driver). Amber under 15%, red when empty.
+            void LsRow(string label, double amount, double cap, double ratePerSec)
+            {
+                if (cap <= 0) { Row(label, "none", new Color(255, 100, 90)); return; }
+                string value = ratePerSec > 0 ? UiDraw.Time(amount / ratePerSec) : $"{amount / cap * 100:0}%";
+                Color c = amount <= 0 ? new Color(255, 100, 90)
+                        : amount < cap * 0.15 ? new Color(255, 190, 90) : Color.White;
+                Row(label, value, c);
+            }
+
+            if (v != null && !v.Destroyed)
+            {
+                double ut = ctx.Clock.UT;
+                var el = v.CurrentElements(ut);
+                double peAlt = el.Periapsis - v.Body.Radius;
+                string apText = el.Hyperbolic ? "-" : UiDraw.Dist(el.Apoapsis - v.Body.Radius);
+                Row("Body", v.Body.Name);
+                Row("Status", Situation(v, el), UiDraw.Accent);
+                Row("Altitude", UiDraw.Dist(v.Altitude));
+                Row("Velocity", UiDraw.Speed(v.Velocity.Length));
+                double vspeed = v.Velocity.Dot(v.Position.Normalized());
+                Row("Vert. speed", UiDraw.Speed(vspeed), Math.Abs(vspeed) < 1 ? Color.White : vspeed >= 0 ? new Color(150, 220, 150) : new Color(230, 160, 110));
+                Row("Apoapsis", apText + TimeToText(el, Math.PI, ut, el.Hyperbolic));
+                Row("Periapsis", UiDraw.Dist(peAlt) + TimeToText(el, 0, ut, false),
+                    peAlt < (v.Body.Atmo?.Top ?? 0) ? new Color(255, 170, 90) : Color.White);
+                if (!el.Hyperbolic) Row("Period", UiDraw.Time(el.Period));
+                Row("Mass", $"{v.TotalMass / 1000:0.0} t");
+                double atmoTop = v.Body.Atmo?.Top ?? 0;
+                if (v.Body.Atmo != null && v.Altitude < atmoTop)
+                {
+                    double rho = v.Body.Atmo.DensityAt(v.Altitude);
+                    double q = 0.5 * rho * v.Velocity.LengthSquared;
+                    Row("Dyn. pressure", UiDraw.Pressure(q), q > 30_000 ? new Color(255, 140, 90) : Color.White);
+                }
+                if (v.EcCapacity > 0)
+                {
+                    Row("Charge", $"{v.ElectricCharge:0}/{v.EcCapacity:0}",
+                        v.ElectricCharge <= 0 ? new Color(255, 140, 90) : Color.White);
+                    v.EcRates(ctx.Clock.UT, ctx.Universe, out double ecProd, out double ecDraw);
+                    double ecNet = ecProd - ecDraw;
+                    string ecRateTxt = ecNet >= 0 ? $"+{ecNet:0.#}/s" : $"{ecNet:0.#}/s";
+                    Row("EC rate", ecRateTxt, ecNet < 0 ? new Color(255, 140, 90) : new Color(150, 220, 150));
+                }
+                if (v.MonopropCapacity > 0)
+                {
+                    string rcs = v.RcsEnabled ? (v.Monoprop > 0 ? "RCS on" : "RCS dry") : "RCS off";
+                    Color rcsCol = !v.RcsEnabled ? UiDraw.TextDim
+                                 : v.Monoprop <= 0 ? new Color(255, 140, 90) : new Color(150, 220, 150);
+                    Row("Monoprop", $"{v.Monoprop:0}/{v.MonopropCapacity:0}  {rcs}", rcsCol);
+                }
+                if (v.CrewCount > 0 || v.LsCapacity > 0)
+                {
+                    int crew = v.CrewCount;
+                    Color lsCol = !v.LifeSupportOk ? new Color(255, 100, 90) : Color.White;
+                    Row("Crew", $"{crew}/{v.SeatCount}", lsCol);
+                    LsRow("Oxygen", v.Oxygen, v.OxygenCapacity, crew * Vessel.OxygenPerCrew);
+                    LsRow("Water", v.Water, v.WaterCapacity, crew * Vessel.WaterPerCrew);
+                    LsRow("Food", v.Food, v.FoodCapacity, crew * Vessel.FoodPerCrew);
+                }
+            }
+            else
+            {
+                Row("Status", v == null ? "-" : "DESTROYED", new Color(255, 100, 90));
+            }
+
+            // ---- top right: time + warp ----
+            string utText = "T+ " + UiDraw.Time(ctx.Clock.UT);
+            double warp = ctx.Clock.Warp;
+            bool limited = ctx.Clock.WarpIndex > ctx.Clock.EffectiveIndex;
+            string warpText = $"WARP {warp:N0}x" + (limited ? " (limited)" : "");
+            var utSz = f.MeasureString(utText);
+            sb.DrawString(f, utText, new Vector2(w - utSz.X - 16, 12), Color.White);
+            var wpSz = f.MeasureString(warpText);
+            sb.DrawString(f, warpText, new Vector2(w - wpSz.X - 16, 32), warp > 1 ? UiDraw.Accent : UiDraw.TextDim);
+            if (mapMode)
+            {
+                string focus = $"MAP - focus: {focusName}  [F] cycle";
+                var fsz = f.MeasureString(focus);
+                sb.DrawString(f, focus, new Vector2(w - fsz.X - 16, 52), UiDraw.TextDim);
+            }
+
+            // ---- encounter banner ----
+            if (pred != null && pred.Type != TransitionType.None && v != null && !v.Destroyed)
+            {
+                string what = pred.Type switch
+                {
+                    TransitionType.Encounter => $"{pred.NextBody.Name} encounter",
+                    TransitionType.Escape => $"Escaping {pred.Body.Name}",
+                    _ => pred.Body.Atmo != null ? $"{pred.Body.Name} atmosphere entry" : $"{pred.Body.Name} impact",
+                };
+                string msg = $"{what} in {UiDraw.Time(pred.TransitionUT - ctx.Clock.UT)}";
+                var msz = f.MeasureString(msg);
+                sb.DrawString(f, msg, new Vector2(w / 2 - msz.X / 2, 12), new Color(255, 200, 110));
+            }
+
+            if (v == null) return result;
+
+            // ---- heading dial + throttle (bottom center) ----
+            var dial = new Vector2(w / 2f, h - 78);
+            float dr = 48;
+            pb.FillCircle(dial, dr + 4, new Color(10, 16, 28, 200));
+            pb.CircleOutline(dial, dr, 2, UiDraw.PanelBorder);
+            // tick marks
+            for (int i = 0; i < 8; i++)
+            {
+                double a = i * Math.PI / 4;
+                var d = new Vector2((float)Math.Cos(a), -(float)Math.Sin(a));
+                pb.Line(dial + d * (dr - 5), dial + d * dr, 1.5f, UiDraw.TextDim);
+            }
+            if (v.Velocity.Length > 1)
+            {
+                double va = v.Velocity.Angle();
+                var pd = new Vector2((float)Math.Cos(va), -(float)Math.Sin(va));
+                pb.FillCircle(dial + pd * (dr - 10), 4, new Color(120, 255, 120));        // prograde
+                pb.FillCircle(dial - pd * (dr - 10), 4, new Color(255, 110, 100));        // retrograde
+            }
+            var hd = new Vector2((float)Math.Cos(v.Heading), -(float)Math.Sin(v.Heading));
+            pb.Line(dial, dial + hd * (dr - 4), 3f, Color.White);
+            // maneuver burn marker: point the heading at this to execute the planned node
+            if (node != null && !double.IsNaN(burnDirAngle))
+            {
+                var md = new Vector2((float)Math.Cos(burnDirAngle), -(float)Math.Sin(burnDirAngle));
+                var mp = dial + md * (dr - 10);
+                pb.FillCircle(mp, 5, new Color(120, 210, 255));
+                pb.CircleOutline(mp, 7, 1.5f, Color.White);
+            }
+            // target navball cues: where the target is (and its opposite) + relative-velocity markers
+            if (nav.Active)
+            {
+                var tgt = new Color(235, 130, 235);
+                if (!double.IsNaN(nav.Target))
+                {
+                    var td = new Vector2((float)Math.Cos(nav.Target), -(float)Math.Sin(nav.Target));
+                    pb.FillCircle(dial + td * (dr - 10), 5, tgt);                 // target
+                    pb.CircleOutline(dial + td * (dr - 10), 7, 1.5f, Color.White);
+                    pb.CircleOutline(dial - td * (dr - 10), 5, 1.5f, tgt);        // anti-target (hollow)
+                }
+                if (!double.IsNaN(nav.RelPro))
+                {
+                    var rd = new Vector2((float)Math.Cos(nav.RelPro), -(float)Math.Sin(nav.RelPro));
+                    var rc = new Color(255, 170, 235);                           // rel-velocity, distinct from orbital
+                    pb.FillCircle(dial + rd * (dr - 22), 3.5f, rc);              // target-relative prograde
+                    pb.CircleOutline(dial - rd * (dr - 22), 4, 1.2f, rc);        // target-relative retrograde
+                }
+                if (!string.IsNullOrEmpty(nav.Readout))
+                {
+                    var rsz = f.MeasureString(nav.Readout);
+                    sb.DrawString(f, nav.Readout, new Vector2(dial.X - rsz.X / 2, dial.Y + dr + 2), tgt);
+                }
+            }
+            if (nav.SasMode > 0 && !string.IsNullOrEmpty(nav.SasLabel))
+            {
+                string s = "SAS: " + nav.SasLabel;
+                var ssz = f.MeasureString(s);
+                sb.DrawString(f, s, new Vector2(dial.X - ssz.X / 2, dial.Y - dr - 18), UiDraw.Accent);
+            }
+
+            var thrRect = new Rectangle((int)(dial.X - dr - 34), (int)(dial.Y - dr), 16, (int)(dr * 2));
+            // vertical throttle: draw as background + fill from bottom
+            pb.FillRect(thrRect, new Color(20, 26, 38, 220));
+            float tf = (float)v.Throttle;
+            pb.FillRect(thrRect.X + 1, thrRect.Y + 1 + (thrRect.Height - 2) * (1 - tf), thrRect.Width - 2, (thrRect.Height - 2) * tf, new Color(255, 170, 60));
+            pb.RectOutline(thrRect, 1, UiDraw.PanelBorder);
+            sb.DrawString(f, $"THR {v.Throttle * 100:0}%", new Vector2(thrRect.X - 6, thrRect.Bottom + 4), UiDraw.TextDim);
+
+            // ---- propulsion strip (above the navball) ----
+            if (!v.Destroyed)
+            {
+                double g = v.Body.Mu / Math.Max(1, v.Position.LengthSquared);
+                double thrust = v.CurrentThrust;
+                double mass = v.TotalMass;
+                double twr = g > 0 ? thrust / (mass * g) : 0;
+                double accel = thrust / mass;
+                var ps = new Rectangle((int)(dial.X - 150), (int)(dial.Y - dr - 56), 300, 44);
+                UiDraw.Panel(pb, ps);
+                void Cell(int col, string label, string value, Color c)
+                {
+                    float cx = ps.X + 10 + col * 74;
+                    sb.DrawString(f, label, new Vector2(cx, ps.Y + 5), UiDraw.TextDim);
+                    sb.DrawString(f, value, new Vector2(cx, ps.Y + 22), c);
+                }
+                Cell(0, "THRUST", UiDraw.Force(thrust), thrust > 0 ? Color.White : UiDraw.TextDim);
+                Cell(1, "TWR", twr > 0 ? $"{twr:0.00}" : "-", twr >= 1 ? new Color(150, 220, 150) : twr > 0 ? new Color(255, 170, 90) : UiDraw.TextDim);
+                Cell(2, "ACCEL", thrust > 0 ? UiDraw.Accel(accel) : "-", Color.White);
+                Cell(3, "dV REM", $"{TotalDeltaV(v):0} m/s", UiDraw.Accent);
+            }
+
+            // ---- stage list (bottom left) ----
+            if (!v.Destroyed && v.Parts.Count > 0)
+            {
+                var stages = Staging.ComputeStages(v.Parts);
+                int rows = Math.Min(stages.Count, 6);
+                var sp = new Rectangle(10, h - 30 - rows * 38 - 28, 300, rows * 38 + 36);
+                UiDraw.Panel(pb, sp);
+                sb.DrawString(f, $"STAGES  dV {TotalDeltaV(v):0} m/s  [Space] fire", new Vector2(sp.X + 8, sp.Y + 6), UiDraw.TextDim);
+                float sy = sp.Y + 28;
+                for (int i = 0; i < rows; i++)
+                {
+                    var st = stages[i];
+                    Color rc = i == 0 ? Color.White : UiDraw.TextDim;
+                    // right-align the dV readout to the panel edge, then truncate the engine label so it can't reach it
+                    string dvText = $"dV {st.DeltaV:0} m/s";
+                    float dvX = sp.Right - 8 - f.MeasureString(dvText).X;
+                    sb.DrawString(f, dvText, new Vector2(dvX, sy), i == 0 ? UiDraw.Accent : UiDraw.TextDim);
+                    string label = $"S{st.Number} {st.Engines}";
+                    float maxLabelW = dvX - (sp.X + 8) - 8;
+                    while (label.Length > 3 && f.MeasureString(label).X > maxLabelW) label = label.Substring(0, label.Length - 1);
+                    if (label != $"S{st.Number} {st.Engines}") label = label.Substring(0, Math.Max(3, label.Length - 2)) + "..";
+                    sb.DrawString(f, label, new Vector2(sp.X + 8, sy), rc);
+                    UiDraw.Bar(pb, new Rectangle(sp.X + 8, (int)sy + 18, sp.Width - 16, 8), (float)StageFuelFrac(v, st), new Color(120, 200, 120));
+                    sy += 38;
+                }
+            }
+
+            // ---- maneuver node panel (top right) ----
+            if (node != null && !v.Destroyed)
+            {
+                double now = ctx.Clock.UT;
+                double avail = TotalDeltaV(v);
+                bool enough = node.DeltaV <= avail + 1e-6;
+                double bt = Staging.BurnTime(v, node.DeltaV);
+                bool burning = burnSpent > 0;
+                var mp = new Rectangle(w - 250, 70, 240, 190);
+                UiDraw.Panel(pb, mp);
+                float my = mp.Y + 8;
+                void MRow(string label, string value, Color c)
+                {
+                    sb.DrawString(f, label, new Vector2(mp.X + 10, my), UiDraw.TextDim);
+                    sb.DrawString(f, value, new Vector2(mp.X + 104, my), c);
+                    my += 18;
+                }
+                string mTitle = nodeCount > 1 ? $"MANEUVER (next of {nodeCount})  [Del]" : "MANEUVER  [Del] / X to clear";
+                sb.DrawString(f, mTitle, new Vector2(mp.X + 10, my), UiDraw.Accent);
+                my += 22;
+                MRow("dV req", $"{node.DeltaV:0} m/s", enough ? Color.White : new Color(255, 110, 100));
+                MRow("pro/rad", $"{node.Prograde:+0;-0} / {node.Radial:+0;-0}", UiDraw.TextDim);
+                MRow("dV avail", $"{avail:0} m/s", enough ? new Color(150, 220, 150) : new Color(255, 110, 100));
+                MRow("burn time", enough && bt > 0 ? UiDraw.Time(bt) : "-", Color.White);
+                double toNode = node.UT - now;
+                MRow("node in", UiDraw.Time(Math.Max(0, toNode)), toNode < 0 ? new Color(255, 170, 90) : Color.White);
+                // ignition is when the (node-centred) burn should start: node - half the burn
+                double burnIn = node.UT - (enough && bt > 0 ? bt / 2 : 0) - now;
+                MRow("burn in", enough && bt > 0 ? UiDraw.Time(Math.Max(0, burnIn)) : "-",
+                     burnIn < 0 ? new Color(255, 110, 100) : new Color(255, 210, 140));
+                if (burning)
+                    MRow("remaining", $"{Math.Max(0, node.DeltaV - burnSpent):0} m/s", UiDraw.Accent);
+                else
+                {
+                    // ignition is half the burn before the node; warp to 2 minutes before that
+                    double ignition = node.UT - (enough && bt > 0 ? bt / 2 : 0);
+                    double warpTarget = ignition - 120;
+                    bool canWarp = warpTarget > now + 1;
+                    var br = new Rectangle(mp.X + 10, mp.Bottom - 30, mp.Width - 20, 22);
+                    if (UiDraw.Button(pb, sb, f, br, "Warp to maneuver", ctx.Input, canWarp))
+                        result.WarpToUT = warpTarget;
+                }
+            }
+
+            // ---- activatable modules panel (right, below the maneuver panel) ----
+            if (!v.Destroyed)
+            {
+                var acts = new List<ModuleInstance>();
+                foreach (var p in v.Parts)
+                    foreach (var m in p.Modules)
+                        if (m.Def.Activatable) acts.Add(m);
+                if (acts.Count > 0)
+                {
+                    var rp = new Rectangle(w - 250, 268, 240, acts.Count * 24 + 30);
+                    UiDraw.Panel(pb, rp);
+                    sb.DrawString(f, "MODULES  [G] solar", new Vector2(rp.X + 10, rp.Y + 6), UiDraw.Accent);
+                    int my = rp.Y + 28;
+                    foreach (var m in acts)
+                    {
+                        string label = $"{m.Def.Name}: {(m.Active ? "ON" : "OFF")}";
+                        if (UiDraw.Button(pb, sb, f, new Rectangle(rp.X + 10, my, rp.Width - 20, 22), label, ctx.Input))
+                            m.Active = !m.Active;
+                        my += 24;
+                    }
+                }
+            }
+
+            // ---- controls hint (bottom right) ----
+            string hint = mapMode
+                ? "[click] orbit=node  [drag] handles  X=del node  [Tab/T] target  [F] focus  [C] crew  [M] flight"
+                : "[Shift/Ctrl] throttle  [A/D] rotate  [H] SAS  [Space] stage  [Tab/T] target  [C] crew  [M] map  [,/.] warp";
+            var hsz = f.MeasureString(hint);
+            sb.DrawString(f, hint, new Vector2(w - hsz.X - 12, h - 24), new Color(120, 132, 150));
+
+            return result;
+        }
+
+        /// <summary>" (in MM:SS)" until the orbit next reaches true anomaly nu, or "" if not applicable.</summary>
+        private static string TimeToText(in OrbitalElements el, double nu, double ut, bool skip)
+        {
+            if (skip || double.IsNaN(el.A)) return "";
+            double t = Kepler.TimeAtTrueAnomaly(el, nu, ut) - ut;
+            if (t <= 0 || double.IsNaN(t) || double.IsInfinity(t)) return "";
+            return $"  ({UiDraw.Time(t)})";
+        }
+
+        /// <summary>Sum of remaining delta-v across all stages from the current fuel state.</summary>
+        private static double TotalDeltaV(Vessel v)
+        {
+            double sum = 0;
+            foreach (var st in Staging.ComputeStages(v.Parts)) sum += st.DeltaV;
+            return sum;
+        }
+
+        private static double StageFuelFrac(Vessel v, StageStat st)
+        {
+            // fuel fraction of the stage's segment, by stage number from the bottom
+            var segs = v.Segments();
+            int idx = segs.Count - st.Number;
+            if (idx < 0 || idx >= segs.Count) return 0;
+            double fuel = 0, cap = 0;
+            for (int i = segs[idx].start; i <= segs[idx].end; i++)
+            {
+                fuel += v.Parts[i].Fuel;
+                cap += v.Parts[i].Def.FuelCapacity;
+            }
+            return cap > 0 ? fuel / cap : 0;
+        }
+
+        private static string Situation(Vessel v, in OrbitalElements el)
+        {
+            if (v.Landed) return "Landed";
+            double atmoTop = v.Body.Atmo?.Top ?? 0;
+            if (atmoTop > 0 && v.Altitude < atmoTop) return "In atmosphere";
+            if (el.Hyperbolic) return "Escape trajectory";
+            if (el.Periapsis - v.Body.Radius > atmoTop) return "Orbiting";
+            return "Sub-orbital";
+        }
+    }
+}

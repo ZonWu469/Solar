@@ -1,0 +1,21 @@
+namespace Solar.Vessels
+{
+    /// <summary>A crew member's specialty. Roles are tracked now; gameplay bonuses (Pilot SAS,
+    /// Engineer repair, Scientist science multiplier) are an easy follow-on.</summary>
+    public enum CrewRole { Pilot, Engineer, Scientist }
+
+    public enum CrewStatus { Active, KIA }
+
+    /// <summary>A named crew member. The same instance is shared between the savegame roster, the
+    /// editor assignment, and the in-flight <see cref="Solar.Parts.Part.Crew"/> list, so mutating
+    /// <see cref="Status"/> (e.g. on death) is visible everywhere.</summary>
+    public sealed class CrewMember
+    {
+        public string Name;
+        public CrewRole Role;
+        public CrewStatus Status = CrewStatus.Active;
+
+        public CrewMember() { }
+        public CrewMember(string name, CrewRole role) { Name = name; Role = role; }
+    }
+}
