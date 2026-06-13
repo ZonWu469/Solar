@@ -21,11 +21,17 @@ namespace Solar.Parts
         public bool Deployed;     // parachutes
         /// <summary>Activation stage index (0 fires first). For an axial part it is when its action fires:
         /// an engine/booster ignites, a decoupler separates, a parachute deploys. For a radial part it is
-        /// the stage at which the (separate) mount is jettisoned; a radial's engines ignite with their host
-        /// part's stage. Seeded from geometry by <see cref="Vessels.Staging.AssignDefaultStages"/>, then
-        /// editable in the VAB. Drives both the staging order and the stage list. -1 = not yet assigned
-        /// (filled from geometry by AssignDefaultStages before flight/stage computation).</summary>
+        /// the stage at which the (separate) mount is jettisoned; a radial's engines ignite / chutes deploy
+        /// at their own <see cref="FireStage"/> instead. Seeded from geometry by
+        /// <see cref="Vessels.Staging.AssignDefaultStages"/>, then editable in the VAB. Drives both the
+        /// staging order and the stage list. -1 = not yet assigned (filled from geometry by
+        /// AssignDefaultStages before flight/stage computation).</summary>
         public int Stage = -1;
+        /// <summary>Radial-only: the stage at which this radial part activates — an engine/booster ignites
+        /// or a parachute deploys — independent of its host axial part and of its (separate) drop
+        /// <see cref="Stage"/>. -1 = derive from geometry (engine fires with host; chute deploys last).
+        /// Ignored for axial parts, which activate at <see cref="Stage"/>.</summary>
+        public int FireStage = -1;
         public readonly List<ModuleInstance> Modules = new();
         /// <summary>Crew members aboard this part (never more than <see cref="SeatCount"/>).</summary>
         public readonly List<CrewMember> Crew = new();

@@ -46,9 +46,14 @@ namespace Solar.Vessels
                 if (p.Stage < 0)
                     p.Stage = p.Def.Kind == PartKind.Parachute ? maxSeg + 1 : seg[i];
                 foreach (var r in p.Radials)
+                {
                     if (r.Stage < 0)
                         r.Stage = r.Def.Kind == PartKind.Parachute ? maxSeg + 1
                                 : r.RadialSeparate ? seg[i] + 1 : seg[i];
+                    // fire/ignite stage: engines fire with their host by default; chutes deploy last
+                    if (r.FireStage < 0)
+                        r.FireStage = r.Def.Kind == PartKind.Parachute ? maxSeg + 1 : p.Stage;
+                }
             }
         }
 
@@ -78,8 +83,9 @@ namespace Solar.Vessels
                 if (hostFires && (p.Def.Kind == PartKind.Engine || p.Def.Kind == PartKind.SolidBooster)) { p.Ignited = true; ignitedAny = true; }
                 foreach (var r in p.Radials)
                 {
-                    if (hostFires && (r.Def.Kind == PartKind.Engine || r.Def.Kind == PartKind.SolidBooster)) { r.Ignited = true; ignitedAny = true; }
-                    if (r.Def.Kind == PartKind.Parachute && r.Stage == s && !r.Deployed) r.Deployed = true;
+                    // radials ignite / deploy at their own fire stage, independent of the host
+                    if (r.FireStage == s && (r.Def.Kind == PartKind.Engine || r.Def.Kind == PartKind.SolidBooster)) { r.Ignited = true; ignitedAny = true; }
+                    if (r.Def.Kind == PartKind.Parachute && r.FireStage == s && !r.Deployed) r.Deployed = true;
                 }
                 if (p.Def.Kind == PartKind.Parachute && p.Stage == s && !p.Deployed) p.Deployed = true;
             }
@@ -254,9 +260,9 @@ namespace Solar.Vessels
                 {
                     var p = present[i];
                     if ((p.Def.Kind == PartKind.Engine || p.Def.Kind == PartKind.SolidBooster) && p.Stage <= s) agg.AddEngine(p);
-                    if (p.Stage <= s)
-                        foreach (var r in p.Radials)
-                            if (r.Def.Kind == PartKind.Engine || r.Def.Kind == PartKind.SolidBooster) agg.AddEngine(r);
+                    foreach (var r in p.Radials)
+                        if ((r.Def.Kind == PartKind.Engine || r.Def.Kind == PartKind.SolidBooster) && r.FireStage <= s)
+                            agg.AddEngine(r);
                 }
 
                 // fuel this stage burns = fuel of the next group it drops; if nothing drops later, the engines

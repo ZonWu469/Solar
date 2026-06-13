@@ -305,6 +305,25 @@ namespace Solar.Scenes
             return res;
         }
 
+        /// <summary>Effective fire/ignition stage of each radial mount on stack entry <paramref name="ei"/>
+        /// (the player's explicit tag where set, else the geometry default), indexed parallel to
+        /// <c>Stack[ei].Mounts</c>. Used to display the per-mount fire-stage control.</summary>
+        private int[] EffectiveMountFireStages(int ei)
+        {
+            var parts = new List<Part>(Stack.Count);
+            foreach (var e in Stack)
+            {
+                var p = new Part(e.Def) { Stage = e.Stage };
+                VesselDesign.MaterializeRadials(e, p);
+                parts.Add(p);
+            }
+            Staging.AssignDefaultStages(parts);
+            var res = new int[Stack[ei].Mounts.Count];
+            foreach (var r in parts[ei].Radials)
+                if (r.RadialMountId >= 0 && r.RadialMountId < res.Length) res[r.RadialMountId] = r.FireStage;
+            return res;
+        }
+
         // ---------- stack ----------
         private void DrawStack(Rendering.PrimitiveBatch pb, Microsoft.Xna.Framework.Graphics.SpriteBatch sb,
                                Microsoft.Xna.Framework.Graphics.SpriteFont f, InputState inp, int w, int h)
@@ -891,28 +910,39 @@ namespace Solar.Scenes
             {
                 var entry = Stack[_selected];
                 Str($"RADIAL  {entry.Def.Name}", x, y, UiDraw.Accent); y += 20;
-                Str("STG = own stage   KEEP = rides core", x, y, UiDraw.TextDim); y += 18;
+                Str("STG = drops as own stage   KEEP = rides core", x, y, UiDraw.TextDim); y += 18;
+                Str("fire S# = ignite   drop S# = jettison", x, y, UiDraw.TextDim); y += 18;
                 Str("Hold a part, hover a radial to stack below it", x, y, UiDraw.TextDim); y += 20;
                 int hostEff = EffectiveStages()[_selected];
-                int toggleMount = -1, delMount = -1, delPartMount = -1, delPart = -1, dropDelta = 0, dropMount = -1;
+                int[] fireEff = EffectiveMountFireStages(_selected);
+                int toggleMount = -1, delMount = -1, delPartMount = -1, delPart = -1;
+                int fireMount = -1, fireDelta = 0, dropDelta = 0, dropMount = -1;
                 for (int mi = 0; mi < entry.Mounts.Count; mi++)
                 {
                     var mount = entry.Mounts[mi];
                     bool sep = mount.Separate;
                     Color modeCol = sep ? new Color(120, 210, 255) : new Color(150, 230, 150);
                     string root = mount.Root != null ? mount.Root.Name : "(empty)";
-                    int drop = mount.Stage >= 0 ? mount.Stage : hostEff + 1;   // effective drop stage
+                    int fire = mount.FireStage >= 0 ? mount.FireStage : fireEff[mi];   // effective fire stage
+                    int drop = mount.Stage >= 0 ? mount.Stage : hostEff + 1;           // effective drop stage
+                    // header row: name + STG/KEEP toggle + delete
                     Str($"Mount {mi + 1}: {root} x2", x, y + 3, Color.White);
-                    Str(sep ? $"drop S{drop}" : "on core", x + 14, y + 19, modeCol);
                     if (Btn(new Rectangle(w - 110, (int)y, 44, 22), sep ? "STG" : "KEEP")) toggleMount = mi;
                     if (Btn(new Rectangle(w - 62, (int)y, 38, 22), "del")) delMount = mi;
-                    // drop-stage steppers for a separate mount, on the second row
+                    y += 24;
+                    // fire-stage steppers (every mount: when its engines ignite / chute deploys)
+                    Str($"fire S{fire}", x + 14, y + 3, modeCol);
+                    if (Btn(new Rectangle(w - 110, (int)y, 21, 20), "-", fire > 0)) { fireMount = mi; fireDelta = -1; }
+                    if (Btn(new Rectangle(w - 86, (int)y, 21, 20), "+")) { fireMount = mi; fireDelta = 1; }
+                    y += 24;
+                    // drop-stage steppers for a separate mount
                     if (sep)
                     {
-                        if (Btn(new Rectangle(w - 110, (int)y + 22, 21, 20), "-", drop > 0)) { dropMount = mi; dropDelta = -1; }
-                        if (Btn(new Rectangle(w - 86, (int)y + 22, 21, 20), "+")) { dropMount = mi; dropDelta = 1; }
+                        Str($"drop S{drop}", x + 14, y + 3, modeCol);
+                        if (Btn(new Rectangle(w - 110, (int)y, 21, 20), "-", drop > fire)) { dropMount = mi; dropDelta = -1; }
+                        if (Btn(new Rectangle(w - 86, (int)y, 21, 20), "+")) { dropMount = mi; dropDelta = 1; }
+                        y += 24;
                     }
-                    y += 44;
                     // sub-stack parts (skip the lone root to keep single-part mounts compact)
                     if (mount.Parts.Count > 1)
                         for (int pi = 0; pi < mount.Parts.Count; pi++)
@@ -923,11 +953,23 @@ namespace Solar.Scenes
                         }
                 }
                 if (toggleMount >= 0) entry.Mounts[toggleMount].Separate = !entry.Mounts[toggleMount].Separate;
+                else if (fireMount >= 0)
+                {
+                    var m = entry.Mounts[fireMount];
+                    int cur = m.FireStage >= 0 ? m.FireStage : fireEff[fireMount];
+                    m.FireStage = Math.Max(0, cur + fireDelta);
+                    if (m.Separate)   // a booster can't be jettisoned before it ignites
+                    {
+                        int dropEff = m.Stage >= 0 ? m.Stage : hostEff + 1;
+                        if (dropEff < m.FireStage) m.Stage = m.FireStage;
+                    }
+                }
                 else if (dropMount >= 0)
                 {
                     var m = entry.Mounts[dropMount];
                     int cur = m.Stage >= 0 ? m.Stage : hostEff + 1;
-                    m.Stage = Math.Max(0, cur + dropDelta);
+                    int fire = m.FireStage >= 0 ? m.FireStage : fireEff[dropMount];
+                    m.Stage = Math.Max(fire, cur + dropDelta);
                 }
                 else if (delPartMount >= 0) entry.RemoveFromMount(delPartMount, delPart);
                 else if (delMount >= 0) entry.RemoveRadial(delMount);

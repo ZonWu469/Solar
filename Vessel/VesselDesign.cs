@@ -15,6 +15,10 @@ namespace Solar.Vessels
         /// <summary>Stage at which this (separate) mount is jettisoned; -1 = derive from geometry. Ignored
         /// when <see cref="Separate"/> is false (the mount then rides its host and drops with it).</summary>
         public int Stage = -1;
+        /// <summary>Stage at which this mount's engines ignite (or its parachute deploys), independent of
+        /// the host axial part and of the drop <see cref="Stage"/>. -1 = derive from geometry (fires with
+        /// the host; a radial chute deploys last).</summary>
+        public int FireStage = -1;
         public PartDef Root => Parts.Count > 0 ? Parts[0] : null;
         public RadialMount() { }
         public RadialMount(PartDef root, bool separate = true) { if (root != null) Parts.Add(root); Separate = separate; }
@@ -111,7 +115,8 @@ namespace Solar.Vessels
                         {
                             RadialSeparate = mount.Separate,
                             RadialMountId = mi, RadialSide = side, RadialSlot = slot,
-                            Stage = mount.Stage,   // drop stage for a separate mount (-1 => derive)
+                            Stage = mount.Stage,         // drop stage for a separate mount (-1 => derive)
+                            FireStage = mount.FireStage, // ignition/deploy stage (-1 => derive)
                         });
             }
         }
@@ -143,7 +148,7 @@ namespace Solar.Vessels
                     int side0 = int.MaxValue;
                     foreach (var r in group) if (r.RadialSide >= 0 && r.RadialSide < side0) side0 = r.RadialSide;
                     group.Sort((a, b) => a.RadialSlot.CompareTo(b.RadialSlot));
-                    var mount = new RadialMount { Separate = group[0].RadialSeparate, Stage = group[0].Stage };
+                    var mount = new RadialMount { Separate = group[0].RadialSeparate, Stage = group[0].Stage, FireStage = group[0].FireStage };
                     foreach (var r in group)
                         if (r.RadialSide == side0 || r.RadialSide < 0) mount.Parts.Add(r.Def);
                     if (mount.Parts.Count > 0) e.Mounts.Add(mount);

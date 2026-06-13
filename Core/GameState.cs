@@ -89,7 +89,8 @@ namespace Solar.Core
     {
         public List<string> Parts = new();
         public bool Separate = true;
-        public int Stage = -1;   // drop stage (-1 = derive from geometry)
+        public int Stage = -1;       // drop stage (-1 = derive from geometry)
+        public int FireStage = -1;   // ignition/deploy stage (-1 = derive from geometry)
     }
 
     public sealed class PartEntryState
@@ -130,7 +131,7 @@ namespace Solar.Core
                     pe.Mounts = new();
                     foreach (var mount in e.Mounts)
                     {
-                        var ms = new RadialMountState { Separate = mount.Separate, Stage = mount.Stage };
+                        var ms = new RadialMountState { Separate = mount.Separate, Stage = mount.Stage, FireStage = mount.FireStage };
                         foreach (var rp in mount.Parts) ms.Parts.Add(rp.Name);
                         pe.Mounts.Add(ms);
                     }
@@ -157,7 +158,7 @@ namespace Solar.Core
                     if (pe.Mounts != null)
                         foreach (var ms in pe.Mounts)
                         {
-                            var mount = new RadialMount { Separate = ms.Separate, Stage = ms.Stage };
+                            var mount = new RadialMount { Separate = ms.Separate, Stage = ms.Stage, FireStage = ms.FireStage };
                             if (ms.Parts != null)
                                 foreach (var pn in ms.Parts) { var rdef = PartCatalog.Get(pn); if (rdef != null) mount.Parts.Add(rdef); }
                             if (mount.Parts.Count > 0) entry.Mounts.Add(mount);

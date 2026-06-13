@@ -385,6 +385,38 @@ namespace Solar.Tests
                 Check("separate radial burn-time", bt >= 0 && !double.IsNaN(bt));
             }
 
+            // 19c. a radial engine ignites at its own fire stage, independent of the host axial part, so a
+            //      radial booster and an axial engine can be put in different stages (and in either order).
+            {
+                // forward: radial fires S0, axial engine fires S1
+                var v = new Vessels.Vessel();
+                v.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                var core = new Parts.Part(Parts.PartCatalog.Get("Tank T400"));
+                var axial = new Parts.Part(Parts.PartCatalog.Get("Terrier")) { Stage = 1 };
+                var rad = new Parts.Part(Parts.PartCatalog.Get("Thumper-R")) { RadialSeparate = false, FireStage = 0 };
+                core.Radials.Add(rad);
+                v.Parts.Add(core); v.Parts.Add(axial);
+                Vessels.Staging.FireNext(v);                       // stage 0
+                bool fwd0 = rad.Ignited && !axial.Ignited;
+                Vessels.Staging.FireNext(v);                       // stage 1
+                bool fwd1 = axial.Ignited;
+
+                // reverse: axial fires S0, radial fires S1
+                var v2 = new Vessels.Vessel();
+                v2.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                var core2 = new Parts.Part(Parts.PartCatalog.Get("Tank T400"));
+                var axial2 = new Parts.Part(Parts.PartCatalog.Get("Terrier")) { Stage = 0 };
+                var rad2 = new Parts.Part(Parts.PartCatalog.Get("Thumper-R")) { RadialSeparate = false, FireStage = 1 };
+                core2.Radials.Add(rad2);
+                v2.Parts.Add(core2); v2.Parts.Add(axial2);
+                Vessels.Staging.FireNext(v2);                      // stage 0
+                bool rev0 = axial2.Ignited && !rad2.Ignited;
+                Vessels.Staging.FireNext(v2);                      // stage 1
+                bool rev1 = rad2.Ignited;
+
+                Check("radial fire order", fwd0 && fwd1 && rev0 && rev1);
+            }
+
             // 19d. every decoupler shows up as a stage row flagged as a separation event, so a multi-decoupler
             //      stack lists all its decouplers (a no-engine segment between decouplers still appears).
             {
