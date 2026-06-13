@@ -33,8 +33,12 @@ namespace Solar.Parts
         /// <summary>The built-in fallback catalog, also used to seed parts.json on first run.</summary>
         public static List<PartDef> BuiltIn() => new()
         {
-            new PartDef { Name = "Pod Mk1", Id = "pod-mk1", Kind = PartKind.Pod, DryMass = 800, Width = 1.7, Height = 1.7, CdA = 1.2, Tint = new Color(225, 228, 235) },
-            new PartDef { Name = "Parachute", Id = "parachute", Kind = PartKind.Parachute, DryMass = 100, Width = 1.2, Height = 0.6, CdA = 0.4, Tint = new Color(235, 130, 60) },
+            new PartDef { Name = "Pod Mk1", Id = "pod-mk1", Kind = PartKind.Pod, DryMass = 800, Width = 1.7, Height = 1.7, CdA = 1.2, ControlAuthority = 0.14, Tint = new Color(225, 228, 235) },
+            new PartDef { Name = "Parachute", Id = "parachute", Kind = PartKind.Parachute, DryMass = 100, Width = 1.2, Height = 0.6, CdA = 0.4, DeployedCdA = 550, Tint = new Color(235, 130, 60) },
+            new PartDef { Name = "Drogue Chute", Id = "drogue-chute", Kind = PartKind.Parachute, DryMass = 70, Width = 0.9, Height = 0.5, CdA = 0.3, DeployedCdA = 250, Tint = new Color(220, 150, 70) },
+            new PartDef { Name = "Large Parachute", Id = "large-parachute", Kind = PartKind.Parachute, DryMass = 220, Width = 1.7, Height = 0.9, CdA = 0.5, DeployedCdA = 1100, Tint = new Color(240, 120, 55) },
+            new PartDef { Name = "Radial Parachute", Id = "radial-parachute", Kind = PartKind.Parachute, DryMass = 90, Width = 0.8, Height = 1.1, CdA = 0.25, DeployedCdA = 350, Tint = new Color(235, 135, 65) },
+            new PartDef { Name = "Radial Drogue", Id = "radial-drogue", Kind = PartKind.Parachute, DryMass = 60, Width = 0.7, Height = 0.9, CdA = 0.2, DeployedCdA = 180, Tint = new Color(225, 155, 75) },
             new PartDef { Name = "Tank T200", Id = "tank-t200", Kind = PartKind.Tank, DryMass = 240, FuelCapacity = 1800, Width = 1.7, Height = 1.6, CdA = 0.3, Tint = new Color(190, 205, 215) },
             new PartDef { Name = "Tank T400", Id = "tank-t400", Kind = PartKind.Tank, DryMass = 450, FuelCapacity = 3600, Width = 1.7, Height = 3.0, CdA = 0.3, Tint = new Color(190, 205, 215) },
             new PartDef { Name = "Tank T800", Id = "tank-t800", Kind = PartKind.Tank, DryMass = 820, FuelCapacity = 7200, Width = 1.7, Height = 5.4, CdA = 0.3, Tint = new Color(175, 195, 210) },
@@ -57,10 +61,10 @@ namespace Solar.Parts
             new PartDef { Name = "Radial Decoupler", Id = "radial-decoupler", Kind = PartKind.RadialDecoupler, DryMass = 50, Width = 0.6, Height = 0.8, CdA = 0.05, Tint = new Color(200, 180, 70) },
             // ---- expanded parts (see Progression/TechTree.cs for unlock nodes) ----
             // pods
-            new PartDef { Name = "Pod Mk2", Id = "pod-mk2", Kind = PartKind.Pod, DryMass = 2500, Width = 2.3, Height = 2.2, CdA = 1.5, Tint = new Color(215, 220, 230) },
-            new PartDef { Name = "Pod Mk3", Id = "pod-mk3", Kind = PartKind.Pod, DryMass = 6000, Width = 3.0, Height = 3.0, CdA = 2.0, Tint = new Color(200, 210, 225) },
-            new PartDef { Name = "Probe Core", Id = "probe-core", Kind = PartKind.Pod, DryMass = 150, Width = 0.8, Height = 0.8, CdA = 0.15, Tint = new Color(180, 180, 200) },
-            new PartDef { Name = "Probe Core XL", Id = "probe-core-xl", Kind = PartKind.Pod, DryMass = 450, Width = 1.4, Height = 1.2, CdA = 0.4, Tint = new Color(170, 170, 195) },
+            new PartDef { Name = "Pod Mk2", Id = "pod-mk2", Kind = PartKind.Pod, DryMass = 2500, Width = 2.3, Height = 2.2, CdA = 1.5, ControlAuthority = 0.20, Tint = new Color(215, 220, 230) },
+            new PartDef { Name = "Pod Mk3", Id = "pod-mk3", Kind = PartKind.Pod, DryMass = 6000, Width = 3.0, Height = 3.0, CdA = 2.0, ControlAuthority = 0.28, Tint = new Color(200, 210, 225) },
+            new PartDef { Name = "Probe Core", Id = "probe-core", Kind = PartKind.Pod, DryMass = 150, Width = 0.8, Height = 0.8, CdA = 0.15, ControlAuthority = 0.10, Tint = new Color(180, 180, 200) },
+            new PartDef { Name = "Probe Core XL", Id = "probe-core-xl", Kind = PartKind.Pod, DryMass = 450, Width = 1.4, Height = 1.2, CdA = 0.4, ControlAuthority = 0.12, Tint = new Color(170, 170, 195) },
             // tanks
             new PartDef { Name = "Tank T100", Id = "tank-t100", Kind = PartKind.Tank, DryMass = 120, FuelCapacity = 900, Width = 1.2, Height = 0.9, CdA = 0.2, Tint = new Color(195, 210, 220) },
             new PartDef { Name = "Tank T4000", Id = "tank-t4000", Kind = PartKind.Tank, DryMass = 3800, FuelCapacity = 36000, Width = 3.0, Height = 9.0, CdA = 0.5, Tint = new Color(210, 160, 85) },
@@ -78,8 +82,8 @@ namespace Solar.Parts
             new PartDef { Name = "Docking Port Jr", Id = "docking-port-jr", Kind = PartKind.DockingPort, DryMass = 60, Width = 1.2, Height = 0.6, CdA = 0.06, Tint = new Color(195, 190, 205) },
             new PartDef { Name = "Shielded Port", Id = "shielded-port", Kind = PartKind.DockingPort, DryMass = 350, Width = 1.7, Height = 1.0, CdA = 0.15, Tint = new Color(185, 180, 195) },
             // landing gear
-            new PartDef { Name = "Landing Gear", Id = "landing-gear", Kind = PartKind.LandingGear, DryMass = 300, Width = 1.2, Height = 1.5, CdA = 0.1, Tint = new Color(160, 165, 175) },
-            new PartDef { Name = "Heavy Landing Gear", Id = "heavy-landing-gear", Kind = PartKind.LandingGear, DryMass = 800, Width = 2.0, Height = 2.2, CdA = 0.2, Tint = new Color(150, 155, 165) },
+            new PartDef { Name = "Landing Gear", Id = "landing-gear", Kind = PartKind.LandingGear, DryMass = 300, Width = 1.2, Height = 1.5, CdA = 0.1, ImpactTolerance = 5, Tint = new Color(160, 165, 175) },
+            new PartDef { Name = "Heavy Landing Gear", Id = "heavy-landing-gear", Kind = PartKind.LandingGear, DryMass = 800, Width = 2.0, Height = 2.2, CdA = 0.2, ImpactTolerance = 12, Tint = new Color(150, 155, 165) },
             // ---- NEW: structural bays & trusses (module carriers) ----
             new PartDef { Name = "Service Bay 1.7m",  Id = "service-bay-1-7m",   Kind = PartKind.StructuralBay, DryMass = 150, Width = 1.7, Height = 1.0, CdA = 0.3, Tint = new Color(140, 150, 165) },
             new PartDef { Name = "Service Bay 2.3m",  Id = "service-bay-2-3m",   Kind = PartKind.StructuralBay, DryMass = 300, Width = 2.3, Height = 1.5, CdA = 0.45, Tint = new Color(135, 145, 160) },
@@ -100,11 +104,11 @@ namespace Solar.Parts
             // ---- NEW: tank ----
             new PartDef { Name = "Toroidal Tank T1200", Id = "toroidal-tank-t1200", Kind = PartKind.Tank, DryMass = 1300, FuelCapacity = 10800, Width = 2.3, Height = 2.0, CdA = 0.4, Tint = new Color(170, 185, 200) },
             // ---- NEW: pod ----
-            new PartDef { Name = "Mk1 Lander Can",    Id = "mk1-lander-can",     Kind = PartKind.Pod, DryMass = 1200, Width = 2.3, Height = 1.8, CdA = 1.0, Tint = new Color(210, 215, 225) },
+            new PartDef { Name = "Mk1 Lander Can",    Id = "mk1-lander-can",     Kind = PartKind.Pod, DryMass = 1200, Width = 2.3, Height = 1.8, CdA = 1.0, ControlAuthority = 0.14, Tint = new Color(210, 215, 225) },
             // ---- NEW: advanced parts (ship with modules pre-fitted in their slots; still editable) ----
-            new PartDef { Name = "Service Pod Mk1", Id = "service-pod-mk1", Kind = PartKind.Pod, DryMass = 1100, Width = 1.7, Height = 1.9, CdA = 1.2, Tint = new Color(220, 222, 232),
+            new PartDef { Name = "Service Pod Mk1", Id = "service-pod-mk1", Kind = PartKind.Pod, DryMass = 1100, Width = 1.7, Height = 1.9, CdA = 1.2, ControlAuthority = 0.14, Tint = new Color(220, 222, 232),
                           DefaultModules = { "Solar Panel", "Battery", "Antenna" } },
-            new PartDef { Name = "Comsat Core", Id = "comsat-core", Kind = PartKind.Pod, DryMass = 320, Width = 0.9, Height = 0.9, CdA = 0.2, Tint = new Color(175, 180, 205),
+            new PartDef { Name = "Comsat Core", Id = "comsat-core", Kind = PartKind.Pod, DryMass = 320, Width = 0.9, Height = 0.9, CdA = 0.2, ControlAuthority = 0.10, Tint = new Color(175, 180, 205),
                           DefaultModules = { "RTG", "Battery", "Relay Antenna" } },
             new PartDef { Name = "Power Service Bay", Id = "power-service-bay", Kind = PartKind.StructuralBay, DryMass = 220, Width = 1.7, Height = 1.1, CdA = 0.3, Tint = new Color(140, 152, 168),
                           DefaultModules = { "Solar Panel", "Battery" } },
@@ -175,6 +179,9 @@ namespace Solar.Parts
         public double Width { get; set; }
         public double Height { get; set; }
         public double CdA { get; set; }
+        public double DeployedCdA { get; set; }
+        public double ControlAuthority { get; set; }
+        public double ImpactTolerance { get; set; }
         public int TintR { get; set; }
         public int TintG { get; set; }
         public int TintB { get; set; }
@@ -184,6 +191,7 @@ namespace Solar.Parts
         {
             Name = p.Name, Id = p.Id, Kind = p.Kind, DryMass = p.DryMass, FuelCapacity = p.FuelCapacity,
             Thrust = p.Thrust, Isp = p.Isp, Width = p.Width, Height = p.Height, CdA = p.CdA,
+            DeployedCdA = p.DeployedCdA, ControlAuthority = p.ControlAuthority, ImpactTolerance = p.ImpactTolerance,
             TintR = p.Tint.R, TintG = p.Tint.G, TintB = p.Tint.B,
             DefaultModules = p.DefaultModules.Count > 0 ? new List<string>(p.DefaultModules) : null,
         };
@@ -193,8 +201,17 @@ namespace Solar.Parts
             Name = Name, Id = string.IsNullOrEmpty(Id) ? PartDef.Slug(Name) : Id,
             Kind = Kind, DryMass = DryMass, FuelCapacity = FuelCapacity,
             Thrust = Thrust, Isp = Isp, Width = Width, Height = Height, CdA = CdA,
+            // migration-safe fallbacks so older parts.json (missing these fields) still behaves:
+            DeployedCdA = DeployedCdA > 0 ? DeployedCdA : (Kind == PartKind.Parachute ? PartCatalog.ChuteDeployedCdA : 0),
+            ControlAuthority = ControlAuthority > 0 ? ControlAuthority : (Kind == PartKind.Pod ? DefaultPodAuthority(DryMass) : 0),
+            ImpactTolerance = ImpactTolerance > 0 ? ImpactTolerance : (Kind == PartKind.LandingGear ? DefaultGearTolerance(DryMass) : 0),
             Tint = new Color(TintR, TintG, TintB),
             DefaultModules = DefaultModules ?? new List<string>(),
         };
+
+        // by-size defaults used only when an entry omits the field (older/edited JSON)
+        private static double DefaultPodAuthority(double dryMass) =>
+            dryMass < 500 ? 0.10 : dryMass < 2000 ? 0.14 : dryMass < 4000 ? 0.20 : 0.28;
+        private static double DefaultGearTolerance(double dryMass) => dryMass < 500 ? 5.0 : 12.0;
     }
 }

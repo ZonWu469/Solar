@@ -268,14 +268,42 @@ namespace Solar.Tests
                 Check("nose cone drag", coned.TotalCdA < bare.TotalCdA);
             }
 
-            // 17. landing legs raise the survivable touchdown speed.
+            // 17. landing legs (module) and landing-gear parts both raise the survivable touchdown speed
+            //     above the 8 m/s baseline; the heavier gear (authored ImpactTolerance in parts.json) more.
             {
                 var v = new Vessels.Vessel();
                 double baseSpeed = v.SafeLandingSpeed;
                 var pod = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
                 pod.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Landing Legs")));
                 v.Parts.Add(pod);
-                Check("landing legs", baseSpeed == 8.0 && v.SafeLandingSpeed > baseSpeed);
+                bool legsHelp = baseSpeed == 8.0 && v.SafeLandingSpeed > baseSpeed;
+
+                var geared = new Vessels.Vessel();
+                geared.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                geared.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Landing Gear")));
+                var heavyGeared = new Vessels.Vessel();
+                heavyGeared.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                heavyGeared.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Heavy Landing Gear")));
+                bool gearHelps = geared.SafeLandingSpeed > 8.0 && heavyGeared.SafeLandingSpeed > geared.SafeLandingSpeed;
+
+                Check("landing tolerance", legsHelp && gearHelps);
+            }
+
+            // 17b. parachutes carry per-part deployed drag (authored DeployedCdA): a deployed chute raises
+            //      TotalCdA, and a Large Parachute adds more than a Drogue Chute.
+            {
+                Vessels.Vessel Chute(string name, bool deploy)
+                {
+                    var vv = new Vessels.Vessel();
+                    vv.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                    var c = new Parts.Part(Parts.PartCatalog.Get(name)) { Deployed = deploy };
+                    vv.Parts.Add(c);
+                    return vv;
+                }
+                double drogue = Chute("Drogue Chute", true).TotalCdA;
+                double large = Chute("Large Parachute", true).TotalCdA;
+                double largeStowed = Chute("Large Parachute", false).TotalCdA;
+                Check("parachute drag", large > drogue && large > largeStowed);
             }
 
             // 18. radial boosters add thrust + mass to the ship and drain their own fuel.
@@ -445,8 +473,9 @@ namespace Solar.Tests
             }
 
             // 24. attitude authority (torque/inertia model): reaction wheels add control torque (and raise
-            //     the rate cap) only with electric charge; fins only bite in atmosphere; and heavier/longer
-            //     craft carry more rotational inertia, so their angular acceleration is lower.
+            //     the rate cap) only with electric charge; fins only bite in atmosphere; the command pod's
+            //     authored ControlAuthority guarantees the same minimum angular accel at any mass, and a
+            //     fixed-torque reaction wheel boosts the lighter craft more.
             {
                 var body = new CelestialBody { Mu = mu, Radius = 6.371e6, Atmo = new Atmosphere(1.225, 5600, 56_000) };
                 var v = new Vessels.Vessel { Body = body, Position = new Vec2d(6.371e6 + 1000, 0) };
@@ -476,10 +505,20 @@ namespace Solar.Tests
                 var heavy = new Vessels.Vessel { Body = body };
                 heavy.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
                 for (int i = 0; i < 6; i++) heavy.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Tank T800")));
-                bool massMatters = heavy.MomentOfInertia > light.MomentOfInertia * 5
-                                   && heavy.ControlTorque / heavy.MomentOfInertia < light.ControlTorque / light.MomentOfInertia;
+                // pod-only: the guaranteed minimum angular accel is the same regardless of mass
+                double accLight = light.ControlTorque / light.MomentOfInertia;
+                double accHeavy = heavy.ControlTorque / heavy.MomentOfInertia;
+                bool minIndependentOfMass = heavy.MomentOfInertia > light.MomentOfInertia * 5
+                                            && Math.Abs(accLight - accHeavy) < 1e-6;
+                // ...but a fixed-torque reaction wheel raises the lighter craft's accel more
+                light.ElectricCharge = 100; heavy.ElectricCharge = 100;
+                light.Parts[0].Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Reaction Wheel")));
+                heavy.Parts[0].Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Reaction Wheel")));
+                double dLight = light.ControlTorque / light.MomentOfInertia - accLight;
+                double dHeavy = heavy.ControlTorque / heavy.MomentOfInertia - accHeavy;
+                bool wheelHelpsLighterMore = dLight > dHeavy && dLight > 0;
 
-                Check("attitude authority", wheelsNeedPower && finsNeedAir && massMatters);
+                Check("attitude authority", wheelsNeedPower && finsNeedAir && minIndependentOfMass && wheelHelpsLighterMore);
             }
 
             // 24b. module status gates: ModuleFunctioning mirrors the EcRates gates — an undeployed solar

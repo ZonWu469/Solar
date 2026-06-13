@@ -235,6 +235,15 @@ namespace Solar.Rendering
                         pb.Tri(P(xc - rw * 0.30f, yb + 0.05f), P(xc + rw * 0.30f, yb + 0.05f), P(xc, yb - flen), new Color(255, 140, 40, 200));
                         pb.Tri(P(xc - rw * 0.16f, yb + 0.05f), P(xc + rw * 0.16f, yb + 0.05f), P(xc, yb - flen * 0.55f), new Color(255, 230, 120, 230));
                     }
+
+                    // deployed radial parachute: canopy above the radial part (mirrors the axial chute)
+                    if (rd.Kind == PartKind.Parachute && r.Deployed)
+                    {
+                        var canopy = P(xc, yb + rh + 7f);
+                        pb.Line(P(xc - rw * 0.4f, yb + rh), P(xc - 4.4f, yb + rh + 6f), Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
+                        pb.Line(P(xc + rw * 0.4f, yb + rh), P(xc + 4.4f, yb + rh + 6f), Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
+                        pb.FillCircle(canopy, 5.5f * pxPerM, new Color(235, 130, 60), PlanetRenderer.Darken(new Color(235, 130, 60), 0.3f));
+                    }
                 }
                 y += h;
             }

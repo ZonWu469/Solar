@@ -82,7 +82,7 @@ namespace Solar.Vessels
                 foreach (var p in AllParts())
                 {
                     c += p.Def.CdA;
-                    if (p.Def.Kind == PartKind.Parachute && p.Deployed) c += PartCatalog.ChuteDeployedCdA;
+                    if (p.Def.Kind == PartKind.Parachute && p.Deployed) c += p.Def.DeployedCdA;
                 }
                 // a nose cone at the top of the stack streamlines the whole vehicle
                 if (Parts.Count > 0 && Parts[0].Def.Kind == PartKind.Aero) c *= 0.8;
@@ -96,12 +96,21 @@ namespace Solar.Vessels
             get { int n = 0; foreach (var p in AllParts()) foreach (var m in p.Modules) if (m.Def.Kind == ModuleKind.LandingLeg) n++; return n; }
         }
 
-        /// <summary>Touchdown speed the vessel survives; base 8 m/s plus a margin per landing leg.</summary>
-        public double SafeLandingSpeed => 8.0 + 4.0 * LandingLegs;
+        /// <summary>Touchdown speed the vessel survives: an 8 m/s baseline, plus each part's authored
+        /// landing-gear <see cref="PartDef.ImpactTolerance"/> (from parts.json) and a margin per leg module.</summary>
+        public double SafeLandingSpeed
+        {
+            get
+            {
+                double t = 8.0 + 4.0 * LandingLegs;
+                foreach (var p in AllParts()) t += p.Def.ImpactTolerance;
+                return t;
+            }
+        }
 
         public bool ChuteDeployed
         {
-            get { foreach (var p in Parts) if (p.Def.Kind == PartKind.Parachute && p.Deployed) return true; return false; }
+            get { foreach (var p in AllParts()) if (p.Def.Kind == PartKind.Parachute && p.Deployed) return true; return false; }
         }
 
         public bool HasFins
@@ -137,17 +146,27 @@ namespace Solar.Vessels
             }
         }
 
-        /// <summary>Total attitude-control torque (N·m): a small built-in command authority, reaction
-        /// wheels (only while powered), and aerodynamic fins (only in atmosphere, scaled by dynamic
-        /// pressure). Angular acceleration is this divided by <see cref="MomentOfInertia"/>.</summary>
+        /// <summary>Best command-part steering authority (rad/s², the authored <see cref="PartDef.ControlAuthority"/>
+        /// from parts.json) over all fitted pods — the minimum angular acceleration the craft can command
+        /// regardless of its mass. Zero if no command part is present.</summary>
+        public double PodControlAccel
+        {
+            get { double a = 0; foreach (var p in AllParts()) if (p.Def.Kind == PartKind.Pod && p.Def.ControlAuthority > a) a = p.Def.ControlAuthority; return a; }
+        }
+
+        /// <summary>Total attitude-control torque (N·m): a command-part minimum (its authored authority
+        /// times the moment of inertia, so it holds at any mass), plus reaction wheels (only while
+        /// powered), RCS blocks (gated like translation), and aerodynamic fins (atmosphere only).
+        /// Angular acceleration is this divided by <see cref="MomentOfInertia"/>.</summary>
         public double ControlTorque
         {
             get
             {
-                double baseT = 6000.0;                                                   // small inherent/RCS authority
+                double podMin = PodControlAccel * MomentOfInertia;                        // size-independent minimum
                 double wheels = ElectricCharge > 0 ? 45000.0 * ReactionWheels : 0;        // gyros, only with power
+                double rcs = (RcsEnabled && Monoprop > 0 && ElectricCharge > 0) ? 8000.0 * RcsBlocks : 0;
                 double fins = HasFins ? 30000.0 * Math.Clamp(DynamicPressure / 4000.0, 0, 1) : 0;
-                return baseT + wheels + fins;
+                return podMin + wheels + rcs + fins;
             }
         }
 

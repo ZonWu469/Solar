@@ -47,7 +47,8 @@ namespace Solar.Vessels
                     p.Stage = p.Def.Kind == PartKind.Parachute ? maxSeg + 1 : seg[i];
                 foreach (var r in p.Radials)
                     if (r.Stage < 0)
-                        r.Stage = r.RadialSeparate ? seg[i] + 1 : seg[i];
+                        r.Stage = r.Def.Kind == PartKind.Parachute ? maxSeg + 1
+                                : r.RadialSeparate ? seg[i] + 1 : seg[i];
             }
         }
 
@@ -76,7 +77,10 @@ namespace Solar.Vessels
                 bool hostFires = p.Stage == s;
                 if (hostFires && (p.Def.Kind == PartKind.Engine || p.Def.Kind == PartKind.SolidBooster)) { p.Ignited = true; ignitedAny = true; }
                 foreach (var r in p.Radials)
+                {
                     if (hostFires && (r.Def.Kind == PartKind.Engine || r.Def.Kind == PartKind.SolidBooster)) { r.Ignited = true; ignitedAny = true; }
+                    if (r.Def.Kind == PartKind.Parachute && r.Stage == s && !r.Deployed) r.Deployed = true;
+                }
                 if (p.Def.Kind == PartKind.Parachute && p.Stage == s && !p.Deployed) p.Deployed = true;
             }
             if (ignitedAny) v.EnginesIgnited = true;
