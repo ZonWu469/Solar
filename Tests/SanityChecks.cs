@@ -444,8 +444,9 @@ namespace Solar.Tests
                 Check("crew transfer", seats && moved && noRoom);
             }
 
-            // 24. steering authority: reaction wheels only turn the ship with electric charge; fins only
-            //     bite in atmosphere; a bare pod's built-in rate is modest (below the old 0.4 floor).
+            // 24. attitude authority (torque/inertia model): reaction wheels add control torque (and raise
+            //     the rate cap) only with electric charge; fins only bite in atmosphere; and heavier/longer
+            //     craft carry more rotational inertia, so their angular acceleration is lower.
             {
                 var body = new CelestialBody { Mu = mu, Radius = 6.371e6, Atmo = new Atmosphere(1.225, 5600, 56_000) };
                 var v = new Vessels.Vessel { Body = body, Position = new Vec2d(6.371e6 + 1000, 0) };
@@ -453,24 +454,56 @@ namespace Solar.Tests
                 pod.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Reaction Wheel")));
                 v.Parts.Add(pod);
                 v.Velocity = Vec2d.Zero;
-                double baseRate = v.TurnRate;                 // no EC -> wheels contribute nothing
+                double baseTorque = v.ControlTorque, baseCap = v.MaxTurnRate;   // no EC -> wheels idle
                 v.ElectricCharge = 100;
-                double powered = v.TurnRate;                  // EC -> one wheel adds ~0.6 rad/s
-                bool wheelsNeedPower = powered > baseRate + 0.5 && powered < baseRate + 0.7
-                                       && baseRate <= 0.8 + 1e-9;   // built-in rate trimmed (was up to 2.0)
+                double poweredTorque = v.ControlTorque, poweredCap = v.MaxTurnRate;
+                bool wheelsNeedPower = poweredTorque > baseTorque + 40000 && poweredTorque < baseTorque + 50000
+                                       && poweredCap > baseCap + 0.1 && poweredCap <= 1.6 + 1e-9;
 
                 var finned = new Vessels.Vessel { Body = body, Position = new Vec2d(6.371e6 + 100, 0) };
                 finned.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
                 finned.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Fin Set")));
                 finned.Velocity = Vec2d.Zero;                 // in atmosphere but not moving -> fins idle
-                double finsStill = finned.TurnRate;
+                double finsStill = finned.ControlTorque;
                 finned.Velocity = new Vec2d(0, 300);          // fast through air -> fins bite
-                double finsFast = finned.TurnRate;
+                double finsFast = finned.ControlTorque;
                 finned.Position = new Vec2d(6.371e6 + 200_000, 0);  // above the atmosphere
-                double finsVacuum = finned.TurnRate;
-                bool finsNeedAir = finsFast > finsStill + 0.1 && Math.Abs(finsVacuum - finsStill) < 1e-9;
+                double finsVacuum = finned.ControlTorque;
+                bool finsNeedAir = finsFast > finsStill + 100 && Math.Abs(finsVacuum - finsStill) < 1e-9;
 
-                Check("steering authority", wheelsNeedPower && finsNeedAir);
+                var light = new Vessels.Vessel { Body = body };
+                light.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                var heavy = new Vessels.Vessel { Body = body };
+                heavy.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                for (int i = 0; i < 6; i++) heavy.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Tank T800")));
+                bool massMatters = heavy.MomentOfInertia > light.MomentOfInertia * 5
+                                   && heavy.ControlTorque / heavy.MomentOfInertia < light.ControlTorque / light.MomentOfInertia;
+
+                Check("attitude authority", wheelsNeedPower && finsNeedAir && massMatters);
+            }
+
+            // 24b. module status gates: ModuleFunctioning mirrors the EcRates gates — an undeployed solar
+            //      panel and a powerless reaction wheel read "off", an RTG is always "on", and a fuel cell
+            //      with no liquid fuel reads "off" even when deployed and powered.
+            {
+                var v = new Vessels.Vessel { Body = new CelestialBody { Mu = mu, Radius = 6.371e6 } };
+                var pod = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
+                var solar = new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Solar Panel"));
+                var rtg = new Parts.ModuleInstance(Parts.ModuleCatalog.Get("RTG"));
+                var wheel = new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Reaction Wheel"));
+                var cell = new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Fuel Cell"));
+                pod.Modules.Add(solar); pod.Modules.Add(rtg); pod.Modules.Add(wheel); pod.Modules.Add(cell);
+                v.Parts.Add(pod);
+
+                v.ElectricCharge = 0; solar.Active = false; cell.Active = false;
+                bool offState = !v.ModuleFunctioning(solar, 0, null) && v.ModuleFunctioning(rtg, 0, null)
+                                && !v.ModuleFunctioning(wheel, 0, null) && !v.ModuleFunctioning(cell, 0, null);
+
+                v.ElectricCharge = 50; solar.Active = true; cell.Active = true;   // pod carries no fuel
+                bool onState = v.ModuleFunctioning(solar, 0, null) && v.ModuleFunctioning(wheel, 0, null)
+                               && !v.ModuleFunctioning(cell, 0, null);            // fuel cell still off: no fuel
+
+                Check("module status gates", offState && onState);
             }
 
             // 25. RCS translation: a command accelerates along the body axes (fore = +Up) and burns

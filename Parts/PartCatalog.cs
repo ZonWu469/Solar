@@ -80,10 +80,6 @@ namespace Solar.Parts
             // landing gear
             new PartDef { Name = "Landing Gear", Id = "landing-gear", Kind = PartKind.LandingGear, DryMass = 300, Width = 1.2, Height = 1.5, CdA = 0.1, Tint = new Color(160, 165, 175) },
             new PartDef { Name = "Heavy Landing Gear", Id = "heavy-landing-gear", Kind = PartKind.LandingGear, DryMass = 800, Width = 2.0, Height = 2.2, CdA = 0.2, Tint = new Color(150, 155, 165) },
-            // aero
-            new PartDef { Name = "Fairing 1.7m", Id = "fairing-1-7m", Kind = PartKind.Aero, DryMass = 120, Width = 1.7, Height = 2.4, CdA = 0.25, Tint = new Color(210, 215, 225) },
-            new PartDef { Name = "Fairing 2.3m", Id = "fairing-2-3m", Kind = PartKind.Aero, DryMass = 220, Width = 2.3, Height = 3.2, CdA = 0.35, Tint = new Color(205, 210, 220) },
-            new PartDef { Name = "Heat Shield 1.7m", Id = "heat-shield-1-7m", Kind = PartKind.Aero, DryMass = 280, Width = 1.7, Height = 0.7, CdA = 0.3, Tint = new Color(180, 120, 90) },
             // ---- NEW: structural bays & trusses (module carriers) ----
             new PartDef { Name = "Service Bay 1.7m",  Id = "service-bay-1-7m",   Kind = PartKind.StructuralBay, DryMass = 150, Width = 1.7, Height = 1.0, CdA = 0.3, Tint = new Color(140, 150, 165) },
             new PartDef { Name = "Service Bay 2.3m",  Id = "service-bay-2-3m",   Kind = PartKind.StructuralBay, DryMass = 300, Width = 2.3, Height = 1.5, CdA = 0.45, Tint = new Color(135, 145, 160) },
@@ -103,8 +99,6 @@ namespace Solar.Parts
             new PartDef { Name = "Sledgehammer SRB",  Id = "sledgehammer-srb",   Kind = PartKind.SolidBooster, DryMass = 1200, FuelCapacity = 8000, Thrust = 800_000, Isp = 200, Width = 1.7, Height = 6.0, CdA = 0.5, Tint = new Color(230, 220, 215) },
             // ---- NEW: tank ----
             new PartDef { Name = "Toroidal Tank T1200", Id = "toroidal-tank-t1200", Kind = PartKind.Tank, DryMass = 1300, FuelCapacity = 10800, Width = 2.3, Height = 2.0, CdA = 0.4, Tint = new Color(170, 185, 200) },
-            // ---- NEW: aero ----
-            new PartDef { Name = "Inflatable Heat Shield 2.3m", Id = "inflatable-heat-shield-2-3m", Kind = PartKind.Aero, DryMass = 150, Width = 2.3, Height = 0.5, CdA = 0.5, Tint = new Color(190, 140, 100) },
             // ---- NEW: pod ----
             new PartDef { Name = "Mk1 Lander Can",    Id = "mk1-lander-can",     Kind = PartKind.Pod, DryMass = 1200, Width = 2.3, Height = 1.8, CdA = 1.0, Tint = new Color(210, 215, 225) },
             // ---- NEW: advanced parts (ship with modules pre-fitted in their slots; still editable) ----

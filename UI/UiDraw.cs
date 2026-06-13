@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Solar.Core;
+using Solar.Parts;
 using Solar.Rendering;
 
 namespace Solar.UI
@@ -13,6 +15,53 @@ namespace Solar.UI
         public static readonly Color PanelBorder = new Color(70, 95, 130);
         public static readonly Color TextDim = new Color(150, 165, 185);
         public static readonly Color Accent = new Color(120, 210, 255);
+        public static readonly Color StatusOn = new Color(120, 220, 120);
+        public static readonly Color StatusOff = new Color(210, 90, 80);
+
+        /// <summary>Draw a module/part icon fitted to <paramref name="rect"/>: the texture if present,
+        /// else a flat <paramref name="tint"/> swatch. When <paramref name="dim"/> the colour is darkened
+        /// (used to show an inactive/non-functioning module).</summary>
+        public static void Icon(PrimitiveBatch pb, Texture2D tex, Rectangle rect, Color tint, bool dim = false)
+        {
+            Color c = dim ? new Color((int)(tint.R * 0.38f), (int)(tint.G * 0.38f), (int)(tint.B * 0.38f), (int)tint.A) : tint;
+            if (tex != null)
+                pb.TexturedQuad(tex, new Vector2(rect.Left, rect.Top), new Vector2(rect.Right, rect.Top),
+                                new Vector2(rect.Right, rect.Bottom), new Vector2(rect.Left, rect.Bottom), c);
+            else
+                pb.FillRect(rect, c);
+        }
+
+        /// <summary>Floating tooltip for a slot module: name, flavour description, and effect line.
+        /// Repositions to stay on screen. Reused by the editor slot list, the module picker, and the
+        /// flight HUD so the three never describe a module differently.</summary>
+        public static void ModuleTooltip(PrimitiveBatch pb, SpriteBatch sb, SpriteFont f, ModuleDef m,
+                                         Vector2 anchor, int w, int h)
+        {
+            const float small = 0.8f;
+            var lines = new List<string>();
+            if (!string.IsNullOrEmpty(m.Description)) lines.Add(m.Description);
+            lines.Add(m.StatLine);
+
+            float lhTitle = f.MeasureString("X").Y + 2;
+            float lhSmall = f.MeasureString("X").Y * small + 2;
+            float tw = f.MeasureString(m.Name).X;
+            foreach (var ln in lines) tw = Math.Max(tw, f.MeasureString(ln).X * small);
+            int bw = (int)tw + 18, bh = (int)(lhTitle + lines.Count * lhSmall) + 12;
+            int bx = (int)anchor.X + 16, by = (int)anchor.Y + 14;
+            if (bx + bw > w - 4) bx = (int)anchor.X - bw - 12;
+            if (by + bh > h - 4) by = h - 4 - bh;
+            if (bx < 4) bx = 4; if (by < 4) by = 4;
+
+            Panel(pb, new Rectangle(bx, by, bw, bh));
+            float ty = by + 6;
+            sb.DrawString(f, m.Name, new Vector2(bx + 9, ty), Color.White);
+            ty += lhTitle;
+            for (int i = 0; i < lines.Count; i++)
+            {
+                SmallText(sb, f, lines[i], new Vector2(bx + 9, ty), i == 0 ? TextDim : Accent, small);
+                ty += lhSmall;
+            }
+        }
 
         public static void Panel(PrimitiveBatch pb, Rectangle r)
         {

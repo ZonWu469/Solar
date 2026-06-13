@@ -116,9 +116,9 @@ namespace Solar.Progression
             },
             new TechNode {
                 Id = "reentry", Title = "Re-entry", Cost = 35, Prereqs = new[] { "landing" },
-                Parts = new[] { "Heat Shield 1.7m" },
+                Parts = new string[0],
                 Modules = new string[0],
-                Description = "Ablative heat shields protect your payload during high-speed atmospheric entries.",
+                Description = "Foundational re-entry research — a prerequisite for heavy landing systems and crewed survival.",
             },
             new TechNode {
                 Id = "probes", Title = "Probes", Cost = 35, Prereqs = new[] { "miniaturization" },
@@ -174,9 +174,9 @@ namespace Solar.Progression
             },
             new TechNode {
                 Id = "aerospace", Title = "Aerospace", Cost = 110, Prereqs = new[] { "megarocketry" },
-                Parts = new[] { "Fairing 2.3m", "Aerospike", "Inflatable Heat Shield 2.3m" },
+                Parts = new[] { "Aerospike" },
                 Modules = new string[0],
-                Description = "The altitude-compensating aerospike engine, wide fairings, and inflatable heat shields for advanced atmospheric operations.",
+                Description = "The altitude-compensating aerospike engine — efficient thrust across the whole climb to orbit.",
             },
             new TechNode {
                 Id = "heavy-landing", Title = "Heavy Landing", Cost = 90, Prereqs = new[] { "reentry" },
@@ -217,8 +217,8 @@ namespace Solar.Progression
             new TechNode {
                 Id = "nuclear-power", Title = "Nuclear Power", Cost = 140, Prereqs = new[] { "sustainability", "advanced-electrics" },
                 Parts = new string[0],
-                Modules = new[] { "Nuclear Reactor", "Stirling RTG", "Radiator Panel" },
-                Description = "A compact fission reactor delivers abundant passive power anywhere. Advanced RTGs and thermal radiators complete the nuclear suite.",
+                Modules = new[] { "Nuclear Reactor", "Stirling RTG" },
+                Description = "A compact fission reactor delivers abundant passive power anywhere. Advanced Stirling RTGs complete the nuclear suite.",
             },
             new TechNode {
                 Id = "power-systems", Title = "Power Systems", Cost = 150, Prereqs = new[] { "nuclear-power" },
@@ -239,12 +239,6 @@ namespace Solar.Progression
                 Description = "Larger probe cores carry more experiments and on-board power — robotic explorers par excellence.",
             },
             new TechNode {
-                Id = "fairings", Title = "Fairings", Cost = 55, Prereqs = new[] { "start" },
-                Parts = new[] { "Fairing 1.7m" },
-                Modules = new string[0],
-                Description = "Payload fairings shield delicate cargo from drag during the climb through atmosphere.",
-            },
-            new TechNode {
                 Id = "crew-systems", Title = "Crew Systems", Cost = 85, Prereqs = new[] { "survival", "reentry" },
                 Parts = new[] { "Pod Mk2" },
                 Modules = new string[0],
@@ -263,8 +257,8 @@ namespace Solar.Progression
             new TechNode {
                 Id = "space-stations", Title = "Space Stations", Cost = 200, Prereqs = new[] { "docking", "crew-systems" },
                 Parts = new[] { "Shielded Port" },
-                Modules = new[] { "Micrometeoroid Shield" },
-                Description = "Shielded docking ports, micrometeoroid protection, and modular construction open the door to permanent orbital outposts.",
+                Modules = new string[0],
+                Description = "Shielded docking ports and modular construction open the door to permanent orbital outposts.",
             },
             new TechNode {
                 Id = "surface-science", Title = "Surface Science", Cost = 180, Prereqs = new[] { "deep-space-science", "heavy-landing" },
@@ -285,14 +279,14 @@ namespace Solar.Progression
             new TechNode {
                 Id = "heavy-crew", Title = "Heavy Crew", Cost = 400, Prereqs = new[] { "crew-systems", "ultra-heavy" },
                 Parts = new[] { "Pod Mk3" },
-                Modules = new[] { "Radiation Shield" },
-                Description = "The Mk3 pod carries five crew — a flying command center for the most ambitious missions. Unlocks heavy radiation shielding for interplanetary journeys.",
+                Modules = new string[0],
+                Description = "The Mk3 pod carries five crew — a flying command center for the most ambitious missions.",
             },
             new TechNode {
                 Id = "near-future", Title = "Near Future Propulsion", Cost = 450, Prereqs = new[] { "nuclear-power", "megarocketry" },
                 Parts = new[] { "Nuclear Lightbulb", "PIT Thruster" },
-                Modules = new[] { "Large Radiator" },
-                Description = "Advanced nuclear propulsion: the closed-cycle gas-core lightbulb and pulsed inductive thruster push Isp into four digits. Bring radiators.",
+                Modules = new string[0],
+                Description = "Advanced nuclear propulsion: the closed-cycle gas-core lightbulb and pulsed inductive thruster push Isp into four digits.",
             },
             new TechNode {
                 Id = "grand-finale", Title = "Grand Finale", Cost = 500, Prereqs = new[] { "ion-prop", "space-stations", "deep-space-net" },

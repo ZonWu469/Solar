@@ -2,7 +2,7 @@ using Microsoft.Xna.Framework;
 
 namespace Solar.Parts
 {
-    public enum ModuleKind { SolarPanel, Rtg, Battery, LifeSupport, Harvester, ReactionWheel, Science, Antenna, FuelCell, LandingLeg, Light, RCS, Tank, Radiator, Shield, Storage }
+    public enum ModuleKind { SolarPanel, Rtg, Battery, LifeSupport, Harvester, ReactionWheel, Science, Antenna, FuelCell, LandingLeg, Light, RCS, Tank, Storage }
 
     /// <summary>Immutable definition of a slot module attached to a part (power, life support, mining).</summary>
     public sealed class ModuleDef
@@ -49,11 +49,9 @@ namespace Solar.Parts
             ModuleKind.Antenna => $"antenna, {RangeText}{(Relay ? " relay" : "")}, {DryMass:0} kg",
             ModuleKind.FuelCell => $"+{EcProduce:0.#} EC/s  -{FuelDraw:0.#} fuel/s — fuel cell, {DryMass:0} kg",
             ModuleKind.LandingLeg => $"landing leg, {DryMass:0} kg",
-            ModuleKind.Light => $"light, {DryMass:0} kg",
+            ModuleKind.Light => $"-{EcDraw:0.##} EC/s — light, {DryMass:0} kg",
             ModuleKind.RCS => $"RCS thruster, {DryMass:0} kg",
             ModuleKind.Tank => $"extra fuel tank, {FuelCapacity:0} kg",
-            ModuleKind.Radiator => $"thermal radiator, {DryMass:0} kg",
-            ModuleKind.Shield => $"passive shielding, {DryMass:0} kg",
             ModuleKind.Storage => EcCapacity > 0 ? $"EC storage pod, +{EcCapacity:0} EC, {DryMass:0} kg"
                                   : FuelCapacity > 0 ? $"fuel storage pod, +{FuelCapacity:0} kg fuel, {DryMass:0} kg"
                                   : $"storage pod, {DryMass:0} kg",

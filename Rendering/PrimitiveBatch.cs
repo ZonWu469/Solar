@@ -57,16 +57,17 @@ namespace Solar.Rendering
         /// <summary>Draw a textured quad (corners CW from top-left a,b,c,d; UVs 0..1), tinted.
         /// Flushes the pending color triangles first so the sprite layers correctly within the
         /// same pass — no separate SpriteBatch needed and world z-order is preserved.</summary>
-        public void TexturedQuad(Texture2D tex, Vector2 a, Vector2 b, Vector2 c, Vector2 d, Color tint)
+        public void TexturedQuad(Texture2D tex, Vector2 a, Vector2 b, Vector2 c, Vector2 d, Color tint, bool flipX = false)
         {
             if (tex == null) return;
             Flush();
-            _tv[0] = new VertexPositionColorTexture(new Vector3(a, 0), tint, new Vector2(0, 0));
-            _tv[1] = new VertexPositionColorTexture(new Vector3(b, 0), tint, new Vector2(1, 0));
-            _tv[2] = new VertexPositionColorTexture(new Vector3(c, 0), tint, new Vector2(1, 1));
-            _tv[3] = new VertexPositionColorTexture(new Vector3(a, 0), tint, new Vector2(0, 0));
-            _tv[4] = new VertexPositionColorTexture(new Vector3(c, 0), tint, new Vector2(1, 1));
-            _tv[5] = new VertexPositionColorTexture(new Vector3(d, 0), tint, new Vector2(0, 1));
+            float u0 = flipX ? 1 : 0, u1 = flipX ? 0 : 1;   // mirror horizontally by swapping the U coords
+            _tv[0] = new VertexPositionColorTexture(new Vector3(a, 0), tint, new Vector2(u0, 0));
+            _tv[1] = new VertexPositionColorTexture(new Vector3(b, 0), tint, new Vector2(u1, 0));
+            _tv[2] = new VertexPositionColorTexture(new Vector3(c, 0), tint, new Vector2(u1, 1));
+            _tv[3] = new VertexPositionColorTexture(new Vector3(a, 0), tint, new Vector2(u0, 0));
+            _tv[4] = new VertexPositionColorTexture(new Vector3(c, 0), tint, new Vector2(u1, 1));
+            _tv[5] = new VertexPositionColorTexture(new Vector3(d, 0), tint, new Vector2(u0, 1));
             _texFx.Texture = tex;
             _texFx.CurrentTechnique.Passes[0].Apply();
             _gd.DrawUserPrimitives(PrimitiveType.TriangleList, _tv, 0, 2);

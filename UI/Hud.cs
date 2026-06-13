@@ -314,26 +314,57 @@ namespace Solar.UI
                 }
             }
 
-            // ---- activatable modules panel (right, below the maneuver panel) ----
+            // ---- module status panel (right, below the maneuver panel): an icon grid split into
+            // toggleable modules (clickable) and always-on systems (status only). Each tile is lit when
+            // the module is currently functioning and dimmed when not, with a green/red status border. ----
             if (!v.Destroyed)
             {
-                var acts = new List<ModuleInstance>();
-                foreach (var p in v.Parts)
+                var toggle = new List<ModuleInstance>();
+                var systems = new List<ModuleInstance>();
+                foreach (var p in v.AllParts())
                     foreach (var m in p.Modules)
-                        if (m.Def.Activatable) acts.Add(m);
-                if (acts.Count > 0)
+                        (m.Def.Activatable ? toggle : systems).Add(m);
+
+                if (toggle.Count > 0 || systems.Count > 0)
                 {
-                    var rp = new Rectangle(w - 250, 268, 240, acts.Count * 24 + 30);
+                    const int tile = 30, gap = 6, cols = 6, pad = 10, labelH = 18;
+                    int innerW = cols * tile + (cols - 1) * gap;
+                    int pw2 = innerW + pad * 2;
+                    int Rows(int n) => n == 0 ? 0 : (n + cols - 1) / cols;
+                    int bodyH = 6;
+                    if (toggle.Count > 0) bodyH += labelH + Rows(toggle.Count) * (tile + gap);
+                    if (systems.Count > 0) bodyH += labelH + Rows(systems.Count) * (tile + gap);
+                    var rp = new Rectangle(w - pw2 - 10, 268, pw2, bodyH + 6);
                     UiDraw.Panel(pb, rp);
-                    sb.DrawString(f, "MODULES  [G] solar", new Vector2(rp.X + 10, rp.Y + 6), UiDraw.Accent);
-                    int my = rp.Y + 28;
-                    foreach (var m in acts)
+
+                    ModuleInstance tip = null;   // hovered module, tooltip painted after the whole grid
+                    int gy = rp.Y + 6;
+
+                    void Group(string title, List<ModuleInstance> mods, bool clickable)
                     {
-                        string label = $"{m.Def.Name}: {(m.Active ? "ON" : "OFF")}";
-                        if (UiDraw.Button(pb, sb, f, new Rectangle(rp.X + 10, my, rp.Width - 20, 22), label, ctx.Input))
-                            m.Active = !m.Active;
-                        my += 24;
+                        if (mods.Count == 0) return;
+                        sb.DrawString(f, title, new Vector2(rp.X + pad, gy), UiDraw.Accent);
+                        gy += labelH;
+                        for (int i = 0; i < mods.Count; i++)
+                        {
+                            var m = mods[i];
+                            int col = i % cols, row = i / cols;
+                            var tr = new Rectangle(rp.X + pad + col * (tile + gap), gy + row * (tile + gap), tile, tile);
+                            bool func = v.ModuleFunctioning(m, ctx.Clock.UT, ctx.Universe);
+                            pb.FillRect(tr, new Color(18, 26, 40, 230));
+                            UiDraw.Icon(pb, ctx.Textures?.Module(m.Def.Id), new Rectangle(tr.X + 2, tr.Y + 2, tile - 4, tile - 4), m.Def.Tint, !func);
+                            pb.RectOutline(tr, 2, func ? UiDraw.StatusOn : UiDraw.StatusOff);
+                            bool hover = tr.Contains((int)ctx.Input.MousePos.X, (int)ctx.Input.MousePos.Y);
+                            if (hover) tip = m;
+                            if (hover && clickable && ctx.Input.LeftClick) m.Active = !m.Active;
+                        }
+                        gy += Rows(mods.Count) * (tile + gap);
                     }
+
+                    Group("MODULES  [G] solar", toggle, true);
+                    Group("SYSTEMS", systems, false);
+
+                    if (tip != null) UiDraw.ModuleTooltip(pb, sb, f, tip.Def, ctx.Input.MousePos, w, h);
                 }
             }
 

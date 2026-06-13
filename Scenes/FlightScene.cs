@@ -269,18 +269,49 @@ namespace Solar.Scenes
                 if (inp.Pressed(Keys.H)) CycleSas();
                 if (inp.Pressed(Keys.R)) _vessel.RcsEnabled = !_vessel.RcsEnabled;
                 _vessel.RcsCommand = Vec2d.Zero;
-                if (!_vessel.Landed)
+                if (_vessel.Landed)
                 {
-                    double turn = _vessel.TurnRate * realDt;
-                    bool manual = inp.Down(Keys.A) || inp.Down(Keys.Left) || inp.Down(Keys.D) || inp.Down(Keys.Right);
-                    if (inp.Down(Keys.A) || inp.Down(Keys.Left)) _vessel.Heading += turn;
-                    if (inp.Down(Keys.D) || inp.Down(Keys.Right)) _vessel.Heading -= turn;
-                    if (manual) _sas = SasMode.Off;          // manual input releases the hold
+                    _vessel.AngularVelocity = 0;             // no spinning while sitting on the surface
+                }
+                else
+                {
+                    // torque/inertia attitude model: input accelerates the angular velocity (capped),
+                    // which then carries as momentum in vacuum and is bled off by drag in atmosphere.
+                    var rotBody = _vessel.Body;
+                    bool rotInAtmo = rotBody?.Atmo != null && _vessel.Altitude < rotBody.Atmo.Top + 500;
+                    double alpha = _vessel.ControlTorque / _vessel.MomentOfInertia;   // available angular accel (rad/s^2)
+                    double maxRate = _vessel.MaxTurnRate;
+                    bool left = inp.Down(Keys.A) || inp.Down(Keys.Left);
+                    bool right = inp.Down(Keys.D) || inp.Down(Keys.Right);
+
+                    if (left ^ right)
+                    {
+                        double dir = left ? 1 : -1;          // +CCW
+                        _vessel.AngularVelocity = Math.Clamp(_vessel.AngularVelocity + dir * alpha * realDt, -maxRate, maxRate);
+                        _sas = SasMode.Off;                  // manual input releases the hold
+                    }
                     else if (_sas != SasMode.Off && SasHoldAngle(clock.UT) is double hold)
                     {
+                        // steer the angular velocity toward the hold angle with the available torque
                         double diff = Kepler.WrapPi(hold - _vessel.Heading);
-                        _vessel.Heading += Math.Clamp(diff, -turn, turn);
+                        double desired = Math.Clamp(diff * 3.0, -maxRate, maxRate);
+                        double dv = Math.Clamp(desired - _vessel.AngularVelocity, -alpha * realDt, alpha * realDt);
+                        _vessel.AngularVelocity += dv;
                     }
+                    else if (rotInAtmo)
+                    {
+                        // aerodynamic damping bleeds rotation toward zero (stronger with dynamic pressure)
+                        double damp = 0.6 + _vessel.DynamicPressure / 2000.0;
+                        _vessel.AngularVelocity *= Math.Max(0, 1 - damp * realDt);
+                    }
+                    // else: vacuum coast — angular velocity persists as momentum
+
+                    // advance heading from angular velocity (real-time paced); high time warp freezes rotation
+                    if (clock.WarpIndex <= SimClock.PhysicsMaxIndex)
+                        _vessel.Heading += _vessel.AngularVelocity * realDt;
+                    else
+                        _vessel.AngularVelocity = 0;
+
                     // RCS translation: I/K fore-aft (along Up axis), J/L left-right
                     double rx = 0, ry = 0;
                     if (inp.Down(Keys.I)) ry += 1;

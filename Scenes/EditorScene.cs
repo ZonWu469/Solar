@@ -47,6 +47,8 @@ namespace Solar.Scenes
         private PartDef _tooltipDef;
         private StackEntry _tooltipEntry;   // set when hovering a placed part, so the tooltip shows its fitted modules
         private Vector2 _tooltipAt;
+        private ModuleDef _modTipDef;       // set when hovering a fitted-slot module row, so its tooltip paints on top
+        private Vector2 _modTipAt;
         // screen rects of radial sub-stack parts, rebuilt each frame by DrawRadials for hit-testing
         private readonly List<(int stackIndex, int mountIndex, int partIndex, Rectangle rect)> _radialHits = new();
 
@@ -70,8 +72,6 @@ namespace Solar.Scenes
             ("Comms",         new[] { ModuleKind.Antenna }),
             ("Resource",      new[] { ModuleKind.Harvester, ModuleKind.Tank }),
             ("Control",       new[] { ModuleKind.ReactionWheel, ModuleKind.RCS }),
-            ("Thermal",       new[] { ModuleKind.Radiator }),
-            ("Shielding",     new[] { ModuleKind.Shield }),
             ("Storage",       new[] { ModuleKind.Storage }),
             ("Utility",       new[] { ModuleKind.LandingLeg, ModuleKind.Light }),
         };
@@ -156,12 +156,13 @@ namespace Solar.Scenes
             }
             else
             {
-                _tooltipDef = null; _tooltipEntry = null;
+                _tooltipDef = null; _tooltipEntry = null; _modTipDef = null;
                 if (UiDraw.Button(pb, sb, f, new Rectangle(PaletteW + 180, 38, 110, 26), "R&D  [R]", inp)) _showRnd = true;
                 DrawPalette(pb, sb, f, inp, h);
                 DrawStack(pb, sb, f, inp, w, h);
                 DrawStats(pb, sb, f, inp, w, h);
                 if (_tooltipDef != null) DrawTooltip(pb, sb, f, _tooltipDef, _tooltipEntry, _tooltipAt, w, h);
+                if (_modTipDef != null) UiDraw.ModuleTooltip(pb, sb, f, _modTipDef, _modTipAt, w, h);
             }
 
             pb.End();
@@ -386,6 +387,7 @@ namespace Solar.Scenes
                 var rect = new Rectangle((int)(cx - pw / 2), (int)y, (int)pw, (int)ph);
                 DrawPartShape(pb, d, cx, y, pw, ph, Ctx.Textures);
                 DrawRadials(pb, i, Stack[i], cx, y, pw, ph, scale);
+                DrawModuleSprites(pb, Stack[i], cx, y, pw, ph);
                 if (Stack[i].Modules.Count > 0)
                     pb.FillCircle(new Vector2(rect.Right + 8, rect.Center.Y), 4, new Color(120, 210, 255));
                 bool hover = rect.Contains((int)inp.MousePos.X, (int)inp.MousePos.Y);
@@ -582,7 +584,7 @@ namespace Solar.Scenes
                     {
                         var rd = mount.Parts[pi];
                         float rw = (float)(rd.Width * scale), rh = (float)(rd.Height * scale);
-                        DrawPartShape(pb, rd, side, yy, rw, rh, Ctx.Textures);
+                        DrawPartShape(pb, rd, side, yy, rw, rh, Ctx.Textures, flipX: s < 0);   // mirror the left column
                         _radialHits.Add((stackIndex, mi, pi, new Rectangle((int)(side - rw / 2), (int)yy, (int)rw, (int)rh)));
                         yy += rh;
                     }
@@ -608,7 +610,46 @@ namespace Solar.Scenes
             DrawPartShape(pb, d, cx, y, pw, ph, tex);
         }
 
-        private static void DrawPartShape(Rendering.PrimitiveBatch pb, PartDef d, float cx, float y, float pw, float ph, Rendering.TextureStore tex = null)
+        /// <summary>Overlay the icon sprites of fitted deployable modules (solar wings, drill, light) on a
+        /// stack part in the VAB, so the assembled ship previews how it will look deployed in flight.</summary>
+        private void DrawModuleSprites(Rendering.PrimitiveBatch pb, StackEntry e, float cx, float y, float pw, float ph)
+        {
+            float my = y + ph / 2f;
+            foreach (var m in e.Modules)
+            {
+                var t = Ctx.Textures?.Module(m.Id);
+                if (t == null) continue;
+                switch (m.Kind)
+                {
+                    case ModuleKind.SolarPanel:
+                    {
+                        float pl = pw * 1.3f, hh = Math.Max(3f, ph * 0.35f);
+                        pb.TexturedQuad(t, new Vector2(cx + pw / 2, my - hh), new Vector2(cx + pw / 2 + pl, my - hh),
+                                           new Vector2(cx + pw / 2 + pl, my + hh), new Vector2(cx + pw / 2, my + hh), Color.White, false);
+                        pb.TexturedQuad(t, new Vector2(cx - pw / 2, my - hh), new Vector2(cx - pw / 2 - pl, my - hh),
+                                           new Vector2(cx - pw / 2 - pl, my + hh), new Vector2(cx - pw / 2, my + hh), Color.White, true);
+                        break;
+                    }
+                    case ModuleKind.Harvester:
+                    {
+                        float s = Math.Min(pw, ph) * 0.5f;
+                        pb.TexturedQuad(t, new Vector2(cx - s / 2, my - s / 2), new Vector2(cx + s / 2, my - s / 2),
+                                           new Vector2(cx + s / 2, my + s / 2), new Vector2(cx - s / 2, my + s / 2), Color.White);
+                        break;
+                    }
+                    case ModuleKind.Light:
+                    {
+                        pb.FillCircle(new Vector2(cx, my), Math.Max(4f, pw * 0.5f), new Color(255, 245, 200, 70));
+                        float s = Math.Min(pw, ph) * 0.4f;
+                        pb.TexturedQuad(t, new Vector2(cx - s / 2, my - s / 2), new Vector2(cx + s / 2, my - s / 2),
+                                           new Vector2(cx + s / 2, my + s / 2), new Vector2(cx - s / 2, my + s / 2), Color.White);
+                        break;
+                    }
+                }
+            }
+        }
+
+        private static void DrawPartShape(Rendering.PrimitiveBatch pb, PartDef d, float cx, float y, float pw, float ph, Rendering.TextureStore tex = null, bool flipX = false)
         {
             Color dark = Rendering.PlanetRenderer.Darken(d.Tint, 0.4f);
             Color light = Rendering.PlanetRenderer.Lighten(d.Tint, 0.12f);
@@ -617,7 +658,7 @@ namespace Solar.Scenes
             var pt = tex?.Part(d.Id);
             if (pt != null)
             {
-                pb.TexturedQuad(pt, new Vector2(l, y), new Vector2(r, y), new Vector2(r, b), new Vector2(l, b), Color.White);
+                pb.TexturedQuad(pt, new Vector2(l, y), new Vector2(r, y), new Vector2(r, b), new Vector2(l, b), Color.White, flipX);
                 return;
             }
 
@@ -795,8 +836,17 @@ namespace Solar.Scenes
                 for (int i = 0; i < entry.Modules.Count; i++)
                 {
                     var em = entry.Modules[i];
-                    string label = em.SlotCost > 1 ? $" {em.Name} [{em.SlotCost}]" : $" {em.Name}";
-                    Str("-" + label, x, y + 3, Color.White);
+                    if (Vis(y, 22))
+                    {
+                        var iconR = new Rectangle((int)x, (int)y, 20, 20);
+                        UiDraw.Icon(pb, Ctx.Textures.Module(em.Id), iconR, em.Tint);
+                        pb.RectOutline(iconR, 1, new Color(50, 66, 92));
+                        sb.DrawString(f, em.Name, new Vector2(x + 26, y + 2), Color.White);
+                        if (em.SlotCost > 1)
+                            UiDraw.SmallText(sb, f, $"[{em.SlotCost}]", new Vector2(w - 96, y + 4), UiDraw.TextDim);
+                        var rowR = new Rectangle((int)x, (int)y, w - 70 - (int)x, 22);
+                        if (rowR.Contains((int)inp.MousePos.X, (int)inp.MousePos.Y)) { _modTipDef = em; _modTipAt = inp.MousePos; }
+                    }
                     if (Btn(new Rectangle(w - 64, (int)y, 38, 22), "del")) removeIdx = i;
                     y += 26;
                 }
@@ -1006,7 +1056,7 @@ namespace Solar.Scenes
                 if (list.Count > 0) groups.Add((catName, list));
             }
 
-            const int catHeaderH = 22, rowH = 30, headerH = 56, footerH = 30;
+            const int catHeaderH = 22, rowH = 34, headerH = 56, footerH = 30;
             // compute content height
             int contentH = 0;
             foreach (var g in groups) { contentH += catHeaderH + g.Modules.Count * rowH; }
@@ -1046,44 +1096,49 @@ namespace Solar.Scenes
                         var rowR = new Rectangle(px + 16, (int)yc + 2, pw - 32, rowH - 4);
                         bool avail = Progression.TechTree.ModuleAvailable(gs, m.Name);
                         bool fits = usedSlots + m.SlotCost <= totalSlots;
-                        string slotTag = m.SlotCost > 1 ? $" [{m.SlotCost} slots]" : "";
+                        bool selectable = avail && fits && !full;
+                        bool hover = selectable && rowR.Contains((int)inp.MousePos.X, (int)inp.MousePos.Y);
 
-                        if (avail && fits && !full)
+                        // row background + outline by state
+                        Color bg = selectable ? (hover ? new Color(60, 95, 140, 235) : new Color(36, 56, 84, 230))
+                                 : !avail ? new Color(24, 30, 40, 220) : new Color(28, 40, 56, 220);
+                        pb.FillRect(rowR, bg);
+                        pb.RectOutline(rowR, 1, selectable ? UiDraw.Accent : UiDraw.PanelBorder);
+
+                        // col 1: icon (dimmed when not selectable)
+                        var iconR = new Rectangle(rowR.X + 6, rowR.Y + (rowR.Height - 26) / 2, 26, 26);
+                        UiDraw.Icon(pb, Ctx.Textures.Module(m.Id), iconR, m.Tint, !selectable);
+                        pb.RectOutline(iconR, 1, new Color(50, 66, 92));
+
+                        // col 2: name
+                        Color nameC = selectable ? Color.White : !avail ? new Color(120, 130, 145) : UiDraw.TextDim;
+                        sb.DrawString(f, m.Name, new Vector2(iconR.Right + 10, rowR.Y + 6), nameC);
+
+                        // col 3 (right-aligned): "cost" = slots + mass, or the gating reason
+                        if (!avail)
                         {
-                            bool hover = rowR.Contains((int)inp.MousePos.X, (int)inp.MousePos.Y);
-                            pb.FillRect(rowR, hover ? new Color(60, 95, 140, 235) : new Color(36, 56, 84, 230));
-                            pb.RectOutline(rowR, 1, UiDraw.Accent);
-                            sb.DrawString(f, $"{m.Name}{slotTag}  -  {m.StatLine}", new Vector2(rowR.X + 10, rowR.Y + 6), Color.White);
-                            if (hover)
-                            {
-                                // draw tooltip with description
-                                string desc = !string.IsNullOrEmpty(m.Description) ? m.Description : m.StatLine;
-                                DrawModuleTooltip(pb, sb, f, m, new Vector2(rowR.Right + 8, rowR.Y), pw, bodyBot, w, h);
-                                if (inp.LeftClick) { entry.Modules.Add(m); _showModulePicker = false; }
-                            }
-                        }
-                        else if (avail && !fits)   // unlocked but too big for remaining slots
-                        {
-                            pb.FillRect(rowR, new Color(28, 40, 56, 220));
-                            pb.RectOutline(rowR, 1, UiDraw.PanelBorder);
-                            sb.DrawString(f, $"{m.Name}{slotTag}  -  {m.StatLine}", new Vector2(rowR.X + 10, rowR.Y + 6), UiDraw.TextDim);
-                            string why = $"needs {m.SlotCost} free slot(s)";
-                            sb.DrawString(f, why, new Vector2(rowR.Right - f.MeasureString(why).X - 10, rowR.Y + 16), new Color(255, 150, 90));
-                        }
-                        else if (avail && full)
-                        {
-                            pb.FillRect(rowR, new Color(28, 40, 56, 220));
-                            pb.RectOutline(rowR, 1, UiDraw.PanelBorder);
-                            sb.DrawString(f, $"{m.Name}{slotTag}  -  {m.StatLine}", new Vector2(rowR.X + 10, rowR.Y + 6), UiDraw.TextDim);
-                        }
-                        else              // tech-locked
-                        {
-                            pb.FillRect(rowR, new Color(24, 30, 40, 220));
-                            pb.RectOutline(rowR, 1, UiDraw.PanelBorder);
                             string node = Progression.TechTree.Node(Progression.TechTree.TechForModule(m.Name))?.Title ?? "R&D";
-                            sb.DrawString(f, m.Name, new Vector2(rowR.X + 10, rowR.Y + 6), new Color(120, 130, 145));
                             string need = $"needs {node}";
-                            sb.DrawString(f, need, new Vector2(rowR.Right - f.MeasureString(need).X - 10, rowR.Y + 6), new Color(160, 135, 105));
+                            sb.DrawString(f, need, new Vector2(rowR.Right - f.MeasureString(need).X - 10, rowR.Y + 8), new Color(160, 135, 105));
+                        }
+                        else if (!fits)
+                        {
+                            string why = $"needs {m.SlotCost} free slot(s)";
+                            sb.DrawString(f, why, new Vector2(rowR.Right - f.MeasureString(why).X - 10, rowR.Y + 8), new Color(255, 150, 90));
+                        }
+                        else
+                        {
+                            string slots = m.SlotCost > 1 ? $"{m.SlotCost} slots" : "1 slot";
+                            string massS = $"{m.DryMass:0} kg";
+                            float sw = f.MeasureString(slots).X * 0.8f, mw = f.MeasureString(massS).X * 0.8f;
+                            UiDraw.SmallText(sb, f, slots, new Vector2(rowR.Right - 10 - sw, rowR.Y + 3), UiDraw.TextDim);
+                            UiDraw.SmallText(sb, f, massS, new Vector2(rowR.Right - 10 - mw, rowR.Y + 16), UiDraw.TextDim);
+                        }
+
+                        if (hover)
+                        {
+                            UiDraw.ModuleTooltip(pb, sb, f, m, inp.MousePos, w, h);
+                            if (inp.LeftClick) { entry.Modules.Add(m); _showModulePicker = false; }
                         }
                     }
                     yc += rowH;
@@ -1093,23 +1148,6 @@ namespace Solar.Scenes
             string footer = full ? "all slots full  -  [Esc] close"
                           : maxScroll > 0 ? "[Esc] close   -   scroll for more" : "[Esc] close";
             sb.DrawString(f, footer, new Vector2(px + 20, py + ph - 24), UiDraw.TextDim);
-        }
-
-        /// <summary>Small tooltip showing the module's flavor description.</summary>
-        private static void DrawModuleTooltip(Rendering.PrimitiveBatch pb, Microsoft.Xna.Framework.Graphics.SpriteBatch sb,
-                                              Microsoft.Xna.Framework.Graphics.SpriteFont f, ModuleDef m, Vector2 anchor,
-                                              int pw, int bodyBot, int w, int h)
-        {
-            string desc = !string.IsNullOrEmpty(m.Description) ? m.Description : m.StatLine;
-            float tw = Math.Min(f.MeasureString(desc).X, 260);
-            float lh = f.MeasureString("X").Y + 4;
-            int bw = (int)tw + 16, bh = (int)lh + 10;
-            int bx = (int)anchor.X, by = (int)anchor.Y;
-            if (bx + bw > w - 4) bx = (int)anchor.X - bw - 12;
-            if (by + bh > h - 4) by = h - 4 - bh;
-            if (bx < 4) bx = 4; if (by < 4) by = 4;
-            UiDraw.Panel(pb, new Rectangle(bx, by, bw, bh));
-            sb.DrawString(f, desc, new Vector2(bx + 8, by + 5), new Color(200, 215, 230));
         }
 
         /// <summary>Living crew not yet assigned to any seat in the current design.</summary>

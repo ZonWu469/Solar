@@ -67,12 +67,6 @@ namespace Solar.Parts
             // ---- NEW: near-future modules (Progression/TechTree.cs for unlock nodes) ----
             // advanced power
             new ModuleDef { Name = "Stirling RTG",       Id = "stirling-rtg",       Description = "Advanced radioisotope generator with a Stirling-cycle converter. Higher efficiency than standard RTGs.", Kind = ModuleKind.Rtg,        DryMass = 120, Activatable = false, EcProduce = 4.0, Tint = new Color(210, 130, 60) },
-            // thermal
-            new ModuleDef { Name = "Radiator Panel",     Id = "radiator-panel",     Description = "Passive thermal radiator. Dissipates waste heat from high-power systems like nuclear reactors.", Kind = ModuleKind.Radiator,  DryMass = 30,  Activatable = false, Tint = new Color(80, 90, 120) },
-            new ModuleDef { Name = "Large Radiator",     Id = "large-radiator",     Description = "Heavy-duty radiator array. Essential for managing the thermal output of advanced propulsion.", Kind = ModuleKind.Radiator,  DryMass = 80,  Activatable = false, SlotCost = 2, Tint = new Color(70, 80, 110) },
-            // shielding
-            new ModuleDef { Name = "Micrometeoroid Shield", Id = "micrometeoroid-shield", Description = "Whipple shield plating. Protects against micrometeoroid impacts during long cruises.", Kind = ModuleKind.Shield, DryMass = 200, Activatable = false, SlotCost = 2, Tint = new Color(140, 150, 170) },
-            new ModuleDef { Name = "Radiation Shield",   Id = "radiation-shield",   Description = "Heavy radiation shielding. Protects crew from solar particle events and cosmic rays on interplanetary journeys.", Kind = ModuleKind.Shield, DryMass = 350, Activatable = false, SlotCost = 3, Tint = new Color(160, 170, 190) },
             // advanced life support
             new ModuleDef { Name = "CO₂ Scrubber",       Id = "co2-scrubber",       Description = "Advanced CO₂ recycling system. Regenerates breathable oxygen from cabin atmosphere.", Kind = ModuleKind.LifeSupport, DryMass = 180, Activatable = true, OxygenRegen = 1.2, EcDraw = 1.5, SlotCost = 2, Tint = new Color(90, 200, 140) },
             new ModuleDef { Name = "Water Recycler",     Id = "water-recycler",     Description = "Purifies wastewater back into drinkable water. Dramatically extends crew endurance.", Kind = ModuleKind.LifeSupport, DryMass = 200, Activatable = true, WaterRegen = 0.8, EcDraw = 2.0, SlotCost = 2, Tint = new Color(80, 180, 210) },

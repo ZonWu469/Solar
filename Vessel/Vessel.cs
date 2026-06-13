@@ -17,6 +17,7 @@ namespace Solar.Vessels
         public Vec2d Position;
         public Vec2d Velocity;
         public double Heading = Math.PI / 2;
+        public double AngularVelocity;   // rad/s, signed (+ CCW). Persists as momentum in vacuum; damped in atmosphere.
         public double Throttle;
         public bool OnRails;
         public OrbitalElements Orbit;
@@ -109,7 +110,7 @@ namespace Solar.Vessels
         }
 
         /// <summary>Count of fitted reaction-wheel modules. They provide attitude authority in vacuum,
-        /// but only while the vessel has electric charge (see <see cref="TurnRate"/>).</summary>
+        /// but only while the vessel has electric charge (see <see cref="ControlTorque"/>).</summary>
         public int ReactionWheels
         {
             get { int n = 0; foreach (var p in AllParts()) foreach (var m in p.Modules) if (m.Def.Kind == ModuleKind.ReactionWheel) n++; return n; }
@@ -122,20 +123,37 @@ namespace Solar.Vessels
             get { double rho = Body?.Atmo?.DensityAt(Altitude) ?? 0; return 0.5 * rho * Velocity.LengthSquared; }
         }
 
-        /// <summary>Rotation rate in rad/s, a sum of gated authorities: a modest built-in command rate
-        /// (heavier rockets turn slower), reaction wheels that work only with electric charge, and fins
-        /// that bite only in atmosphere (scaled by dynamic pressure). A powerless, finless craft in
-        /// vacuum is left with just the small built-in rate, so wheels/RCS genuinely matter.</summary>
-        public double TurnRate
+        /// <summary>Approximate moment of inertia (kg·m²) of the stack about its center, modeled as a
+        /// slender box of the total mass with the stack's height and widest part. Heavier and longer
+        /// craft resist rotation more, so angular acceleration falls off with size and mass.</summary>
+        public double MomentOfInertia
         {
             get
             {
-                double inherent = Math.Clamp(0.15 + 12000.0 / (TotalMass + 10000.0), 0.2, 0.8);
-                double wheels = ElectricCharge > 0 ? 0.6 * ReactionWheels : 0;
-                double fins = HasFins ? 0.5 * Math.Clamp(DynamicPressure / 4000.0, 0, 1) : 0;
-                return inherent + wheels + fins;
+                double maxW = 0;
+                foreach (var p in Parts) maxW = Math.Max(maxW, p.Def.Width);
+                double L = Math.Max(TotalHeight, 1), W = Math.Max(maxW, 1);
+                return Math.Max(TotalMass * (L * L + W * W) / 12.0, 1);
             }
         }
+
+        /// <summary>Total attitude-control torque (N·m): a small built-in command authority, reaction
+        /// wheels (only while powered), and aerodynamic fins (only in atmosphere, scaled by dynamic
+        /// pressure). Angular acceleration is this divided by <see cref="MomentOfInertia"/>.</summary>
+        public double ControlTorque
+        {
+            get
+            {
+                double baseT = 6000.0;                                                   // small inherent/RCS authority
+                double wheels = ElectricCharge > 0 ? 45000.0 * ReactionWheels : 0;        // gyros, only with power
+                double fins = HasFins ? 30000.0 * Math.Clamp(DynamicPressure / 4000.0, 0, 1) : 0;
+                return baseT + wheels + fins;
+            }
+        }
+
+        /// <summary>Rotation-rate ceiling (rad/s). Reaction wheels let the craft spin up faster and reach
+        /// a higher cap, but it stays bounded so fine attitude control is preserved.</summary>
+        public double MaxTurnRate => Math.Min(0.35 + 0.22 * (ElectricCharge > 0 ? ReactionWheels : 0), 1.6);
 
         /// <summary>Inclusive index ranges between decouplers (decouplers belong to no segment).</summary>
         public List<(int start, int end)> Segments()
@@ -391,7 +409,31 @@ namespace Solar.Vessels
                         case ModuleKind.ReactionWheel: draw += m.Def.EcDraw; break;
                         case ModuleKind.Science: if (m.Active) draw += m.Def.EcDraw; break;
                         case ModuleKind.Antenna: if (m.Active) draw += m.Def.EcDraw; break;
+                        case ModuleKind.Light: if (m.Active) draw += m.Def.EcDraw; break;
                     }
+            }
+        }
+
+        /// <summary>Whether a fitted module is currently doing its job, applying the same resource gates
+        /// (EC / fuel / landed / deployed) that <see cref="EcRates"/> uses. Drives the flight HUD status
+        /// lights, so keep the per-kind gates here in sync with EcRates. Passive parts with no on/off
+        /// concept (batteries, tanks, storage, landing legs) report true ("installed/ready").</summary>
+        public bool ModuleFunctioning(ModuleInstance m, double ut, Universe u)
+        {
+            bool ec = ElectricCharge > 0;
+            switch (m.Def.Kind)
+            {
+                case ModuleKind.Rtg: return true;                                  // passive generator, always on
+                case ModuleKind.SolarPanel: return m.Active && SolarFactor(ut, u) > 0;
+                case ModuleKind.FuelCell: return m.Active && TotalLiquidFuel > 0;
+                case ModuleKind.Harvester: return m.Active && Landed && ec;
+                case ModuleKind.ReactionWheel: return ec;
+                case ModuleKind.Science: return m.Active && ec;
+                case ModuleKind.Antenna: return m.Active && ec;
+                case ModuleKind.Light: return m.Active && ec;
+                case ModuleKind.LifeSupport: return (!m.Def.Activatable || m.Active) && (m.Def.EcDraw <= 0 || ec);
+                case ModuleKind.RCS: return RcsEnabled && Monoprop > 0 && ec;
+                default: return true;                                              // Battery / Tank / Storage / LandingLeg
             }
         }
 

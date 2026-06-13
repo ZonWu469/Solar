@@ -120,24 +120,52 @@ namespace Solar.Rendering
                     pb.FillCircle(canopy, 5.5f * pxPerM, new Color(235, 130, 60), PlanetRenderer.Darken(new Color(235, 130, 60), 0.3f));
                 }
 
-                // slot modules visible on the hull when deployed/active
+                // slot modules visible on the hull when deployed/active: drawn from the module's icon
+                // texture where one exists, falling back to the simple procedural shapes otherwise
                 if (!v.IsDebris && p.Modules.Count > 0)
                 {
-                    bool solar = false, drill = false;
+                    // a centered textured box in local coords (lx,ly), size bw x bh meters
+                    void IconBox(Microsoft.Xna.Framework.Graphics.Texture2D t, float lx, float ly, float bw, float bh)
+                        => pb.TexturedQuad(t, P(lx - bw / 2, ly + bh / 2), P(lx + bw / 2, ly + bh / 2),
+                                              P(lx + bw / 2, ly - bh / 2), P(lx - bw / 2, ly - bh / 2), Color.White);
+
                     foreach (var mod in p.Modules)
                     {
-                        if (mod.Active && mod.Def.Kind == ModuleKind.SolarPanel) solar = true;
-                        if (mod.Active && mod.Def.Kind == ModuleKind.Harvester) drill = true;
+                        if (!mod.Active) continue;
+                        var mtex = tex?.Module(mod.Def.Id);
+                        switch (mod.Def.Kind)
+                        {
+                            case ModuleKind.SolarPanel:
+                            {
+                                float my = y + h * 0.5f, pl = w * 1.3f, ph2 = Math.Max(0.5f, h * 0.35f);
+                                if (mtex != null)
+                                {
+                                    // two wings; the left one mirrored so the right-oriented art reads correctly
+                                    pb.TexturedQuad(mtex, P(-w / 2, my + ph2), P(-w / 2 - pl, my + ph2), P(-w / 2 - pl, my - ph2), P(-w / 2, my - ph2), Color.White, true);
+                                    pb.TexturedQuad(mtex, P(w / 2, my + ph2), P(w / 2 + pl, my + ph2), P(w / 2 + pl, my - ph2), P(w / 2, my - ph2), Color.White, false);
+                                }
+                                else
+                                {
+                                    Color pc = new Color(70, 130, 235), pcd = PlanetRenderer.Darken(pc, 0.4f);
+                                    pb.Quad(P(-w / 2, my - ph2), P(-w / 2, my + ph2), P(-w / 2 - pl, my + ph2), P(-w / 2 - pl, my - ph2), pc, pc, pcd, pcd);
+                                    pb.Quad(P(w / 2, my - ph2), P(w / 2, my + ph2), P(w / 2 + pl, my + ph2), P(w / 2 + pl, my - ph2), pc, pc, pcd, pcd);
+                                }
+                                break;
+                            }
+                            case ModuleKind.Harvester:
+                                if (mtex != null) IconBox(mtex, 0, y + h * 0.5f, w * 0.5f, h * 0.5f);
+                                else pb.FillCircle(P(0, y + h * 0.5f), w * 0.16f * pxPerM, new Color(255, 180, 80));
+                                break;
+                            case ModuleKind.Light:
+                            {
+                                var lc = P(0, y + h * 0.5f);
+                                pb.FillCircle(lc, Math.Max(2f, w * 0.6f * pxPerM), new Color(255, 245, 200, 70));   // soft glow
+                                if (mtex != null) IconBox(mtex, 0, y + h * 0.5f, w * 0.45f, h * 0.45f);
+                                else pb.FillCircle(lc, Math.Max(1.5f, w * 0.12f * pxPerM), new Color(255, 250, 220));
+                                break;
+                            }
+                        }
                     }
-                    if (solar)
-                    {
-                        float my = y + h * 0.5f, pl = w * 1.3f, ph2 = Math.Max(0.5f, h * 0.35f);
-                        Color pc = new Color(70, 130, 235), pcd = PlanetRenderer.Darken(pc, 0.4f);
-                        pb.Quad(P(-w / 2, my - ph2), P(-w / 2, my + ph2), P(-w / 2 - pl, my + ph2), P(-w / 2 - pl, my - ph2), pc, pc, pcd, pcd);
-                        pb.Quad(P(w / 2, my - ph2), P(w / 2, my + ph2), P(w / 2 + pl, my + ph2), P(w / 2 + pl, my - ph2), pc, pc, pcd, pcd);
-                    }
-                    if (drill)
-                        pb.FillCircle(P(0, y + h * 0.5f), w * 0.16f * pxPerM, new Color(255, 180, 80));
                 }
 
                 // radial-mounted parts beside the hull: each mount is a vertical sub-stack mirrored on both
@@ -183,7 +211,8 @@ namespace Solar.Rendering
 
                     var rt = tex?.Part(rd.Id);
                     if (rt != null)
-                        pb.TexturedQuad(rt, P(xc - rw / 2, yb + rh), P(xc + rw / 2, yb + rh), P(xc + rw / 2, yb), P(xc - rw / 2, yb), Color.White);
+                        // textures are authored right-oriented; mirror the left-side (RadialSide 1) copy
+                        pb.TexturedQuad(rt, P(xc - rw / 2, yb + rh), P(xc + rw / 2, yb + rh), P(xc + rw / 2, yb), P(xc - rw / 2, yb), Color.White, r.RadialSide != 0);
                     else if (rd.Kind == PartKind.SolidBooster)
                     {
                         pb.Tri(P(xc, yb + rh), P(xc - rw / 2, yb + rh * 0.9f), P(xc + rw / 2, yb + rh * 0.9f), rlight);
