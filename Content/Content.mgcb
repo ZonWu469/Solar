@@ -51,6 +51,30 @@
 /processorParam:TextureFormat=Color
 /build:Textures/modules/antenna.png
 
+#begin Textures/modules/atmosphere-analyzer.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/atmosphere-analyzer.png
+
+#begin Textures/modules/barometer.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/barometer.png
+
 #begin Textures/modules/battery.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -183,6 +207,30 @@
 /processorParam:TextureFormat=Color
 /build:Textures/modules/cryo-tank.png
 
+#begin Textures/modules/deep-space-lab.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/deep-space-lab.png
+
+#begin Textures/modules/docking-sensor.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/docking-sensor.png
+
 #begin Textures/modules/drill.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -242,6 +290,18 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:Textures/modules/gigantor-xl.png
+
+#begin Textures/modules/gravioli-detector.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/gravioli-detector.png
 
 #begin Textures/modules/hydroponics-bay.png
 /importer:TextureImporter
@@ -315,6 +375,18 @@
 /processorParam:TextureFormat=Color
 /build:Textures/modules/ls-storage-pod.png
 
+#begin Textures/modules/magnetometer.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/magnetometer.png
+
 #begin Textures/modules/monoprop-tank.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -327,6 +399,18 @@
 /processorParam:TextureFormat=Color
 /build:Textures/modules/monoprop-tank.png
 
+#begin Textures/modules/mystery-goo.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/mystery-goo.png
+
 #begin Textures/modules/nuclear-reactor.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -338,6 +422,30 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:Textures/modules/nuclear-reactor.png
+
+#begin Textures/modules/ore-scanner.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/ore-scanner.png
+
+#begin Textures/modules/radiation-detector.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/radiation-detector.png
 
 #begin Textures/modules/rcs-thruster-block.png
 /importer:TextureImporter
@@ -387,6 +495,30 @@
 /processorParam:TextureFormat=Color
 /build:Textures/modules/rtg.png
 
+#begin Textures/modules/science-jr.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/science-jr.png
+
+#begin Textures/modules/seismic-accelerometer.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/seismic-accelerometer.png
+
 #begin Textures/modules/signal-booster.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -422,6 +554,18 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:Textures/modules/stirling-rtg.png
+
+#begin Textures/modules/thermometer.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/thermometer.png
 
 #begin Textures/modules/water-recycler.png
 /importer:TextureImporter
@@ -615,6 +759,18 @@
 /processorParam:TextureFormat=Color
 /build:Textures/parts/landing-gear.png
 
+#begin Textures/parts/main-hub.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/parts/main-hub.png
+
 #begin Textures/parts/mainsail.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -686,6 +842,18 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:Textures/parts/nuclear-lightbulb.png
+
+#begin Textures/parts/OLD_service-bay-1-7m.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/parts/OLD_service-bay-1-7m.png
 
 #begin Textures/parts/parachute.png
 /importer:TextureImporter

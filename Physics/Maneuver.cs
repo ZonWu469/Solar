@@ -20,6 +20,11 @@ namespace Solar.Physics
         public OrbitalElements Source;
         public bool HasSource;
 
+        // The primary body Source/result are relative to. Set by the projection walk every
+        // frame (so a node can live in a different SOI than the live vessel); runtime-only,
+        // not serialized. Consumers fall back to the live body when this is null.
+        public CelestialBody Body;
+
         // Once the burn time passes, the node's absolute world position is frozen here so it
         // stays visible (and correctly placed) regardless of later orbit or SOI changes.
         public bool Reached;

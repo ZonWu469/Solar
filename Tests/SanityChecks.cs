@@ -1054,6 +1054,71 @@ namespace Solar.Tests
                 Check("terrain wiring", sunSmooth && earthRelief);
             }
 
+            // 41. patched-conic handoff + child-frame node planning (powers placing map nodes on the
+            //     projected post-transition path): an orbit escaping the Moon's SOI hands off to Earth with
+            //     a continuous absolute state, and a prograde burn planned on a Moon-relative orbit raises
+            //     apoapsis only -- node math is frame-agnostic, so a node can live in any SOI.
+            {
+                var u = SolarSystemData.Create();
+                var earth = u["Earth"]; var moon = u["Moon"];
+
+                var r0 = new Vec2d(moon.Radius + 2.0e5, 0);
+                double vesc = Math.Sqrt(2 * moon.Mu / r0.Length);
+                var el = Kepler.ElementsFromState(r0, new Vec2d(0, vesc * 1.2), moon.Mu, 0);  // hyperbolic escape
+                var pred = TrajectoryPredictor.Predict(el, moon, 0);
+                bool escapes = pred.Type == TransitionType.Escape && pred.NextBody == earth
+                               && !double.IsNaN(pred.NextOrbit.A);
+                bool continuous = false;
+                if (escapes)
+                {
+                    Vec2d moonRel = Kepler.StateAtTime(el, pred.TransitionUT).pos;
+                    Vec2d viaMoon = moonRel + Kepler.StateAtTime(moon.Orbit, pred.TransitionUT).pos;  // Earth-relative
+                    Vec2d viaEarth = Kepler.StateAtTime(pred.NextOrbit, pred.TransitionUT).pos;
+                    continuous = (viaEarth - viaMoon).Length < 1e-5 * viaMoon.Length + 1.0;
+                }
+
+                var moonOrbit = new OrbitalElements { A = moon.Radius + 1e5, E = 0, ArgPe = 0, M0 = 0, Epoch = 0, Mu = moon.Mu, Dir = 1 };
+                double tPe = Kepler.TimeAtTrueAnomaly(moonOrbit, 0, 0);
+                var raised = new Maneuver { UT = tPe, Prograde = 50 }.ResultOrbit(moonOrbit, moon.Mu);
+                bool apRaised = raised.Apoapsis > moonOrbit.Apoapsis + 1
+                                && Math.Abs(raised.Periapsis - moonOrbit.Periapsis) < 1e-4 * moonOrbit.Periapsis;
+
+                Check("patched-conic node planning", escapes && continuous && apRaised);
+            }
+
+            // 30. science economy: an instrument's payout is data-driven (ModuleDef.ScienceValue) scaled by
+            //     situation and body, so different instruments yield different points in the same place.
+            {
+                var sciJr = Parts.ModuleCatalog.Get("Science Jr");     // ScienceValue 12
+                var goo = Parts.ModuleCatalog.Get("Mystery Goo");      // ScienceValue 8
+                // Science Jr landed on Moon: round(12 * 1.5 * 2.0) = 36; Mystery Goo: round(8 * 1.5 * 2.0) = 24
+                double jrPts = Solar.Scenes.FlightScene.SciPoints(sciJr, "landed", "Moon");
+                double gooPts = Solar.Scenes.FlightScene.SciPoints(goo, "landed", "Moon");
+                bool valuesOk = Math.Abs(jrPts - 36) < 1e-9 && Math.Abs(gooPts - 24) < 1e-9;
+                // instruments are not interchangeable, and situation/body change the payout
+                // (Science Jr high orbit at Earth: round(12 * 1.0 * 1.0) = 12, vs 36 landed on the Moon)
+                bool distinct = jrPts != gooPts
+                                && Solar.Scenes.FlightScene.SciPoints(sciJr, "high orbit", "Earth") == 12
+                                && Solar.Scenes.FlightScene.SciPoints(sciJr, "high orbit", "Earth") != jrPts;
+                Check("science value data-driven", valuesOk && distinct);
+            }
+
+            // 31. tech-tree coverage: every node's parts/modules resolve in the catalogs (so unlocking can't
+            //     reference a phantom), and every node has an R&D layout entry (so none goes invisible).
+            {
+                bool catalogOk = true;
+                foreach (var n in Progression.TechTree.Nodes)
+                {
+                    foreach (var p in n.Parts) if (Parts.PartCatalog.Get(p) == null) catalogOk = false;
+                    foreach (var m in n.Modules) if (Parts.ModuleCatalog.Get(m) == null) catalogOk = false;
+                }
+                var laidOut = new HashSet<string>();
+                foreach (var e in Scenes.RDScene.Layout) laidOut.Add(e.Id);
+                bool layoutOk = true;
+                foreach (var n in Progression.TechTree.Nodes) if (!laidOut.Contains(n.Id)) layoutOk = false;
+                Check("tech tree coverage", catalogOk && layoutOk);
+            }
+
             string res = $"Physics self-test: {pass}/{total} PASS";
             if (fails.Count > 0) res += "  FAILED: " + string.Join(", ", fails);
             return res;

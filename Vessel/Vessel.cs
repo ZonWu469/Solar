@@ -44,12 +44,13 @@ namespace Solar.Vessels
         public readonly List<string> RecentDeaths = new();
 
         // per-crew life-support consumption (units/s) and how long crew survive total deprivation
+        // TODO(balance.json): the four life-support constants below are global tunables.
         public const double OxygenPerCrew = 0.5;
         public const double WaterPerCrew = 0.2;
         public const double FoodPerCrew = 0.1;
         public const double LsDeathTime = 21600;  // 6 h of an empty resource kills one crew member
 
-        public const double G0 = 9.81;
+        public const double G0 = 9.81;   // TODO(balance.json): standard gravity used by the rocket equation
 
         public Vec2d Up => Vec2d.FromAngle(Heading);
         public double Altitude => Position.Length - Body.SurfaceRadiusAt(Position.Angle());
@@ -137,6 +138,20 @@ namespace Solar.Vessels
             get { int n = 0; foreach (var p in AllParts()) foreach (var m in p.Modules) if (m.Def.Kind == ModuleKind.ReactionWheel) n++; return n; }
         }
 
+        /// <summary>Total reaction-wheel torque (N*m), summed from each wheel module's data-driven
+        /// <see cref="ModuleDef.Torque"/> (modules.json). Gated on power by <see cref="ControlTorque"/>.</summary>
+        public double ReactionWheelTorque
+        {
+            get { double t = 0; foreach (var p in AllParts()) foreach (var m in p.Modules) if (m.Def.Kind == ModuleKind.ReactionWheel) t += m.Def.Torque; return t; }
+        }
+
+        /// <summary>Total rotational torque (N*m) RCS blocks contribute, from each block's data-driven
+        /// <see cref="ModuleDef.Torque"/>. Gated like translation in <see cref="ControlTorque"/>.</summary>
+        public double RcsTorque
+        {
+            get { double t = 0; foreach (var p in AllParts()) foreach (var m in p.Modules) if (m.Def.Kind == ModuleKind.RCS) t += m.Def.Torque; return t; }
+        }
+
         /// <summary>Dynamic pressure (Pa) on the vessel right now: zero in vacuum, rising with air
         /// density and speed. Drives how much authority aerodynamic fins provide.</summary>
         public double DynamicPressure
@@ -175,15 +190,16 @@ namespace Solar.Vessels
             get
             {
                 double podMin = PodControlAccel * MomentOfInertia;                        // size-independent minimum
-                double wheels = ElectricCharge > 0 ? 45000.0 * ReactionWheels : 0;        // gyros, only with power
-                double rcs = (RcsEnabled && Monoprop > 0 && ElectricCharge > 0) ? 8000.0 * RcsBlocks : 0;
-                double fins = HasFins ? 30000.0 * Math.Clamp(DynamicPressure / 4000.0, 0, 1) : 0;
+                double wheels = ElectricCharge > 0 ? ReactionWheelTorque : 0;             // gyros (per-module torque), only with power
+                double rcs = (RcsEnabled && Monoprop > 0 && ElectricCharge > 0) ? RcsTorque : 0;
+                double fins = HasFins ? 30000.0 * Math.Clamp(DynamicPressure / 4000.0, 0, 1) : 0;   // TODO(balance.json): fin torque scale
                 return podMin + wheels + rcs + fins;
             }
         }
 
         /// <summary>Rotation-rate ceiling (rad/s). Reaction wheels let the craft spin up faster and reach
         /// a higher cap, but it stays bounded so fine attitude control is preserved.</summary>
+        // TODO(balance.json): turn-rate base / per-wheel gain / ceiling are global tunables.
         public double MaxTurnRate => Math.Min(0.35 + 0.22 * (ElectricCharge > 0 ? ReactionWheels : 0), 1.6);
 
         /// <summary>Whether the craft can run attitude hold (SAS) at all: a fitted SAS-capable command
@@ -311,8 +327,8 @@ namespace Solar.Vessels
 
         // ----- RCS translation -----
 
-        public const double RcsThrustPerBlock = 1000.0;  // N of translation authority per RCS block
-        public const double RcsIsp = 240.0;              // s, monopropellant specific impulse
+        public const double RcsThrustPerBlock = 1000.0;  // N of translation authority per RCS block (per-module default)
+        public const double RcsIsp = 240.0;              // s, monopropellant specific impulse (per-module default)
 
         /// <summary>Count of fitted RCS thruster-block modules.</summary>
         public int RcsBlocks
@@ -320,10 +336,31 @@ namespace Solar.Vessels
             get { int n = 0; foreach (var p in AllParts()) foreach (var m in p.Modules) if (m.Def.Kind == ModuleKind.RCS) n++; return n; }
         }
 
+        /// <summary>Raw RCS translation thrust (N) from each block's data-driven <see cref="ModuleDef.RcsThrust"/>
+        /// (modules.json), before the enable/fuel/power gate.</summary>
+        public double RcsRawThrust
+        {
+            get { double t = 0; foreach (var p in AllParts()) foreach (var m in p.Modules) if (m.Def.Kind == ModuleKind.RCS) t += m.Def.RcsThrust; return t; }
+        }
+
+        /// <summary>Thrust-weighted effective monopropellant Isp (s) across the fitted RCS blocks; falls back
+        /// to <see cref="RcsIsp"/> when no blocks declare one.</summary>
+        public double RcsEffectiveIsp
+        {
+            get
+            {
+                double thrust = 0, flowPerG = 0;
+                foreach (var p in AllParts()) foreach (var m in p.Modules)
+                    if (m.Def.Kind == ModuleKind.RCS && m.Def.RcsThrust > 0 && m.Def.RcsIsp > 0)
+                    { thrust += m.Def.RcsThrust; flowPerG += m.Def.RcsThrust / m.Def.RcsIsp; }
+                return flowPerG > 0 ? thrust / flowPerG : RcsIsp;
+            }
+        }
+
         /// <summary>Total RCS translation thrust (N) available right now: blocks only count while RCS is
         /// enabled, monopropellant remains, and the avionics have power.</summary>
         public double RcsThrust =>
-            RcsEnabled && Monoprop > 0 && ElectricCharge > 0 ? RcsThrustPerBlock * RcsBlocks : 0;
+            RcsEnabled && Monoprop > 0 && ElectricCharge > 0 ? RcsRawThrust : 0;
 
         /// <summary>True while RCS is actively translating this frame (gates physics + warp).</summary>
         public bool RcsActive => RcsThrust > 0 && (RcsCommand.X != 0 || RcsCommand.Y != 0);
@@ -350,7 +387,7 @@ namespace Solar.Vessels
         {
             if (!RcsActive || dt <= 0) return;
             double cmd = Math.Min(1, RcsCommand.Length);
-            double flow = RcsThrust * cmd / (RcsIsp * G0);
+            double flow = RcsThrust * cmd / (RcsEffectiveIsp * G0);
             Monoprop = Math.Max(0, Monoprop - flow * dt);
         }
 

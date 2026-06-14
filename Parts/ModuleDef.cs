@@ -30,6 +30,10 @@ namespace Solar.Parts
         public double FuelCapacity;// extra fuel storage (monopropellant tank module)
         public double Range;       // antenna full-strength reach in metres (0 = not an antenna)
         public bool Relay;         // antenna rebroadcasts: it can relay signal to other vessels
+        public double ScienceValue;// base data worth for a Science-kind instrument (0 = use kind fallback)
+        public double Torque;      // rotational authority N*m contributed when powered (reaction wheel / RCS block)
+        public double RcsThrust;   // translation thrust N per RCS block (0 = use default)
+        public double RcsIsp;      // monopropellant specific impulse s for an RCS block (0 = use default)
         public Color Tint;
 
         private string RangeText => Range >= 1e9 ? $"{Range / 1e9:0.#} Gm"

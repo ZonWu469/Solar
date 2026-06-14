@@ -64,7 +64,7 @@ namespace Solar.Progression
             },
             new TechNode {
                 Id = "landing", Title = "Landing", Cost = 14, Prereqs = new[] { "start" },
-                Parts = new string[0],
+                Parts = new[] { "Landing Gear" },
                 Modules = new[] { "Landing Legs" },
                 Description = "Extendable legs absorb touchdown shock — essential for targeted landings on the Moon and beyond.",
             },
@@ -87,7 +87,7 @@ namespace Solar.Progression
             new TechNode {
                 Id = "survival", Title = "Life Support", Cost = 40, Prereqs = new[] { "electrics" },
                 Parts = new string[0],
-                Modules = new[] { "Life Support", "Drill" },
+                Modules = new[] { "Life Support", "Drill", "Snack Container" },
                 Description = "Life support systems keep your crew alive on long journeys. Drills refuel tanks by mining on the surface.",
             },
             new TechNode {
@@ -98,31 +98,31 @@ namespace Solar.Progression
             },
             new TechNode {
                 Id = "radial", Title = "Radial Construction", Cost = 30, Prereqs = new[] { "solids" },
-                Parts = new[] { "Radial Tank", "Stack Bi-Adapter" },
+                Parts = new[] { "Radial Tank", "Stack Bi-Adapter", "I-Beam", "Long I-Beam" },
                 Modules = new string[0],
                 Description = "Mount tanks and equipment to the sides of your stack. Stack adapters bridge different diameters.",
             },
             new TechNode {
                 Id = "heavy", Title = "Heavy Rocketry", Cost = 45, Prereqs = new[] { "start" },
-                Parts = new[] { "Jumbo T2000", "Mainsail" },
+                Parts = new[] { "Jumbo T2000", "Mainsail", "Dart" },
                 Modules = new string[0],
                 Description = "Bigger is better. The Mainsail and Jumbo tank lift serious payloads into orbit.",
             },
             new TechNode {
                 Id = "gimbaled", Title = "Gimbaled Engines", Cost = 40, Prereqs = new[] { "control", "heavy" },
                 Parts = new[] { "Vector" },
-                Modules = new string[0],
+                Modules = new[] { "Heavy Reaction Wheel" },
                 Description = "The mighty Vector engine gimbals hard — excellent control authority for unwieldy stacks.",
             },
             new TechNode {
                 Id = "reentry", Title = "Re-entry", Cost = 35, Prereqs = new[] { "landing" },
-                Parts = new string[0],
+                Parts = new[] { "Drogue Chute", "Large Parachute", "Radial Parachute", "Radial Drogue" },
                 Modules = new string[0],
-                Description = "Foundational re-entry research — a prerequisite for heavy landing systems and crewed survival.",
+                Description = "Drogue and heavy parachutes for controlled re-entry — and the foundation for heavy landing systems and crewed survival.",
             },
             new TechNode {
                 Id = "probes", Title = "Probes", Cost = 35, Prereqs = new[] { "miniaturization" },
-                Parts = new[] { "Probe Core" },
+                Parts = new[] { "Probe Core", "Service Pod Mk1", "Comsat Core" },
                 Modules = new string[0],
                 Description = "Lightweight probe cores let you fly unmanned missions — no life support needed.",
             },
@@ -133,7 +133,7 @@ namespace Solar.Progression
             new TechNode {
                 Id = "advanced", Title = "Advanced Propulsion", Cost = 80, Prereqs = new[] { "heavy" },
                 Parts = new[] { "Nerv", "Tank T1600" },
-                Modules = new[] { "Relay Antenna" },
+                Modules = new[] { "Relay Antenna", "Comm-32 Relay" },
                 Description = "The nuclear Nerv engine delivers incredible efficiency — 800 s Isp opens up the outer solar system.",
             },
             new TechNode {
@@ -180,19 +180,19 @@ namespace Solar.Progression
             },
             new TechNode {
                 Id = "heavy-landing", Title = "Heavy Landing", Cost = 90, Prereqs = new[] { "reentry" },
-                Parts = new[] { "Heavy Landing Gear", "Mk1 Lander Can" },
+                Parts = new[] { "Heavy Landing Gear", "Mk1 Lander Can", "Lander Can 2" },
                 Modules = new string[0],
                 Description = "Reinforced landing gear and the Mk1 Lander Can support crewed surface missions on any world.",
             },
             new TechNode {
                 Id = "monoprop", Title = "Monopropellant", Cost = 80, Prereqs = new[] { "probes", "control" },
                 Parts = new[] { "Dawn" },
-                Modules = new[] { "Monoprop Tank", "RCS Thruster Block", "Cryo Tank", "Large RCS Block", "Fuel Storage Pod" },
+                Modules = new[] { "Monoprop Tank", "RCS Thruster Block", "Cryo Tank", "Large RCS Block", "Fuel Storage Pod", "RCS Quad" },
                 Description = "RCS thrusters, monopropellant tanks, and cryo storage for fine translation control — crucial for docking.",
             },
             new TechNode {
                 Id = "docking", Title = "Docking", Cost = 100, Prereqs = new[] { "monoprop" },
-                Parts = new[] { "Docking Port Jr", "Docking Port Sr" },
+                Parts = new[] { "Docking Port Jr", "Docking Port Sr", "Docking Port Medium" },
                 Modules = new[] { "Docking Sensor" },
                 Description = "Docking ports allow two vessels to join in orbit — the gateway to space stations and orbital assembly.",
             },
@@ -210,7 +210,7 @@ namespace Solar.Progression
             },
             new TechNode {
                 Id = "advanced-electrics", Title = "Advanced Electrics", Cost = 90, Prereqs = new[] { "electrics", "science" },
-                Parts = new string[0],
+                Parts = new[] { "Power Service Bay" },
                 Modules = new[] { "Large Solar Array", "Battery Z-4000" },
                 Description = "Bigger panels and denser batteries — power-hungry craft need serious infrastructure.",
             },
@@ -229,7 +229,7 @@ namespace Solar.Progression
             new TechNode {
                 Id = "resource-processing", Title = "Resource Processing", Cost = 150, Prereqs = new[] { "sustainability", "planetary-science" },
                 Parts = new string[0],
-                Modules = new[] { "ISRU Converter", "Seismic Accelerometer", "Advanced Harvester" },
+                Modules = new[] { "ISRU Converter", "Seismic Accelerometer", "Advanced Harvester", "Atmospheric Harvester", "Fuel Depot Pod" },
                 Description = "In-situ resource utilization — convert ore to fuel anywhere. Deep-core drills extract fuel from even the poorest deposits.",
             },
             new TechNode {
@@ -240,8 +240,8 @@ namespace Solar.Progression
             },
             new TechNode {
                 Id = "crew-systems", Title = "Crew Systems", Cost = 85, Prereqs = new[] { "survival", "reentry" },
-                Parts = new[] { "Pod Mk2" },
-                Modules = new string[0],
+                Parts = new[] { "Pod Mk2", "Big Pod" },
+                Modules = new[] { "Cupola" },
                 Description = "The Mk2 pod seats three crew — more hands, more science, more ambition.",
             },
 
@@ -256,7 +256,7 @@ namespace Solar.Progression
             },
             new TechNode {
                 Id = "space-stations", Title = "Space Stations", Cost = 200, Prereqs = new[] { "docking", "crew-systems" },
-                Parts = new[] { "Shielded Port" },
+                Parts = new[] { "Shielded Port", "Crew Tube", "Flat Platform", "Heavy Platform" },
                 Modules = new string[0],
                 Description = "Shielded docking ports and modular construction open the door to permanent orbital outposts.",
             },
@@ -271,6 +271,12 @@ namespace Solar.Progression
                 Parts = new string[0],
                 Modules = new[] { "Comm-DSN Dish" },
                 Description = "The giant DSN dish can phone home from the outer planets — no data left behind.",
+            },
+            new TechNode {
+                Id = "colonization", Title = "Colonization", Cost = 180, Prereqs = new[] { "sustainability", "docking" },
+                Parts = new[] { "Inflatable Habitat", "Main Hub" },
+                Modules = new[] { "Habitation Ring", "Greenhouse Dome" },
+                Description = "Habitats, hubs, and greenhouse domes turn a landed crewed vessel into a self-sufficient surface colony.",
             },
 
             // ════════════════════════════════════════════════════════════════

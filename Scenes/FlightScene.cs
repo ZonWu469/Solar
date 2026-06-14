@@ -35,6 +35,12 @@ namespace Solar.Scenes
 
         private bool _map;
         private bool _slopeView;             // terrain colored by slope (landing-spot finder) instead of elevation
+
+        // map-view ship popup (click a ship -> Switch / Set as target)
+        private Vessel _menuVessel;
+        private string _menuName;
+        private bool _menuControllable;
+        private Vector2 _menuPos;
         private double _flightZoom = 0.35;   // m per pixel
         private double _mapZoom;
         private int _focus;                  // 0 = vessel, otherwise body index + 1
@@ -191,7 +197,13 @@ namespace Solar.Scenes
         {
             _nodes.Clear();
             if (s.Nodes != null)
-                foreach (var n in s.Nodes) { var m = n?.ToManeuver(); if (m != null) _nodes.Add(m); }
+                foreach (var n in s.Nodes)
+                {
+                    var m = n?.ToManeuver();
+                    if (m == null) continue;
+                    if (!string.IsNullOrEmpty(n.BodyName)) m.Body = Ctx.Universe[n.BodyName];
+                    _nodes.Add(m);
+                }
             else if (s.Node != null)
                 _nodes.Add(s.Node.ToManeuver());
         }
@@ -205,20 +217,6 @@ namespace Solar.Scenes
             return best;
         }
 
-        /// <summary>The final orbit a new node should be placed on: the last future node's result
-        /// orbit, or the live coast orbit when there are no pending nodes.</summary>
-        private OrbitalElements ChainEndOrbit(OrbitalElements live, double mu, double ut, out double fromUT)
-        {
-            OrbitalElements src = live; fromUT = ut;
-            foreach (var n in Sorted(ut))
-            {
-                if (n.UT < ut) continue;
-                var res = n.ResultOrbit(src, mu);
-                if (!double.IsNaN(res.A)) { src = res; fromUT = n.UT; }
-            }
-            return src;
-        }
-
         /// <summary>Nodes sorted by time (a fresh list; safe to iterate while mutating _nodes is avoided).</summary>
         private List<Maneuver> Sorted(double ut)
         {
@@ -227,19 +225,69 @@ namespace Solar.Scenes
             return list;
         }
 
-        /// <summary>Re-chain every pending node so each is planned against the previous burn's result
-        /// orbit (within the current SOI). Past nodes keep their last (frozen) source.</summary>
-        private void RefreshNodeChain(OrbitalElements live, double mu, double ut)
+        /// <summary>One drawn/clickable conic of the planned trajectory, in its own primary's frame.</summary>
+        private readonly struct ProjSegment
         {
-            OrbitalElements src = live;
-            foreach (var n in Sorted(ut))
-            {
-                if (n.UT < ut) continue;   // past nodes: leave frozen, they no longer alter projection
-                n.Source = src; n.HasSource = true;
-                var res = n.ResultOrbit(src, mu);
-                if (!double.IsNaN(res.A)) src = res;
-            }
+            public ProjSegment(in OrbitalElements el, CelestialBody body, Vec2d primaryAbs,
+                               double startUT, double endUT, bool closed, bool planned)
+            { El = el; Body = body; PrimaryAbs = primaryAbs; StartUT = startUT; EndUT = endUT; Closed = closed; Planned = planned; }
+            public readonly OrbitalElements El;
+            public readonly CelestialBody Body;
+            public readonly Vec2d PrimaryAbs;   // body's absolute position snapshot at StartUT
+            public readonly double StartUT;
+            public readonly double EndUT;        // transition / node time, or +inf if the segment is a full orbit
+            public readonly bool Closed;         // a full ellipse (no transition ends it)
+            public readonly bool Planned;        // lies after at least one burn (drawn as the orange plan)
         }
+
+        /// <summary>Walk the planned trajectory through SOI transitions and pending-node burns (KSP-style
+        /// patched conics), producing the ordered conic segments that are both drawn and click-hit-tested.
+        /// When <paramref name="refreshNodes"/> is set, each future node's Source/Body frame is assigned
+        /// here (skipped during a burn so the planned orbit stays put).</summary>
+        private List<ProjSegment> BuildProjection(double ut, bool refreshNodes)
+        {
+            var segs = new List<ProjSegment>();
+            if (!LiveOrbit(ut, out var live, out var liveBody, out _)) return segs;
+
+            var future = new List<Maneuver>();
+            foreach (var n in Sorted(ut)) if (n.UT >= ut) future.Add(n);
+
+            OrbitalElements src = live;
+            CelestialBody body = liveBody;
+            double segStart = ut;
+            bool planned = false;   // becomes true once a node burn has been applied
+            int ni = 0, guard = 0;
+            while (guard++ < 16)
+            {
+                Maneuver node = ni < future.Count ? future[ni] : null;
+                var pred = TrajectoryPredictor.Predict(src, body, segStart);
+                double transUT = (pred.Type != TransitionType.None && pred.NextBody != null)
+                    ? pred.TransitionUT : double.PositiveInfinity;
+
+                if (node != null && node.UT <= transUT)
+                {
+                    // a burn happens before the next SOI change: the orbit shape holds until the node
+                    segs.Add(new ProjSegment(src, body, body.AbsolutePositionAt(segStart), segStart, node.UT, false, planned));
+                    if (refreshNodes) { node.Source = src; node.Body = body; node.HasSource = true; }
+                    var res = node.ResultOrbit(src, body.Mu);
+                    ni++;
+                    if (double.IsNaN(res.A)) break;
+                    src = res; segStart = node.UT; planned = true;
+                    continue;
+                }
+
+                bool hasTrans = !double.IsInfinity(transUT);
+                segs.Add(new ProjSegment(src, body, body.AbsolutePositionAt(segStart), segStart,
+                                         hasTrans ? transUT : double.PositiveInfinity, !hasTrans, planned));
+                if (!hasTrans) break;
+                src = pred.NextOrbit; body = pred.NextBody; segStart = pred.TransitionUT;
+            }
+            return segs;
+        }
+
+        /// <summary>Re-chain every pending node across SOI transitions so each is planned against the
+        /// trajectory reaching it. Past nodes keep their last (frozen) source.</summary>
+        private void RefreshNodeChain(double ut) => BuildProjection(ut, refreshNodes: true);
 
         public override void Update(double dt)
         {
@@ -277,8 +325,10 @@ namespace Solar.Scenes
             if (_buildAtColony) { _buildAtColony = false; BuildAtColony(); return; }
             if (_map && inp.Pressed(Keys.F)) _focus = (_focus + 1) % (Ctx.Universe.Bodies.Count + 1);
 
+            // map-view ship popup is handled first so its clicks don't fall through to node editing
+            bool menuConsumed = UpdateShipMenu(clock.UT);
             bool maneuverWheel = false;
-            UpdateManeuverInput(clock.UT, out maneuverWheel);
+            UpdateManeuverInput(clock.UT, menuConsumed, out maneuverWheel);
 
             if (inp.WheelDelta != 0 && !maneuverWheel)
             {
@@ -930,6 +980,85 @@ namespace Solar.Scenes
             _toast = $"Now controlling {_shipName}"; _toastT = 4;
         }
 
+        // ----- map-view ship popup (click a ship icon -> Switch / Set as target) -----
+        private const int MenuW = 156, MenuTitleH = 18, MenuBtnH = 18, MenuPad = 6, MenuGap = 3;
+        private int MenuBtnCount => _menuControllable ? 2 : 1;
+        private int MenuH => MenuPad + MenuTitleH + MenuBtnCount * (MenuBtnH + MenuGap) - MenuGap + MenuPad;
+        private Rectangle MenuRect() => new Rectangle((int)_menuPos.X, (int)_menuPos.Y, MenuW, MenuH);
+        private Rectangle MenuBtnRect(int i) => new Rectangle((int)_menuPos.X + MenuPad,
+            (int)_menuPos.Y + MenuPad + MenuTitleH + i * (MenuBtnH + MenuGap), MenuW - 2 * MenuPad, MenuBtnH);
+
+        /// <summary>Hit-test the controllable ships and debris in map view against the mouse.</summary>
+        private bool PickShip(Vector2 mouse, double ut, out Vessel ship, out string name, out bool controllable)
+        {
+            ship = null; name = null; controllable = false;
+            float best = 14f;
+            foreach (var ts in _others)
+            {
+                if (ts.V == null || ts.V.Destroyed) continue;
+                float d = Vector2.Distance(_cam.WorldToScreen(ts.V.AbsolutePosition(ut)), mouse);
+                if (d < best) { best = d; ship = ts.V; name = ts.Name; controllable = true; }
+            }
+            for (int i = 0; i < _debris.Count; i++)
+            {
+                if (_debris[i].Destroyed) continue;
+                float d = Vector2.Distance(_cam.WorldToScreen(_debris[i].AbsolutePosition(ut)), mouse);
+                if (d < best) { best = d; ship = _debris[i]; name = $"Debris {i + 1}"; controllable = false; }
+            }
+            return ship != null;
+        }
+
+        /// <summary>Map-view ship menu: open on a click over a ship, run its buttons, close on an outside
+        /// click. Returns true when it consumed this frame's click so node editing doesn't also fire.</summary>
+        private bool UpdateShipMenu(double ut)
+        {
+            var inp = Ctx.Input;
+            if (!_map || _cam.ScreenW == 0) { _menuVessel = null; return false; }
+            if (_menuVessel != null && (_menuVessel == _vessel || _menuVessel.Destroyed)) _menuVessel = null;
+
+            if (_menuVessel != null)
+            {
+                if (!inp.LeftClick) return false;
+                for (int i = 0; i < MenuBtnCount; i++)
+                    if (MenuBtnRect(i).Contains((int)inp.MousePos.X, (int)inp.MousePos.Y))
+                    {
+                        bool doSwitch = _menuControllable && i == 0;
+                        var v = _menuVessel; var nm = _menuName;
+                        _menuVessel = null;
+                        SetTarget(null, v, nm);
+                        if (doSwitch) TakeControlOfTarget();
+                        return true;
+                    }
+                _menuVessel = null;   // clicked outside: close (and swallow the click)
+                return true;
+            }
+
+            if (inp.LeftClick && PickShip(inp.MousePos, ut, out var ship, out var name, out bool controllable))
+            {
+                _menuVessel = ship; _menuName = name; _menuControllable = controllable;
+                _menuPos = new Vector2(Math.Min(inp.MousePos.X, _cam.ScreenW - MenuW - 4),
+                                       Math.Min(inp.MousePos.Y, _cam.ScreenH - MenuH - 4));
+                return true;
+            }
+            return false;
+        }
+
+        private void DrawShipMenu(PrimitiveBatch pb, Microsoft.Xna.Framework.Graphics.SpriteBatch sb)
+        {
+            if (_menuVessel == null) return;
+            var f = Ctx.Font; var mouse = Ctx.Input.MousePos;
+            UiDraw.Panel(pb, MenuRect());
+            sb.DrawString(f, _menuName ?? "Ship", new Vector2(_menuPos.X + MenuPad, _menuPos.Y + 3), UiDraw.Accent);
+            for (int i = 0; i < MenuBtnCount; i++)
+            {
+                var br = MenuBtnRect(i);
+                bool hover = br.Contains((int)mouse.X, (int)mouse.Y);
+                pb.FillRect(br, hover ? new Color(60, 95, 140, 230) : new Color(40, 60, 90, 210));
+                string label = (_menuControllable && i == 0) ? "Switch to" : "Set as target";
+                sb.DrawString(f, label, new Vector2(br.X + 6, br.Y + 2), Color.White);
+            }
+        }
+
         /// <summary>Advance the target through none -> each item -> none.</summary>
         private void CycleTarget(int dir)
         {
@@ -1085,17 +1214,31 @@ namespace Solar.Scenes
         private static double TimeLeft(double amount, double ratePerSec)
             => ratePerSec > 0 ? amount / ratePerSec : double.PositiveInfinity;
 
+        // TODO(balance.json): the 250 km low/high-orbit threshold is a global tunable.
         private static string SciSituation(Vessel v) =>
             v.Landed ? "landed" : v.Altitude < 250_000 ? "low orbit" : "high orbit";
 
+        // TODO(balance.json): situation multipliers are global tunables.
+        private static double SciSituationFactor(string sit) => sit switch
+        {
+            "landed" => 1.5, "low orbit" => 0.8, _ => 1.0,   // high orbit = 1.0
+        };
+
+        // TODO(balance.json / bodies.json): per-body science multiplier belongs in bodies.json.
         private static double SciBodyFactor(string body) => body switch
         {
             "Earth" => 1.0, "Moon" => 2.0, "Sun" => 2.5, _ => 3.0,
         };
 
+        /// <summary>Science points awarded for running one instrument in a given situation/body. The
+        /// instrument's base worth comes from <see cref="Parts.ModuleDef.ScienceValue"/> (data-driven via
+        /// modules.json); situation and body apply global multipliers.</summary>
+        public static double SciPoints(Parts.ModuleDef def, string sit, string body) =>
+            Math.Round(def.ScienceValue * SciSituationFactor(sit) * SciBodyFactor(body));
+
         /// <summary>Science point/s transmitted at full signal; weak signal scales this down (so distant
         /// vessels transmit slowly) and zero signal stops transmission entirely.</summary>
-        private const double TransmitBaseRate = 8.0;
+        private const double TransmitBaseRate = 8.0;   // TODO(balance.json): global transmit rate.
 
         private IEnumerable<Vessel> OtherVessels()
         {
@@ -1122,7 +1265,6 @@ namespace Solar.Scenes
             if (antenna && anyScience)
             {
                 string sit = SciSituation(v);
-                double baseVal = v.Landed ? 15 : v.Altitude < 250_000 ? 8 : 10;
                 bool queued = false;
                 foreach (var p in v.AllParts())
                 {
@@ -1133,7 +1275,7 @@ namespace Solar.Scenes
                         string key = $"{v.Body.Name}|{sit}|{m.Def.Name}";
                         if (gs.ScienceCollected.Contains(key)) continue;
                         gs.ScienceCollected.Add(key);
-                        v.PendingScience += Math.Round(baseVal * SciBodyFactor(v.Body.Name));
+                        v.PendingScience += SciPoints(m.Def, sit, v.Body.Name);
                         _toast = $"recorded {m.Def.Name}: {v.Body.Name} {sit}";
                         _toastT = 5;
                         queued = true;
@@ -1198,17 +1340,12 @@ namespace Solar.Scenes
         /// <summary>Your final planned conic (after all pending nodes) and the body you orbit.</summary>
         private bool YourPlannedOrbit(double ut, out OrbitalElements el, out CelestialBody primary)
         {
-            el = default;
-            if (!LiveOrbit(ut, out var live, out primary, out _)) return false;
-            var src = live;
-            foreach (var n in Sorted(ut))
-                if (n.UT >= ut && n.HasSource)
-                {
-                    var res = n.ResultOrbit(n.Source, primary.Mu);
-                    if (!double.IsNaN(res.A)) src = res;
-                }
-            el = src;
-            return true;
+            el = default; primary = null;
+            var segs = BuildProjection(ut, refreshNodes: false);
+            if (segs.Count == 0) return false;
+            var last = segs[segs.Count - 1];
+            el = last.El; primary = last.Body;
+            return !double.IsNaN(el.A);
         }
 
         // =====================================================================  maneuver planning
@@ -1230,7 +1367,11 @@ namespace Solar.Scenes
         private bool ManeuverContext(Maneuver node, double ut, out OrbitalElements orbit, out CelestialBody body, out Vec2d primaryAbs)
         {
             if (!LiveOrbit(ut, out orbit, out body, out primaryAbs)) return false;
-            if (node != null && node.HasSource) orbit = node.Source;
+            if (node != null && node.HasSource)
+            {
+                orbit = node.Source;
+                if (node.Body != null) { body = node.Body; primaryAbs = body.AbsolutePositionAt(ut); }
+            }
             return true;
         }
 
@@ -1251,8 +1392,13 @@ namespace Solar.Scenes
             return true;
         }
 
-        /// <summary>Nearest true anomaly on the orbit to the mouse, if within the pick threshold.</summary>
-        private bool PickOrbitNu(in OrbitalElements el, Vec2d primaryAbs, Vector2 mouse, out double nuBest)
+        /// <summary>Nearest true anomaly on the orbit to the mouse, if within the pick threshold.
+        /// <paramref name="soiRadius"/> bounds the drawn arc of a hyperbola (the frame's SOI).</summary>
+        private bool PickOrbitNu(in OrbitalElements el, Vec2d primaryAbs, Vector2 mouse, double soiRadius, out double nuBest)
+            => PickOrbitNuDist(el, primaryAbs, mouse, soiRadius, out nuBest) <= 10f;
+
+        /// <summary>Screen distance (px) from the mouse to the nearest point on the orbit, plus that nu.</summary>
+        private float PickOrbitNuDist(in OrbitalElements el, Vec2d primaryAbs, Vector2 mouse, double soiRadius, out double nuBest)
         {
             nuBest = 0; double best = double.MaxValue;
             const int n = 360;
@@ -1260,7 +1406,7 @@ namespace Solar.Scenes
             double nuMax = Math.PI;
             if (el.Hyperbolic)
             {
-                double rLim = double.IsInfinity(_vessel.Body.SoiRadius) ? el.Periapsis * 50 : _vessel.Body.SoiRadius;
+                double rLim = double.IsInfinity(soiRadius) ? el.Periapsis * 50 : soiRadius;
                 double cnu = (el.SemiLatus / rLim - 1) / el.E;
                 nuMax = cnu <= -1 ? Math.PI - 1e-3 : cnu >= 1 ? 0.1 : Math.Acos(cnu);
             }
@@ -1273,14 +1419,14 @@ namespace Solar.Scenes
                 float d = Vector2.Distance(sp, mouse);
                 if (d < best) { best = d; nuBest = nu; }
             }
-            return best <= 10f;
+            return (float)best;
         }
 
         // X delete button placement relative to a node marker
         private const float XOffX = 14f, XOffY = -14f, XHit = 9f;
         private static Vector2 XButtonPos(Vector2 nodeScreen) => nodeScreen + new Vector2(XOffX, XOffY);
 
-        private void UpdateManeuverInput(double ut, out bool wheelConsumed)
+        private void UpdateManeuverInput(double ut, bool suppressClick, out bool wheelConsumed)
         {
             wheelConsumed = false;
             if (!_map || _cam.ScreenW == 0) { _dragHandle = -1; _dragNode = -1; _hoverHandle = -1; _hoverNode = -1; _hoverX = -1; return; }
@@ -1292,9 +1438,9 @@ namespace Solar.Scenes
                 return;
             }
 
-            // re-chain pending nodes against the live orbit while coasting; freeze during a burn
+            // re-chain pending nodes across SOI transitions while coasting; freeze during a burn
             bool thrusting = _vessel.CurrentThrust > 0;
-            if (!thrusting) RefreshNodeChain(live, body.Mu, ut);
+            if (!thrusting) RefreshNodeChain(ut);
 
             Vector2 mouse = inp.MousePos;
 
@@ -1337,8 +1483,8 @@ namespace Solar.Scenes
                 if (inp.Pressed(Keys.OemSemicolon)) kbNode.Radial -= ks;
             }
 
-            // begin interaction on click
-            if (inp.LeftClick)
+            // begin interaction on click (suppressed when the ship popup consumed this click)
+            if (inp.LeftClick && !suppressClick)
             {
                 if (_hoverX >= 0)
                 {
@@ -1358,11 +1504,22 @@ namespace Solar.Scenes
                 }
                 else if (!_showTargetWindow)
                 {
-                    // place a new node on the end of the chain (live orbit if none pending)
-                    var endOrbit = ChainEndOrbit(live, body.Mu, ut, out double fromUT);
-                    if (PickOrbitNu(endOrbit, primaryAbs, mouse, out double nu))
+                    // place a new node on whichever projected conic is clicked -- including the path
+                    // inside a body encountered/escaped to (KSP patched-conic node planning)
+                    var segs = BuildProjection(ut, refreshNodes: false);
+                    double bestNu = 0; float bestD = 10f; ProjSegment bestSeg = default; bool hit = false;
+                    foreach (var sg in segs)
                     {
-                        _nodes.Add(new Maneuver { UT = Kepler.TimeAtTrueAnomaly(endOrbit, nu, fromUT), Source = endOrbit, HasSource = true });
+                        float d = PickOrbitNuDist(sg.El, sg.PrimaryAbs, mouse, sg.Body.SoiRadius, out double nu);
+                        if (d < bestD) { bestD = d; bestNu = nu; bestSeg = sg; hit = true; }
+                    }
+                    if (hit)
+                    {
+                        _nodes.Add(new Maneuver
+                        {
+                            UT = Kepler.TimeAtTrueAnomaly(bestSeg.El, bestNu, bestSeg.StartUT),
+                            Source = bestSeg.El, Body = bestSeg.Body, HasSource = true
+                        });
                         _burnSpent = 0; _dragHandle = -1; _dragNode = -1;
                     }
                 }
@@ -1373,9 +1530,11 @@ namespace Solar.Scenes
             {
                 var node = _nodes[_dragNode];
                 var src = node.HasSource ? node.Source : live;
+                var nodeBody = node.Body ?? body;
+                var nodeAbs = node.Body != null ? node.Body.AbsolutePositionAt(ut) : primaryAbs;
                 if (_dragHandle == 4)
                 {
-                    if (PickOrbitNu(src, primaryAbs, mouse, out double nu))
+                    if (PickOrbitNu(src, nodeAbs, mouse, nodeBody.SoiRadius, out double nu))
                         node.UT = Kepler.TimeAtTrueAnomaly(src, nu, ut);
                 }
                 else if (ManeuverGeometry(node, ut, out var ns, out var pd, out var rd))
@@ -1436,6 +1595,7 @@ namespace Solar.Scenes
             DrawCrewPanel(pb, sb);
             DrawColonyPanel(pb, sb, ut);
             DrawCancelMission(pb, sb);
+            if (_map) DrawShipMenu(pb, sb);
 
             if (_toastT > 0 && _toast != null)
             {
@@ -1484,7 +1644,8 @@ namespace Solar.Scenes
             var f = Ctx.Font;
             var inp = Ctx.Input;
             pb.FillRect(0, 0, Ctx.W, Ctx.H, new Color(0, 0, 0, 150));   // dim the world behind
-            int w = 320, h = 262;
+            bool onPad = _vessel is { Destroyed: false, Landed: true, EnginesIgnited: false };
+            int w = 320, h = onPad ? 310 : 262;
             var r = new Rectangle(Ctx.W / 2 - w / 2, Ctx.H / 2 - h / 2, w, h);
             UiDraw.Panel(pb, r);
             const string title = "PAUSED";
@@ -1498,6 +1659,10 @@ namespace Solar.Scenes
             if (UiDraw.Button(pb, sb, f, new Rectangle(bx, by, bw, bh), "Return to game", inp))
                 _showExitDialog = false;
             by += bh + 10;
+            // on the pad (landed, never launched): scrap the launch and return to the editor
+            if (onPad && UiDraw.Button(pb, sb, f, new Rectangle(bx, by, bw, bh), "Back to editor (scrap launch)", inp))
+            { _cancelMission = true; _showExitDialog = false; }
+            if (onPad) by += bh + 10;
             if (UiDraw.Button(pb, sb, f, new Rectangle(bx, by, bw, bh), "Space Center", inp))
                 _exitToHub = true;
             by += bh + 10;
@@ -2083,42 +2248,37 @@ namespace Solar.Scenes
         /// consumed the moment their burn time passes, so only pending future nodes are ever drawn.</summary>
         private void DrawManeuver(PrimitiveBatch pb, Microsoft.Xna.Framework.Graphics.SpriteBatch sb, double ut)
         {
-            if (!LiveOrbit(ut, out _, out var body, out var primaryAbs)) return;
             var orange = new Color(255, 170, 90);
 
-            var sorted = Sorted(ut);
-            // the last node owns the final planned orbit (Ap/Pe + encounter shown there)
-            Maneuver last = null;
-            foreach (var n in sorted) if (n.UT >= ut) last = n;
-
-            foreach (var node in sorted)
+            // Planned conics across every SOI patch (the orange route). Pre-burn segments belong to the
+            // live/predicted path (drawn cyan elsewhere), so only Planned segments are drawn here.
+            var segs = BuildProjection(ut, refreshNodes: false);
+            int lastPlanned = -1;
+            for (int i = 0; i < segs.Count; i++) if (segs[i].Planned) lastPlanned = i;
+            for (int i = 0; i < segs.Count; i++)
             {
-                if (!node.HasSource) continue;
-
-                // planned-orbit preview
-                var planned = node.ResultOrbit(node.Source, body.Mu);
-                if (double.IsNaN(planned.A)) continue;
-                if (node == last)
+                var sg = segs[i];
+                if (!sg.Planned) continue;
+                if (i == lastPlanned)
                 {
-                    OrbitRenderer.DrawConicGlow(pb, _cam, planned, primaryAbs, orange, body.SoiRadius);
-                    DrawApPeMarkers(pb, sb, planned, primaryAbs, body.Radius, orange, new Color(255, 210, 140));
-                    var pp = TrajectoryPredictor.Predict(planned, body, node.UT);
-                    if (pp.Type != TransitionType.None)
-                    {
-                        Vec2d mPos = primaryAbs + Kepler.StateAtTime(planned, pp.TransitionUT).pos;
-                        pb.CircleOutline(_cam.WorldToScreen(mPos), 6, 1.5f, orange);
-                        if (pp.NextBody != null)
-                        {
-                            Vec2d nbAbs = pp.NextBody.AbsolutePositionAt(pp.TransitionUT);
-                            OrbitRenderer.DrawConic(pb, _cam, pp.NextOrbit, nbAbs, orange * 0.85f, 1.4f, pp.NextBody.SoiRadius);
-                        }
-                    }
+                    OrbitRenderer.DrawConicGlow(pb, _cam, sg.El, sg.PrimaryAbs, orange, sg.Body.SoiRadius);
+                    DrawApPeMarkers(pb, sb, sg.El, sg.PrimaryAbs, sg.Body.Radius, orange, new Color(255, 210, 140));
                 }
                 else
                 {
-                    OrbitRenderer.DrawConic(pb, _cam, planned, primaryAbs, orange * 0.7f, 1.3f, body.SoiRadius);
+                    OrbitRenderer.DrawConic(pb, _cam, sg.El, sg.PrimaryAbs, orange * 0.8f, 1.3f, sg.Body.SoiRadius);
                 }
+                // transition marker where this patch hands off to a different SOI
+                if (i + 1 < segs.Count && segs[i + 1].Body != sg.Body && !double.IsInfinity(sg.EndUT))
+                {
+                    Vec2d mPos = sg.PrimaryAbs + Kepler.StateAtTime(sg.El, sg.EndUT).pos;
+                    pb.CircleOutline(_cam.WorldToScreen(mPos), 6, 1.5f, orange);
+                }
+            }
 
+            foreach (var node in Sorted(ut))
+            {
+                if (!node.HasSource || node.UT < ut) continue;
                 if (!ManeuverGeometry(node, ut, out var nodeScreen, out var proDir, out var radDir)) continue;
 
                 // burn-direction arrow + delta-v handles

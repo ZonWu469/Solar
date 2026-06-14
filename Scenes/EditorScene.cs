@@ -277,9 +277,10 @@ namespace Solar.Scenes
         {
             var e = new StackEntry(d);
             int used = 0;
-            foreach (var name in d.DefaultModules)
+            foreach (var idOrName in d.DefaultModules)
             {
-                var md = ModuleCatalog.Get(name);
+                // DefaultModules holds ids; fall back to name lookup for un-migrated entries
+                var md = ModuleCatalog.GetById(idOrName) ?? ModuleCatalog.Get(idOrName);
                 if (md == null || used + md.SlotCost > d.Slots) continue;
                 e.Modules.Add(md);
                 used += md.SlotCost;

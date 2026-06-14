@@ -24,7 +24,7 @@ namespace Solar.Parts
         public double ImpactTolerance;  // m/s added to the safe landing speed (landing gear)
         public Color Tint;
 
-        /// <summary>Module names this part ships with pre-installed in its slots (an "advanced" part,
+        /// <summary>Module ids this part ships with pre-installed in its slots (an "advanced" part,
         /// e.g. a service pod that already carries a solar panel + battery). Seeded into a fresh
         /// <see cref="Vessel.StackEntry"/> when the part is placed in the editor; the player can still
         /// remove or swap them. Empty for ordinary parts.</summary>

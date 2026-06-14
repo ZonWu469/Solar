@@ -267,12 +267,13 @@ namespace Solar.Core
         public bool HasSource;
         public bool Reached;
         public Vec2d ReachedAbsPos;
+        public string BodyName;   // primary the node is planned around; re-resolved/refreshed on load
 
         public static ManeuverState From(Maneuver m) =>
             m == null ? null : new ManeuverState
             {
                 UT = m.UT, Prograde = m.Prograde, Radial = m.Radial, Source = m.Source, HasSource = m.HasSource,
-                Reached = m.Reached, ReachedAbsPos = m.ReachedAbsPos
+                Reached = m.Reached, ReachedAbsPos = m.ReachedAbsPos, BodyName = m.Body?.Name
             };
 
         public Maneuver ToManeuver() =>

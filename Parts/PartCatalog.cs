@@ -111,11 +111,17 @@ namespace Solar.Parts
             new PartDef { Name = "Big Pod",           Id = "big-pod",            Kind = PartKind.Pod, DryMass = 6500, Width = 2.5, Height = 3.6, CdA = 2.0, ControlAuthority = 0.30, Sas = true, Slots = 4, Tint = new Color(200, 208, 222) },
             // ---- NEW: advanced parts (ship with modules pre-fitted in their slots; still editable) ----
             new PartDef { Name = "Service Pod Mk1", Id = "service-pod-mk1", Kind = PartKind.Pod, DryMass = 1100, Width = 1.7, Height = 1.9, CdA = 1.2, ControlAuthority = 0.14, Tint = new Color(220, 222, 232),
-                          DefaultModules = { "Solar Panel", "Battery", "Antenna" } },
+                          DefaultModules = { "solar-panel", "battery", "antenna" } },
             new PartDef { Name = "Comsat Core", Id = "comsat-core", Kind = PartKind.Pod, DryMass = 320, Width = 0.9, Height = 0.9, CdA = 0.2, ControlAuthority = 0.10, Tint = new Color(175, 180, 205),
-                          DefaultModules = { "RTG", "Battery", "Relay Antenna" } },
+                          DefaultModules = { "rtg", "battery", "relay-antenna" } },
             new PartDef { Name = "Power Service Bay", Id = "power-service-bay", Kind = PartKind.StructuralBay, DryMass = 220, Width = 1.7, Height = 1.1, CdA = 0.3, Tint = new Color(140, 152, 168),
-                          DefaultModules = { "Solar Panel", "Battery" } },
+                          DefaultModules = { "solar-panel", "battery" } },
+            // ---- NEW: colony & spaceflight expansion (curated; see Progression/TechTree.cs) ----
+            new PartDef { Name = "Main Hub", Id = "main-hub", Kind = PartKind.Pod, DryMass = 6500, Width = 3.6, Height = 3.6, CdA = 2.0, ControlAuthority = 0.4, Sas = true, Slots = 4, Tint = new Color(200, 208, 222),
+                          DefaultModules = { "large-solar-array", "battery-z100" } },
+            new PartDef { Name = "Inflatable Habitat", Id = "inflatable-habitat", Kind = PartKind.Pod, DryMass = 1600, Width = 2.5, Height = 2.4, CdA = 1.4, ControlAuthority = 0.16, Sas = true, Slots = 3, Tint = new Color(212, 216, 226) },
+            new PartDef { Name = "Crew Tube", Id = "crew-tube", Kind = PartKind.StructuralBay, DryMass = 140, Width = 1.7, Height = 2.0, CdA = 0.2, Slots = 2, Tint = new Color(158, 163, 175) },
+            new PartDef { Name = "Docking Port Medium", Id = "docking-port-md", Kind = PartKind.DockingPort, DryMass = 140, Width = 1.7, Height = 0.7, CdA = 0.08, Tint = new Color(192, 188, 202) },
             };
             // built-in defs declare Slots only where it differs from the per-kind default; backfill the rest
             foreach (var p in list) if (p.Slots == 0) p.Slots = PartDef.DefaultSlots(p.Kind);
@@ -148,6 +154,14 @@ namespace Solar.Parts
                         // without players deleting parts.json). Re-save when anything changed.
                         bool changed = false;
                         foreach (var d in dtos) if (string.IsNullOrEmpty(d.Id)) changed = true;
+                        // migrate DefaultModules that still reference module *names* to stable ids
+                        foreach (var p in list)
+                            for (int i = 0; i < p.DefaultModules.Count; i++)
+                            {
+                                string s = p.DefaultModules[i];
+                                if (ModuleCatalog.GetById(s) == null && ModuleCatalog.Get(s) is { } md)
+                                { p.DefaultModules[i] = md.Id; changed = true; }
+                            }
                         foreach (var b in BuiltIn())
                             if (list.Find(p => p.Name == b.Name) == null) { list.Add(b); changed = true; }
                         All = list;
@@ -172,6 +186,17 @@ namespace Solar.Parts
             }
             catch { /* read-only install dir: keep running with the in-memory catalog */ }
         }
+
+        /// <summary>Rewrite a Content directory's parts.json from the in-code <see cref="BuiltIn"/> list
+        /// (see <see cref="ModuleCatalog.WriteTemplate"/>). Used by <c>--regen-catalogs</c> to refresh the
+        /// source template — notably to migrate DefaultModules to ids.</summary>
+        public static void WriteTemplate(string contentDir)
+        {
+            var built = BuiltIn();
+            var dtos = new List<PartDefDto>(built.Count);
+            foreach (var p in built) dtos.Add(PartDefDto.FromPart(p));
+            File.WriteAllText(Path.Combine(contentDir, "parts.json"), JsonSerializer.Serialize(dtos, JsonOpts));
+        }
     }
 
     /// <summary>JSON-friendly mirror of <see cref="PartDef"/> (MonoGame's Color isn't serializable).</summary>
@@ -195,7 +220,7 @@ namespace Solar.Parts
         public int TintR { get; set; }
         public int TintG { get; set; }
         public int TintB { get; set; }
-        public List<string> DefaultModules { get; set; }   // module names pre-fitted in this part's slots (optional)
+        public List<string> DefaultModules { get; set; }   // module ids pre-fitted in this part's slots (optional)
 
         public static PartDefDto FromPart(PartDef p) => new()
         {

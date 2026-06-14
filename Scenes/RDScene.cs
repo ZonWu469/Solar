@@ -34,60 +34,35 @@ namespace Solar.Scenes
             _offsetY = _targetOffY = Ctx.H / 2f - 250;
         }
 
-        /// <summary>Manually lay out the 32 nodes in tiers left-to-right.</summary>
+        /// <summary>The single source of truth for tree layout: node id -> (column = tier, row = branch).
+        /// Must cover every <see cref="TechTree.Nodes"/> id; a SanityChecks test asserts this so a new node
+        /// can't go invisible (the bug that hid power-systems / near-future).</summary>
+        internal static readonly (string Id, int Col, int Row)[] Layout =
+        {
+            ("start", 0, 3),
+            // Tier 1 (col=1)
+            ("field-science", 1, 0), ("electrics", 1, 1), ("control", 1, 2),
+            ("solids", 1, 3), ("landing", 1, 4), ("miniaturization", 1, 5),
+            // Tier 2 (col=2)
+            ("science", 2, 0), ("survival", 2, 1), ("fuel-cells", 2, 2), ("radial", 2, 3),
+            ("heavy", 2, 4), ("gimbaled", 2, 5), ("reentry", 2, 6), ("probes", 2, 7),
+            // Tier 3 (col=3)
+            ("advanced-science", 3, 0), ("sustainability", 3, 1), ("advanced-electrics", 3, 2),
+            ("radial-advanced", 3, 3), ("megarocketry", 3, 4), ("ultra-heavy", 3, 5),
+            ("aerospace", 3, 6), ("vacuum-engines", 3, 7), ("advanced-probes", 3, 8),
+            ("monoprop", 3, 9), ("crew-systems", 3, 10), ("heavy-landing", 3, 11), ("advanced", 3, 12),
+            ("planetary-science", 4, 0), ("deep-space-science", 4, 1), ("nuclear-power", 4, 2),
+            ("docking", 4, 8), ("resource-processing", 4, 4), ("surface-science", 4, 5), ("power-systems", 4, 6),
+            // Tier 4 (col=5)
+            ("ion-prop", 5, 1), ("space-stations", 5, 7), ("deep-space-net", 5, 3), ("colonization", 5, 9),
+            // Tier 5 (col=6)
+            ("heavy-crew", 6, 4), ("near-future", 6, 2), ("grand-finale", 6, 6),
+        };
+
+        /// <summary>Build the per-frame node positions/rects from the static <see cref="Layout"/> table.</summary>
         private void LayoutTree()
         {
-            // Tier positions (col, row) in a grid; col = tier, row = branch offset
-            Put("start",            0, 3);
-
-            // Tier 1 (col=1)
-            Put("field-science",    1, 0);
-            Put("electrics",        1, 1);
-            Put("control",          1, 2);
-            Put("solids",           1, 3);
-            Put("landing",          1, 4);
-            Put("miniaturization",  1, 5);
-
-            // Tier 2 (col=2)
-            Put("science",          2, 0);
-            Put("survival",         2, 1);
-            Put("fuel-cells",       2, 2);
-            Put("radial",           2, 3);
-            Put("heavy",            2, 4);
-            Put("gimbaled",         2, 5);
-            Put("reentry",          2, 6);
-            Put("probes",           2, 7);
-            Put("fairings",         2, 8);
-
-            // Tier 3 (col=3)
-            Put("advanced-science",         3, 0);
-            Put("sustainability",           3, 1);
-            Put("advanced-electrics",       3, 2);
-            Put("radial-advanced",          3, 3);
-            Put("megarocketry",             3, 4);
-            Put("ultra-heavy",              3, 5);
-            Put("aerospace",                3, 6);
-            Put("vacuum-engines",           3, 7);
-            Put("advanced-probes",          3, 8);
-            Put("monoprop",                 3, 9);
-            Put("crew-systems",             3, 10);
-            Put("heavy-landing",            3, 11);
-            Put("advanced",                 3, 12);
-            Put("planetary-science",        4, 0);
-            Put("deep-space-science",       4, 1);
-            Put("nuclear-power",            4, 2);
-            Put("docking",                  4, 8);
-            Put("resource-processing",      4, 4);
-            Put("surface-science",          4, 5);
-
-            // Tier 4 (col=4 or 5)
-            Put("ion-prop",          5, 1);
-            Put("space-stations",    5, 7);
-            Put("deep-space-net",    5, 3);
-
-            // Tier 5 (col=6)
-            Put("heavy-crew",        6, 4);
-            Put("grand-finale",      6, 6);
+            foreach (var (id, col, row) in Layout) Put(id, col, row);
         }
 
         private void Put(string id, int col, int row)

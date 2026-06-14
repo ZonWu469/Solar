@@ -9,7 +9,12 @@
       "PowerShell(dotnet run -- --selftest)",
       "PowerShell($j = Get-Content \"Content/parts.json\" -Raw | ConvertFrom-Json; \"Entries: $\\($j.Count\\)\"; $j | Where-Object { $_.Id -in @\\('lander-can-2','big-pod','pod-mk1','tank-t200','landing-gear','docking-port-sr'\\) } | Select-Object Id, Kind, Slots | Format-Table -AutoSize)",
       "PowerShell(dotnet build -clp:ErrorsOnly 2>&1)",
-      "PowerShell(dotnet run --no-build -- --selftest 2>&1)"
+      "PowerShell(dotnet run --no-build -- --selftest 2>&1)",
+      "Bash(read -r n)",
+      "Bash(grep -q 'Name = \"__TRACKED_VAR__\"' Parts/PartCatalog.cs)",
+      "Bash(grep -q 'Name = \"__TRACKED_VAR__\"' Parts/ModuleCatalog.cs)",
+      "Bash(cp Content/parts.json /tmp/parts.json.bak)",
+      "Bash(cp Content/modules.json /tmp/modules.json.bak)"
     ]
   }
 }
