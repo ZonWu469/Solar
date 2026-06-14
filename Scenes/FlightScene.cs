@@ -66,7 +66,6 @@ namespace Solar.Scenes
         private double _sasHold;            // captured world heading for Stability mode
 
         private Prediction _pred;
-        private double _predTimer;
 
         private readonly List<Maneuver> _nodes = new();   // chained planned burns (KSP-style), sorted by UT
         private int _dragHandle = -1;       // -1 none; 0/1 prograde +/-; 2/3 radial out/in; 4 = move node
@@ -272,7 +271,12 @@ namespace Solar.Scenes
                     // a burn happens before the next SOI change: the orbit shape holds until the node
                     segs.Add(new ProjSegment(src, body, body.AbsolutePositionAt(bodyRefUT), segStart, node.UT, false, planned));
                     if (refreshNodes) { node.Source = src; node.Body = body; node.HasSource = true; node.FrameUT = bodyRefUT; }
-                    var res = node.ResultOrbit(src, body.Mu);
+                    // While this node is being burned, project its *remaining* delta-v so the planned
+                    // orbit holds steady as the live orbit rises to meet it, instead of drifting.
+                    var burnNode = node;
+                    if (node.UT == _burnTargetUT && _burnSpent > 0 && node.DeltaV > 0)
+                        burnNode = node.Scaled(Math.Clamp((node.DeltaV - _burnSpent) / node.DeltaV, 0, 1));
+                    var res = burnNode.ResultOrbit(src, body.Mu);
                     ni++;
                     if (double.IsNaN(res.A)) break;
                     src = res; segStart = node.UT; planned = true;   // same body: bodyRefUT unchanged
@@ -467,12 +471,10 @@ namespace Solar.Scenes
                         CheckSoiOffRails(clock.UT);
                         if (CheckSurface(approach)) break;
                     }
-                    _predTimer -= realDt;
-                    if (_predTimer <= 0 && !_vessel.Destroyed && !_vessel.Landed)
-                    {
+                    // Recompute every physics frame so the drawn conic tracks the live state instead of
+                    // lagging and snapping (most visible mid-burn / at the 4x physics-warp cap).
+                    if (!_vessel.Destroyed && !_vessel.Landed)
                         _pred = TrajectoryPredictor.Predict(_vessel.CurrentElements(clock.UT), _vessel.Body, clock.UT);
-                        _predTimer = 0.2;
-                    }
                 }
                 else // coasting in vacuum: on rails
                 {

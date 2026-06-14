@@ -103,12 +103,20 @@ namespace Solar.UI
                     string ecRateTxt = ecNet >= 0 ? $"+{ecNet:0.#}/s" : $"{ecNet:0.#}/s";
                     Row("EC rate", ecRateTxt, ecNet < 0 ? new Color(255, 140, 90) : new Color(150, 220, 150));
                 }
-                if (v.MonopropCapacity > 0)
+                // RCS status: always shown when thrusters or a monoprop tank are fitted, with the
+                // reason it can't fire (so translation never silently does nothing).
+                if (v.RcsBlocks > 0 || v.MonopropCapacity > 0)
                 {
-                    string rcs = v.RcsEnabled ? (v.Monoprop > 0 ? "RCS on" : "RCS dry") : "RCS off";
-                    Color rcsCol = !v.RcsEnabled ? UiDraw.TextDim
-                                 : v.Monoprop <= 0 ? new Color(255, 140, 90) : new Color(150, 220, 150);
-                    Row("Monoprop", $"{v.Monoprop:0}/{v.MonopropCapacity:0}  {rcs}", rcsCol);
+                    var warn = new Color(255, 140, 90);
+                    string status; Color rcsCol;
+                    if (!v.RcsEnabled)                  { status = "off (press R)";    rcsCol = UiDraw.TextDim; }
+                    else if (v.RcsBlocks == 0)          { status = "no thrusters";     rcsCol = warn; }
+                    else if (v.MonopropCapacity <= 0)   { status = "no monoprop tank"; rcsCol = warn; }
+                    else if (v.Monoprop <= 0)           { status = "dry";              rcsCol = warn; }
+                    else if (v.ElectricCharge <= 0)     { status = "no power";         rcsCol = warn; }
+                    else                                { status = "on";               rcsCol = new Color(150, 220, 150); }
+                    string amount = v.MonopropCapacity > 0 ? $"{v.Monoprop:0}/{v.MonopropCapacity:0}  " : "";
+                    Row("RCS", $"{amount}{status}", rcsCol);
                 }
                 if (v.CrewCount > 0 || v.LsCapacity > 0)
                 {

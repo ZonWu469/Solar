@@ -33,6 +33,16 @@ namespace Solar.Rendering
             Vector2 P(float lx, float ly) => baseS + rightS * (lx * pxPerM) + upS * (ly * pxPerM);
 
             bool flaming = !v.IsDebris && v.CurrentThrust > 0;   // solids flame at any throttle
+
+            // RCS translation cue: while actively translating, the gas is expelled OPPOSITE the
+            // commanded direction (Newton's third law). jx/jy is that local jet direction
+            // (local +x = right, +y = nose), matching Vessel.RcsAccel's body frame.
+            bool rcsFiring = !v.IsDebris && v.RcsActive;
+            double rcsLen = v.RcsCommand.Length;
+            float rcsMag = (float)Math.Min(1, rcsLen);
+            float jx = 0, jy = 0;
+            if (rcsLen > 1e-6) { jx = -(float)(v.RcsCommand.X / rcsLen); jy = -(float)(v.RcsCommand.Y / rcsLen); }
+
             float y = 0;
             for (int i = v.Parts.Count - 1; i >= 0; i--)
             {
@@ -137,6 +147,33 @@ namespace Solar.Rendering
                     pb.Quad(P(gx - padW / 2, gy - strutLen - padH), P(gx + padW / 2, gy - strutLen - padH),
                             P(gx + padW / 2, gy - strutLen), P(gx - padW / 2, gy - strutLen),
                             d.Tint, d.Tint, dark, dark);
+                }
+
+                // RCS thruster sprays: a part carrying an RCS block puffs a pair of jets in the
+                // jet direction (opposite the commanded translation), length pulsing with the command.
+                if (rcsFiring && rcsMag > 1e-6f)
+                {
+                    bool hasRcs = false;
+                    foreach (var mod in p.Modules) if (mod.Def.Kind == ModuleKind.RCS) { hasRcs = true; break; }
+                    if (hasRcs)
+                    {
+                        float flick = 1f + 0.25f * (float)Math.Sin(anim * 41 + i * 1.7);
+                        float plen = (0.35f + 0.6f * rcsMag) * Math.Max(h, w) * 0.5f * flick;
+                        float perpx = -jy, perpy = jx;                  // across the jet axis
+                        float side = Math.Max(w, 0.6f) * 0.45f;         // each thruster offset from center
+                        float bw = 0.10f * Math.Max(w, 0.6f);
+                        float cy = y + h * 0.5f;
+                        for (int sgn = -1; sgn <= 1; sgn += 2)
+                        {
+                            float ox = perpx * side * sgn, oy = perpy * side * sgn;
+                            var tip = P(ox + jx * plen, cy + oy + jy * plen);
+                            pb.Tri(P(ox + perpx * bw, cy + oy + perpy * bw),
+                                   P(ox - perpx * bw, cy + oy - perpy * bw), tip, new Color(150, 220, 255, 170));
+                            pb.Tri(P(ox + perpx * bw * 0.5f, cy + oy + perpy * bw * 0.5f),
+                                   P(ox - perpx * bw * 0.5f, cy + oy - perpy * bw * 0.5f),
+                                   P(ox + jx * plen * 0.6f, cy + oy + jy * plen * 0.6f), new Color(235, 250, 255, 220));
+                        }
+                    }
                 }
 
                 // slot modules visible on the hull when deployed/active: drawn from the module's icon

@@ -621,6 +621,39 @@ namespace Solar.Tests
                 Check("rcs translation", foreOk && drained && offNoForce && dryNoForce);
             }
 
+            // 25b. RCS translation authority scales with mass (heavier craft = less accel for the same
+            //      command, same block), and a freshly launched design starts with every tank full
+            //      INCLUDING monopropellant -- so RCS never silently does nothing for lack of fuel at launch.
+            {
+                Vessels.Vessel Make(bool heavy)
+                {
+                    var vd = new Vessels.VesselDesign();
+                    var pod = new Vessels.StackEntry(Parts.PartCatalog.Get("Pod Mk1"));
+                    pod.Modules.Add(Parts.ModuleCatalog.Get("Monoprop Tank"));
+                    pod.Modules.Add(Parts.ModuleCatalog.Get("RCS Thruster Block"));
+                    vd.Stack.Add(pod);
+                    vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Tank T400")));   // fuel mass
+                    if (heavy) vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Tank T800")));
+                    var v = vd.Instantiate();
+                    v.Heading = Math.PI / 2; v.RcsEnabled = true; v.RcsCommand = new Vec2d(0, 1);
+                    return v;
+                }
+                var light = Make(false);
+                var heavy = Make(true);
+
+                // launch fill: every part full, monoprop + EC at capacity (> 0)
+                bool tanksFull = true;
+                foreach (var p in light.Parts) if (Math.Abs(p.Fuel - p.Def.FuelCapacity) > 1e-6) tanksFull = false;
+                bool monoFull = light.MonopropCapacity > 0 && Math.Abs(light.Monoprop - light.MonopropCapacity) < 1e-6;
+                bool ecFull = light.EcCapacity > 0 && Math.Abs(light.ElectricCharge - light.EcCapacity) < 1e-6;
+
+                // mass-dependent accel: same single block, more mass -> less acceleration, matching F/m
+                bool massScaled = heavy.TotalMass > light.TotalMass
+                                  && heavy.RcsAccel.Length < light.RcsAccel.Length
+                                  && Math.Abs(heavy.RcsAccel.Length - light.RcsRawThrust / heavy.TotalMass) < 1e-6 * (light.RcsRawThrust / heavy.TotalMass);
+                Check("rcs mass scaling + launch fill", tanksFull && monoFull && ecFull && massScaled);
+            }
+
             // 26. on-rails <-> physics handoff preserves a vessel's state vector. Promoting a nearby
             //     tracked ship to physics (for rendezvous) and demoting it back must not teleport it.
             {
@@ -819,6 +852,29 @@ namespace Solar.Tests
                 Vessels.Staging.FireNext(v);                       // stage 1
                 bool litNow = v.Parts[2].Ignited;
                 Check("stage re-tag", v.Parts[2].Stage == 1 && notLit && litNow);
+            }
+
+            // 30d. reported case: liquid engine + decoupler + axial solid booster underneath. Auto staging must
+            //      put the SRB at stage 0 (fires first, lifts off) and the decoupler at stage 1; the first
+            //      spacebar press lights ONLY the SRB and detaches nothing. (A decoupler can never be stage 0.)
+            {
+                var vd = new Vessels.VesselDesign();
+                foreach (var n in new[] { "Pod Mk1", "Tank T400", "Terrier", "Decoupler", "Thumper SRB" })
+                    vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get(n)));
+                var v = vd.Instantiate();
+                var srb = v.Parts[4]; var dec = v.Parts[3]; var eng = v.Parts[2];
+                bool stages = srb.Def.Name == "Thumper SRB" && srb.Stage == 0
+                              && dec.Def.Name == "Decoupler" && dec.Stage == 1 && eng.Stage == 1;
+
+                var debris0 = Vessels.Staging.FireNext(v);         // stage 0: light the SRB only
+                bool lit0 = srb.Ignited && !eng.Ignited && debris0 == null && v.Parts.Count == 5;
+                bool lifts = v.CurrentThrust > v.TotalMass * Vessels.Staging.G0;   // SRB first stage TWR > 1
+
+                var debris1 = Vessels.Staging.FireNext(v);         // stage 1: decouple SRB, light the engine
+                bool decoupled = debris1 != null && debris1.Parts.Exists(p => p.Def.Name == "Thumper SRB")
+                                 && !v.Parts.Exists(p => p.Def.Name == "Thumper SRB")
+                                 && v.Parts.Exists(p => p.Def.Name == "Terrier" && p.Ignited);
+                Check("axial SRB lower stage", stages && lit0 && lifts && decoupled);
             }
 
             // 31. the "Internal_" sandbox cheat unlocks the whole tech tree; an ordinary name does not.
