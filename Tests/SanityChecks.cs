@@ -1060,6 +1060,19 @@ namespace Solar.Tests
                 Check("terrain wiring", sunSmooth && earthRelief);
             }
 
+            // 40b. launch-pad plain: Earth always has a flat, level plain at the pad longitude so a fresh
+            //      launch spawns on solid ground (not buried in a hill) at a fixed, repeatable spot.
+            {
+                var u = SolarSystemData.Create();
+                var earth = u["Earth"];
+                double a = SolarSystemData.LaunchPadAngle;
+                bool flat = earth.Terrain.SlopeAt(a) <= Terrain.LandableSlope;
+                bool level = Math.Abs(earth.Terrain.HeightAt(a)) < earth.Terrain.MaxAmplitude * 0.05;
+                bool surfaceSane = earth.SurfaceRadiusAt(a) >= earth.Radius * 0.9
+                                   && earth.SurfaceRadiusAt(a) <= earth.MaxRadius;
+                Check("launch-pad plain", flat && level && surfaceSane);
+            }
+
             // 41. patched-conic handoff + child-frame node planning (powers placing map nodes on the
             //     projected post-transition path): an orbit escaping the Moon's SOI hands off to Earth with
             //     a continuous absolute state, and a prograde burn planned on a Moon-relative orbit raises

@@ -27,7 +27,8 @@ namespace Solar.Physics
         public IReadOnlyList<double> PlainCenters { get; }
 
         public Terrain(double radius, double amplitude, int seed,
-                       int octaves = 6, double lacunarity = 2.0, double persistence = 0.6, int plains = 3)
+                       int octaves = 6, double lacunarity = 2.0, double persistence = 0.6, int plains = 3,
+                       IReadOnlyList<double> fixedPlains = null)
         {
             _radius = radius;
             Amplitude = amplitude;
@@ -52,13 +53,17 @@ namespace Solar.Physics
             }
             for (int k = 0; k < octaves; k++) _amp[k] /= sum;   // now |raw height| <= 1
 
-            int np = Math.Max(0, plains);
+            int nFixed = fixedPlains?.Count ?? 0;
+            int np = Math.Max(nFixed, Math.Max(0, plains));
             _plains = new (double, double)[np];
             var centers = new double[np];
             for (int j = 0; j < np; j++)
             {
-                double c = rnd.NextDouble() * Math.PI * 2;
-                double sigma = 0.10 + rnd.NextDouble() * 0.05;   // wide, smooth flat wells (~6-9 deg)
+                // the first slots are the requested fixed plains (deterministic, fixed width);
+                // the rest are random wells as before
+                double c, sigma;
+                if (j < nFixed) { c = fixedPlains[j]; sigma = 0.13; }   // ~7.5 deg flat well at a known longitude
+                else { c = rnd.NextDouble() * Math.PI * 2; sigma = 0.10 + rnd.NextDouble() * 0.05; }   // wide, smooth (~6-9 deg)
                 _plains[j] = (c, sigma);
                 centers[j] = c;
             }

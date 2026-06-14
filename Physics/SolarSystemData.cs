@@ -17,6 +17,10 @@ namespace Solar.Physics
         private const double DefaultTerrainAmpFrac = 0.02;   // peak relief = 2% of radius
         private const int DefaultTerrainPlains = 3;
 
+        /// <summary>Body-local longitude of the launch pad (Earth). Bodies don't rotate, so this is a
+        /// fixed world angle; the spawn code and the pad plain both reference it so they stay aligned.</summary>
+        public const double LaunchPadAngle = System.Math.PI / 2;
+
         public static Universe Create()
         {
             var u = new Universe();
@@ -48,7 +52,9 @@ namespace Solar.Physics
                         double amp = b.Radius * ampFrac;
                         int seed = d.TerrainSeed ?? d.Name.GetHashCode();
                         int plains = d.TerrainPlains ?? DefaultTerrainPlains;
-                        b.Terrain = new Terrain(b.Radius, amp, seed, plains: plains);
+                        // the home/launch body gets a guaranteed flat plain under the pad
+                        double[] fixedPlains = d.Name == "Earth" ? new[] { LaunchPadAngle } : null;
+                        b.Terrain = new Terrain(b.Radius, amp, seed, plains: plains, fixedPlains: fixedPlains);
                     }
                 }
                 if (parent != null)

@@ -25,6 +25,11 @@ namespace Solar.Physics
         // not serialized. Consumers fall back to the live body when this is null.
         public CelestialBody Body;
 
+        // The time the node's body SOI was entered: the position the node's conic is drawn
+        // around (now for the live body, the transition time for an encountered/escaped body).
+        // Runtime-only; recomputed each frame by the projection walk.
+        public double FrameUT = double.NaN;
+
         // Once the burn time passes, the node's absolute world position is frozen here so it
         // stays visible (and correctly placed) regardless of later orbit or SOI changes.
         public bool Reached;

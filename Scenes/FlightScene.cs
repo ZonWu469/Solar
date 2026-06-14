@@ -138,8 +138,10 @@ namespace Solar.Scenes
             {
                 site = Ctx.Universe["Earth"];
                 _vessel.Body = site;
-                _vessel.Position = new Vec2d(0, site.Radius);
-                _vessel.Heading = Math.PI / 2;
+                // spawn on the surface (a flat pad plain sits here), never buried in terrain relief
+                double a = SolarSystemData.LaunchPadAngle;
+                _vessel.Position = Vec2d.FromAngle(a, site.SurfaceRadiusAt(a));
+                _vessel.Heading = a;   // radial-up on the (flat) pad
                 _vessel.Throttle = 1.0;   // pad launch starts at full throttle so firing the first stage lifts off
             }
             _vessel.Velocity = Vec2d.Zero;
@@ -255,7 +257,8 @@ namespace Solar.Scenes
             OrbitalElements src = live;
             CelestialBody body = liveBody;
             double segStart = ut;
-            bool planned = false;   // becomes true once a node burn has been applied
+            double bodyRefUT = ut;   // time the current body's SOI was entered: the conic's draw origin
+            bool planned = false;    // becomes true once a node burn has been applied
             int ni = 0, guard = 0;
             while (guard++ < 16)
             {
@@ -267,20 +270,20 @@ namespace Solar.Scenes
                 if (node != null && node.UT <= transUT)
                 {
                     // a burn happens before the next SOI change: the orbit shape holds until the node
-                    segs.Add(new ProjSegment(src, body, body.AbsolutePositionAt(segStart), segStart, node.UT, false, planned));
-                    if (refreshNodes) { node.Source = src; node.Body = body; node.HasSource = true; }
+                    segs.Add(new ProjSegment(src, body, body.AbsolutePositionAt(bodyRefUT), segStart, node.UT, false, planned));
+                    if (refreshNodes) { node.Source = src; node.Body = body; node.HasSource = true; node.FrameUT = bodyRefUT; }
                     var res = node.ResultOrbit(src, body.Mu);
                     ni++;
                     if (double.IsNaN(res.A)) break;
-                    src = res; segStart = node.UT; planned = true;
+                    src = res; segStart = node.UT; planned = true;   // same body: bodyRefUT unchanged
                     continue;
                 }
 
                 bool hasTrans = !double.IsInfinity(transUT);
-                segs.Add(new ProjSegment(src, body, body.AbsolutePositionAt(segStart), segStart,
+                segs.Add(new ProjSegment(src, body, body.AbsolutePositionAt(bodyRefUT), segStart,
                                          hasTrans ? transUT : double.PositiveInfinity, !hasTrans, planned));
                 if (!hasTrans) break;
-                src = pred.NextOrbit; body = pred.NextBody; segStart = pred.TransitionUT;
+                src = pred.NextOrbit; body = pred.NextBody; segStart = pred.TransitionUT; bodyRefUT = pred.TransitionUT;
             }
             return segs;
         }
@@ -1370,7 +1373,16 @@ namespace Solar.Scenes
             if (node != null && node.HasSource)
             {
                 orbit = node.Source;
-                if (node.Body != null) { body = node.Body; primaryAbs = body.AbsolutePositionAt(ut); }
+                if (node.Body != null)
+                {
+                    // live-SOI node: anchor to the body's CURRENT position so the marker stays put as the
+                    // body moves (e.g. during a burn); a future encounter/escape patch uses its SOI-entry
+                    // (ghost) time, matching how BuildProjection draws that conic.
+                    double anchor = ReferenceEquals(node.Body, body) ? ut
+                                  : (double.IsNaN(node.FrameUT) ? ut : node.FrameUT);
+                    body = node.Body;
+                    primaryAbs = body.AbsolutePositionAt(anchor);
+                }
             }
             return true;
         }
