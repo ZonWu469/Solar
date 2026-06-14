@@ -44,6 +44,9 @@ namespace Solar.Scenes
         private string _targetName;
         private bool _showTargetWindow;
         private bool _showCrew;              // in-flight crew roster / transfer panel
+        private bool _showColony;            // colony / surface-base management panel (landed only)
+        private bool _showAddModule;         // colony "add module" sub-list
+        private bool _buildAtColony;         // deferred: open the editor to build a vessel at this base
         private bool _caValid;               // closest-approach solution for this frame
         private double _caUT, _caSep, _caRelSpeed;
         private List<ProximityPoint> _prox = new();  // geometric orbit-curve proximities (throttled)
@@ -95,6 +98,8 @@ namespace Solar.Scenes
                 _burnSpent = 0;
                 var b = _vessel.Body ?? Ctx.Universe["Earth"];
                 _vessel.Body = b;
+                // a colony kept producing while we were away: catch its tanks up to now
+                Colony.AdvanceProduction(_vessel, _resume.LastUT, Ctx.Clock.UT, Ctx.Universe);
                 if (_vessel.OnRails) _vessel.UpdateFromRails(Ctx.Clock.UT);
                 _lastBody = b;
                 _lastCamRel = _vessel.Position;
@@ -105,19 +110,34 @@ namespace Solar.Scenes
                 return;
             }
 
-            var earth = Ctx.Universe["Earth"];
             _vessel = Ctx.Design.Instantiate(Ctx.State.Roster);
             // a duplicate of an existing ship's name gets a progressive suffix so both persist
             _shipName = Ctx.State.UniqueShipName(Ctx.Design.Name);
-            _vessel.Body = earth;
-            _vessel.Position = new Vec2d(0, earth.Radius);
+
+            CelestialBody site;
+            if (Ctx.PendingLaunchSite is LaunchSite ls && Ctx.Universe[ls.BodyName] != null)
+            {
+                // built at a colony: spawn landed a few metres beside the base, at rest, ready to surface-dock
+                site = Ctx.Universe[ls.BodyName];
+                _vessel.Body = site;
+                _vessel.Position = ls.Position;
+                _vessel.Heading = ls.Heading;
+                _vessel.Throttle = 0;
+                Ctx.PendingLaunchSite = null;
+            }
+            else
+            {
+                site = Ctx.Universe["Earth"];
+                _vessel.Body = site;
+                _vessel.Position = new Vec2d(0, site.Radius);
+                _vessel.Heading = Math.PI / 2;
+                _vessel.Throttle = 1.0;   // pad launch starts at full throttle so firing the first stage lifts off
+            }
             _vessel.Velocity = Vec2d.Zero;
-            _vessel.Heading = Math.PI / 2;
             _vessel.Landed = true;
             _vessel.OnRails = false;
-            _vessel.Throttle = 1.0;   // pad launch starts at full throttle so firing the first stage lifts off
-            _lastBody = earth;
-            _mapZoom = earth.SoiRadius * 2.4 / Math.Min(Ctx.W, Ctx.H);
+            _lastBody = site;
+            _mapZoom = site.SoiRadius * 2.4 / Math.Min(Ctx.W, Ctx.H);
             SpawnOthers();
         }
 
@@ -130,11 +150,13 @@ namespace Solar.Scenes
                 if (s.Name == _shipName || s.Destroyed) continue;
                 var v = s.ToVessel(Ctx.Universe, Ctx.State.Roster);
                 if (v.Body == null) continue;
-                // skip a ship sitting on the same spot as the active vessel (e.g. another ship saved landed
-                // on the launch pad): it would render right on top of ours and read as stray parts. It's
-                // still persisted by PersistOthers, so this only suppresses the overlapping spawn/render.
+                Colony.AdvanceProduction(v, s.LastUT, Ctx.Clock.UT, Ctx.Universe);
+                // skip a ship sitting on the *same spot* as the active vessel (e.g. another ship saved landed
+                // on the launch pad): it would render right on top of ours and read as stray parts. Kept tight
+                // (true co-location) so a craft built a few metres beside a base still shows and can connect.
+                // It's still persisted by PersistOthers, so this only suppresses the overlapping spawn/render.
                 if (_vessel != null && v.Body == _vessel.Body && v.Landed && _vessel.Landed
-                    && (v.Position - _vessel.Position).Length < 100.0) continue;
+                    && (v.Position - _vessel.Position).Length < 8.0) continue;
                 if (!v.Landed && !v.OnRails) v.GoOnRails(Ctx.Clock.UT);
                 _others.Add(new TrackedShip { Name = s.Name, V = v });
             }
@@ -145,7 +167,7 @@ namespace Solar.Scenes
         {
             if (_vessel == null) return;
             Ctx.State.UT = Ctx.Clock.UT;
-            Ctx.State.UpsertShip(ShipState.From(_vessel, _shipName, _nodes, _targetName));
+            Ctx.State.UpsertShip(ShipState.From(_vessel, _shipName, _nodes, _targetName, Ctx.Clock.UT));
         }
 
         /// <summary>Snapshot every tracked co-orbiting ship back into the savegame (so undocked modules
@@ -157,7 +179,7 @@ namespace Solar.Scenes
                 var v = ts.V;
                 if (v.Destroyed) { Ctx.State.RemoveShip(ts.Name); continue; }
                 if (!v.Landed && !v.OnRails) v.GoOnRails(Ctx.Clock.UT);
-                Ctx.State.UpsertShip(ShipState.From(v, ts.Name));
+                Ctx.State.UpsertShip(ShipState.From(v, ts.Name, ut: Ctx.Clock.UT));
             }
         }
 
@@ -242,7 +264,13 @@ namespace Solar.Scenes
             if (inp.Pressed(Keys.T)) _showTargetWindow = !_showTargetWindow;
             if (inp.Pressed(Keys.V)) TakeControlOfTarget();
             if (inp.Pressed(Keys.U)) Undock();
+            if (inp.Pressed(Keys.K)) ConnectSurface(clock.UT);   // confirm a surface connection into a base
             if (inp.Pressed(Keys.C)) _showCrew = !_showCrew;
+            // colony / base management, available while landed
+            if (inp.Pressed(Keys.B) && _vessel != null && _vessel.Landed && !_vessel.Destroyed)
+            { _showColony = !_showColony; if (!_showColony) _showAddModule = false; }
+            if (!(_vessel != null && _vessel.Landed)) { _showColony = false; _showAddModule = false; }
+            if (_buildAtColony) { _buildAtColony = false; BuildAtColony(); return; }
             if (_map && inp.Pressed(Keys.F)) _focus = (_focus + 1) % (Ctx.Universe.Bodies.Count + 1);
 
             bool maneuverWheel = false;
@@ -368,10 +396,14 @@ namespace Solar.Scenes
                     double h = sdt / steps;
                     for (int s = 0; s < steps; s++)
                     {
+                        // the speed entering the step is the true approach speed at the surface; reading
+                        // velocity after a step that dips below ground would include gravity gained over
+                        // that substep, inflating the impact figure past the survivable threshold.
+                        double approach = _vessel.Velocity.Length;
                         Integrator.Step(_vessel, h);
                         clock.UT += h;
                         CheckSoiOffRails(clock.UT);
-                        if (CheckSurface()) break;
+                        if (CheckSurface(approach)) break;
                     }
                     _predTimer -= realDt;
                     if (_predTimer <= 0 && !_vessel.Destroyed && !_vessel.Landed)
@@ -495,7 +527,13 @@ namespace Solar.Scenes
             foreach (var ts in _others)
             {
                 var v = ts.V;
-                if (v.Landed || v.Destroyed) continue;
+                if (v.Destroyed) continue;
+                if (v.Landed)
+                {
+                    // a parked ship stays put; a colony's miners/recyclers keep running while we fly nearby
+                    if (v.IsColony && sdt > 0) v.UpdateResources(sdt, ut, Ctx.Universe);
+                    continue;
+                }
 
                 if (physWarp && OtherNear(v))
                 {
@@ -516,58 +554,77 @@ namespace Solar.Scenes
         /// for connecting two craft that are both parked on a surface into a compound base.</summary>
         private const double CaptureDist = 15.0;
         private const double SoftDockSpeed = 2.5;
-        private const double ConnectDist = 50.0;
+        private const double ConnectDist = 75.0;   // hand-landing tolerance: park within this of a base to connect
 
-        /// <summary>Join the active vessel to a tracked ship into one compound vessel: an orbital dock
-        /// (both coasting, within capture range, low relative speed) or a surface connection (both landed
-        /// nearby, no alignment needed). Both craft must have a free docking port.</summary>
+        /// <summary>A surface-connect candidate found this frame: a landed ship in connect range that the
+        /// player can join into a base by pressing the connect key. Null when none is in range.</summary>
+        private TrackedShip _surfaceConnect;
+
+        /// <summary>Auto-perform an orbital dock (a soft capture has no decision to make), and surface every
+        /// eligible surface connection as a candidate the player confirms with a key — so two craft don't
+        /// silently weld together the instant they touch down near each other.</summary>
         private void TryDock(double ut)
         {
+            _surfaceConnect = null;
             if (_vessel == null || _vessel.Destroyed || !_vessel.HasFreeDockingPort) return;
             foreach (var ts in _others)
             {
                 var o = ts.V;
                 if (o.Destroyed || o.Body != _vessel.Body || !o.HasFreeDockingPort) continue;
 
-                bool surface = _vessel.Landed && o.Landed;
-                if (surface)
+                if (_vessel.Landed && o.Landed)
                 {
-                    if ((o.Position - _vessel.Position).Length >= ConnectDist) continue;
+                    // surface connection: don't merge automatically — record it for a confirmed [K] connect
+                    if ((o.Position - _vessel.Position).Length < ConnectDist) { _surfaceConnect = ts; return; }
+                    continue;
                 }
-                else
-                {
-                    if (_vessel.Landed || o.Landed) continue;   // can't dock a flying craft to a landed one
-                    if ((o.Position - _vessel.Position).Length >= CaptureDist) continue;
-                    if ((o.Velocity - _vessel.Velocity).Length >= SoftDockSpeed) continue;
-                }
-
-                var myPort = _vessel.FirstFreeDockingPort();
-                var theirPort = o.FirstFreeDockingPort();
-                if (_vessel.OnRails) _vessel.GoOffRails(ut);
-                if (!surface)
-                {
-                    // conserve momentum into the merged rigid body (landed craft are already at rest)
-                    double m1 = _vessel.TotalMass, m2 = o.TotalMass;
-                    _vessel.Velocity = (_vessel.Velocity * m1 + o.Velocity * m2) / (m1 + m2);
-                }
-                _vessel.DockWith(o, myPort, theirPort);
-                _others.Remove(ts);
-                Ctx.State.RemoveShip(ts.Name);
-                ClearTarget();
-                if (!_vessel.Landed) RefreshPrediction(ut);
-                if (surface)
-                {
-                    var ms = Solar.Progression.Milestones.Evaluate(_vessel, ut, Ctx.State);
-                    _toast = ms != null ? $"+{ms.Reward:0} science  -  {ms.Title}" : $"Connected {ts.Name} to base";
-                }
-                else
-                {
-                    var ms = Solar.Progression.Milestones.Award(Ctx.State, "docking");
-                    _toast = ms != null ? $"+{ms.Reward:0} science  -  {ms.Title}" : $"Docked with {ts.Name}";
-                }
-                _toastT = 5;
+                if (_vessel.Landed || o.Landed) continue;   // can't dock a flying craft to a landed one
+                if ((o.Position - _vessel.Position).Length >= CaptureDist) continue;
+                if ((o.Velocity - _vessel.Velocity).Length >= SoftDockSpeed) continue;
+                DoDock(ts, o, false, ut);
                 return;
             }
+        }
+
+        /// <summary>Connect the active landed vessel to the pending surface candidate (the [K] action).</summary>
+        private void ConnectSurface(double ut)
+        {
+            if (_surfaceConnect == null) return;
+            var ts = _surfaceConnect; _surfaceConnect = null;
+            if (ts.V == null || ts.V.Destroyed || !_vessel.Landed || !ts.V.Landed) return;
+            if (!_vessel.HasFreeDockingPort || !ts.V.HasFreeDockingPort) return;
+            DoDock(ts, ts.V, true, ut);
+        }
+
+        /// <summary>Merge a tracked ship into the active vessel as one compound vessel, dropping it from the
+        /// tracked/saved set. Shared by an orbital dock and a surface connection.</summary>
+        private void DoDock(TrackedShip ts, Vessel o, bool surface, double ut)
+        {
+            var myPort = _vessel.FirstFreeDockingPort();
+            var theirPort = o.FirstFreeDockingPort();
+            if (_vessel.OnRails) _vessel.GoOffRails(ut);
+            if (!surface)
+            {
+                // conserve momentum into the merged rigid body (landed craft are already at rest)
+                double m1 = _vessel.TotalMass, m2 = o.TotalMass;
+                _vessel.Velocity = (_vessel.Velocity * m1 + o.Velocity * m2) / (m1 + m2);
+            }
+            _vessel.DockWith(o, myPort, theirPort);
+            _others.Remove(ts);
+            Ctx.State.RemoveShip(ts.Name);
+            ClearTarget();
+            if (!_vessel.Landed) RefreshPrediction(ut);
+            if (surface)
+            {
+                var ms = Solar.Progression.Milestones.Evaluate(_vessel, ut, Ctx.State);
+                _toast = ms != null ? $"+{ms.Reward:0} science  -  {ms.Title}" : $"Connected {ts.Name} to base";
+            }
+            else
+            {
+                var ms = Solar.Progression.Milestones.Award(Ctx.State, "docking");
+                _toast = ms != null ? $"+{ms.Reward:0} science  -  {ms.Title}" : $"Docked with {ts.Name}";
+            }
+            _toastT = 5;
         }
 
         /// <summary>Detach the most-recently docked module; it becomes a tracked co-orbiting ship.</summary>
@@ -581,7 +638,7 @@ namespace Solar.Scenes
             detached.GoOnRails(ut);
             string name = UniqueShipName(_shipName + " module");
             _others.Add(new TrackedShip { Name = name, V = detached });
-            Ctx.State.UpsertShip(ShipState.From(detached, name));
+            Ctx.State.UpsertShip(ShipState.From(detached, name, ut: ut));
             if (!_vessel.Landed && !_vessel.Destroyed) RefreshPrediction(ut);
             _toast = $"Undocked {name}"; _toastT = 4;
         }
@@ -698,13 +755,14 @@ namespace Solar.Scenes
             }
         }
 
-        private bool CheckSurface()
+        /// <summary>Resolve a surface contact. <paramref name="impactSpeed"/> is the approach speed
+        /// measured before the penetrating step, so the figure shown matches the land/crash verdict.</summary>
+        private bool CheckSurface(double impactSpeed)
         {
             var v = _vessel;
             if (v.Position.Length > v.Body.Radius) return false;
-            double speed = v.Velocity.Length;
             v.Position = v.Position.Normalized() * v.Body.Radius;
-            if (speed <= v.SafeLandingSpeed)
+            if (v.SurvivesTouchdown(impactSpeed))
             {
                 v.Velocity = Vec2d.Zero;
                 v.Landed = true;
@@ -715,7 +773,7 @@ namespace Solar.Scenes
             else
             {
                 v.Destroyed = true;
-                _endMessage = $"CRASHED into {v.Body.Name} at {speed:0} m/s   [Esc] to base";
+                _endMessage = $"CRASHED into {v.Body.Name} at {impactSpeed:0.0} m/s   [Esc] to base";
             }
             return true;
         }
@@ -1294,6 +1352,7 @@ namespace Solar.Scenes
             DrawTargetWindow(pb, sb);
             DrawScienceStatus(pb, sb, ut);
             DrawCrewPanel(pb, sb);
+            DrawColonyPanel(pb, sb, ut);
             DrawCancelMission(pb, sb);
 
             if (_toastT > 0 && _toast != null)
@@ -1304,6 +1363,17 @@ namespace Solar.Scenes
                 var pos = new Vector2(Ctx.W / 2 - sz.X / 2, 70);
                 pb.FillRect((int)pos.X - 14, (int)pos.Y - 6, (int)sz.X + 28, (int)sz.Y + 12, new Color(20, 30, 22, (int)(200 * alpha)));
                 sb.DrawString(f, _toast, pos, new Color(150, 230, 150) * alpha);
+            }
+
+            // surface-rendezvous prompt: a parked ship is in connect range — confirm the merge with [K]
+            if (_surfaceConnect != null && _vessel != null && _vessel.Landed && !_vessel.Destroyed && !_showExitDialog)
+            {
+                var f = Ctx.FontBig;
+                string msg = $"[K] connect to {_surfaceConnect.Name}";
+                var sz = f.MeasureString(msg);
+                var pos = new Vector2(Ctx.W / 2 - sz.X / 2, Ctx.H - 150);
+                pb.FillRect((int)pos.X - 12, (int)pos.Y - 6, (int)sz.X + 24, (int)sz.Y + 12, new Color(20, 30, 40, 200));
+                sb.DrawString(f, msg, pos, new Color(150, 230, 150));
             }
 
             DrawExitDialog(pb, sb);
@@ -1430,6 +1500,124 @@ namespace Solar.Scenes
             if (moveFrom != null && moveTo != null) v.TransferCrew(moveFrom, moveTo);
         }
 
+        /// <summary>Free module slots on a part (its capacity minus what fitted modules already consume).</summary>
+        private static int FreeSlots(Solar.Parts.Part p)
+        {
+            int used = 0; foreach (var m in p.Modules) used += m.Def.SlotCost;
+            return p.Def.Slots - used;
+        }
+
+        /// <summary>Surface-base management (landed only): establish a colony, then fabricate vessels and
+        /// modules at it from the base's pooled fuel. The heart of the build-a-base loop.</summary>
+        private void DrawColonyPanel(PrimitiveBatch pb, Microsoft.Xna.Framework.Graphics.SpriteBatch sb, double ut)
+        {
+            if (!_showColony) return;
+            var v = _vessel;
+            if (v == null || v.Destroyed || !v.Landed) return;
+            var f = Ctx.Font; var inp = Ctx.Input;
+
+            const int wWin = 300;
+            var r = new Rectangle(Ctx.W - wWin - 10, 320, wWin, 232);
+            UiDraw.Panel(pb, r);
+            float y = r.Y + 8;
+            sb.DrawString(f, "BASE  [B] close", new Vector2(r.X + 10, y), UiDraw.Accent); y += 24;
+            void Row(string label, string value, Color? c = null)
+            {
+                sb.DrawString(f, label, new Vector2(r.X + 12, y), UiDraw.TextDim);
+                sb.DrawString(f, value, new Vector2(r.X + 120, y), c ?? Color.White);
+                y += 18;
+            }
+            bool eng = Colony.HasEngineer(v);
+            Row("Body", v.Body.Name);
+            Row("Status", v.IsColony ? "COLONY" : "Landed craft", v.IsColony ? new Color(255, 190, 90) : Color.White);
+            Row("Modules", (v.DockLinks.Count + 1).ToString());
+            Row("Crew", v.CrewCount.ToString(), eng ? new Color(150, 220, 150) : Color.White);
+            Row("Fuel (material)", $"{v.TotalLiquidFuel:0} kg");
+            y += 6;
+
+            var btn = new Rectangle(r.X + 12, (int)y, wWin - 24, 26);
+            if (!v.IsColony)
+            {
+                bool can = Colony.CanEstablish(v);
+                if (UiDraw.Button(pb, sb, f, btn, "Establish Colony", inp, can))
+                { v.IsColony = true; _toast = "Colony established at " + v.Body.Name; _toastT = 4; }
+                y += 30;
+                if (!can) sb.DrawString(f, "needs crew aboard a landed craft", new Vector2(r.X + 12, y), UiDraw.TextDim);
+            }
+            else
+            {
+                bool canBuild = eng && v.TotalLiquidFuel >= Colony.BuildReserve;
+                if (UiDraw.Button(pb, sb, f, btn, "Build Vessel", inp, canBuild))
+                { _buildAtColony = true; _showColony = false; _showAddModule = false; }
+                y += 30;
+                var btn2 = new Rectangle(r.X + 12, (int)y, wWin - 24, 26);
+                if (UiDraw.Button(pb, sb, f, btn2, _showAddModule ? "Add Module  (close)" : "Add Module", inp, eng))
+                    _showAddModule = !_showAddModule;
+                y += 30;
+                sb.DrawString(f, eng ? "[C] manage crew" : "needs an engineer to fabricate",
+                              new Vector2(r.X + 12, y), eng ? UiDraw.TextDim : new Color(255, 170, 90));
+            }
+
+            if (_showAddModule && v.IsColony) DrawAddModule(pb, sb, r);
+        }
+
+        /// <summary>The "add module" sub-list: every tech-available module the base can fit and afford,
+        /// fabricated into the first part with a free slot for the base's fuel as raw material.</summary>
+        private void DrawAddModule(PrimitiveBatch pb, Microsoft.Xna.Framework.Graphics.SpriteBatch sb, Rectangle basePanel)
+        {
+            var v = _vessel; var f = Ctx.Font; var inp = Ctx.Input;
+            const int wWin = 300, rowH = 24, maxRows = 12;
+            var r = new Rectangle(basePanel.X - wWin - 6, basePanel.Y, wWin, 40 + maxRows * rowH);
+            UiDraw.Panel(pb, r);
+            sb.DrawString(f, "FABRICATE MODULE", new Vector2(r.X + 10, r.Y + 8), UiDraw.Accent);
+            float y = r.Y + 32;
+            int shown = 0;
+            foreach (var md in Solar.Parts.ModuleCatalog.All)
+            {
+                if (shown >= maxRows) break;
+                if (!Solar.Progression.TechTree.ModuleAvailable(Ctx.State, md.Name)) continue;
+                bool fits = false;
+                foreach (var p in v.AllParts()) if (FreeSlots(p) >= md.SlotCost) { fits = true; break; }
+                if (!fits) continue;
+                bool afford = Colony.CanFabricate(v, md.DryMass);
+                var br = new Rectangle(r.X + 10, (int)y, wWin - 20, rowH - 2);
+                string label = $"{md.Name}   {md.DryMass * Colony.MaterialPerKg:0} kg";
+                if (UiDraw.Button(pb, sb, f, br, label, inp, afford))
+                    FabricateModule(md);
+                y += rowH; shown++;
+            }
+            if (shown == 0)
+                sb.DrawString(f, "nothing fits / affordable", new Vector2(r.X + 10, y), UiDraw.TextDim);
+        }
+
+        /// <summary>Fit a fabricated module into the base's first part with a free slot, charging the
+        /// material cost. No-op if it no longer fits or the base can't pay.</summary>
+        private void FabricateModule(Solar.Parts.ModuleDef md)
+        {
+            var v = _vessel;
+            Solar.Parts.Part target = null;
+            foreach (var p in v.AllParts()) if (FreeSlots(p) >= md.SlotCost) { target = p; break; }
+            if (target == null) return;
+            if (!Colony.PayFabrication(v, md.DryMass)) return;
+            target.Modules.Add(new Solar.Parts.ModuleInstance(md));
+            _toast = $"Fabricated {md.Name}"; _toastT = 4;
+        }
+
+        /// <summary>Open the editor to build a new vessel at this colony: the next launch spawns it landed
+        /// a few metres beside the base (ready to surface-dock), rather than on the home pad.</summary>
+        private void BuildAtColony()
+        {
+            var v = _vessel;
+            if (v == null || !v.IsColony || !v.Landed || v.Destroyed) return;
+            var up = v.Position.Normalized();
+            var tangent = new Vec2d(-up.Y, up.X);                       // along the local surface
+            var pos = (v.Position + tangent * 25).Normalized() * v.Body.Radius;   // 25 m beside, on the surface
+            Ctx.PendingLaunchSite = new LaunchSite { BodyName = v.Body.Name, Position = pos, Heading = pos.Angle() };
+            PersistShip();
+            PersistOthers();
+            Ctx.Scenes.SwitchTo(new EditorScene(Ctx));
+        }
+
         private string FocusName() =>
             _focus == 0 ? "Vessel" : Ctx.Universe.Bodies[_focus - 1].Name;
 
@@ -1470,7 +1658,7 @@ namespace Solar.Scenes
                 if (_vessel.Landed && _targetVessel.Landed)
                 {
                     bool ready = d < ConnectDist;
-                    Row("Connect", ready ? "connecting..." : $"approach < {ConnectDist:0} m", ready ? green : blue);
+                    Row("Connect", ready ? "[K] to connect" : $"approach < {ConnectDist:0} m", ready ? green : blue);
                 }
                 else if (!_vessel.Landed && !_targetVessel.Landed)
                 {

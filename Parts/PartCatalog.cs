@@ -82,8 +82,8 @@ namespace Solar.Parts
             new PartDef { Name = "Docking Port Jr", Id = "docking-port-jr", Kind = PartKind.DockingPort, DryMass = 60, Width = 1.2, Height = 0.6, CdA = 0.06, Tint = new Color(195, 190, 205) },
             new PartDef { Name = "Shielded Port", Id = "shielded-port", Kind = PartKind.DockingPort, DryMass = 350, Width = 1.7, Height = 1.0, CdA = 0.15, Tint = new Color(185, 180, 195) },
             // landing gear
-            new PartDef { Name = "Landing Gear", Id = "landing-gear", Kind = PartKind.LandingGear, DryMass = 300, Width = 1.2, Height = 1.5, CdA = 0.1, ImpactTolerance = 5, Tint = new Color(160, 165, 175) },
-            new PartDef { Name = "Heavy Landing Gear", Id = "heavy-landing-gear", Kind = PartKind.LandingGear, DryMass = 800, Width = 2.0, Height = 2.2, CdA = 0.2, ImpactTolerance = 12, Tint = new Color(150, 155, 165) },
+            new PartDef { Name = "Landing Gear", Id = "landing-gear", Kind = PartKind.LandingGear, DryMass = 300, Width = 1.2, Height = 1.5, CdA = 0.1, ImpactTolerance = 14, Tint = new Color(160, 165, 175) },
+            new PartDef { Name = "Heavy Landing Gear", Id = "heavy-landing-gear", Kind = PartKind.LandingGear, DryMass = 800, Width = 2.0, Height = 2.2, CdA = 0.2, ImpactTolerance = 24, Tint = new Color(150, 155, 165) },
             // ---- NEW: structural bays & trusses (module carriers) ----
             new PartDef { Name = "Service Bay 1.7m",  Id = "service-bay-1-7m",   Kind = PartKind.StructuralBay, DryMass = 150, Width = 1.7, Height = 1.0, CdA = 0.3, Tint = new Color(140, 150, 165) },
             new PartDef { Name = "Service Bay 2.3m",  Id = "service-bay-2-3m",   Kind = PartKind.StructuralBay, DryMass = 300, Width = 2.3, Height = 1.5, CdA = 0.45, Tint = new Color(135, 145, 160) },
@@ -212,6 +212,6 @@ namespace Solar.Parts
         // by-size defaults used only when an entry omits the field (older/edited JSON)
         private static double DefaultPodAuthority(double dryMass) =>
             dryMass < 500 ? 0.10 : dryMass < 2000 ? 0.14 : dryMass < 4000 ? 0.20 : 0.28;
-        private static double DefaultGearTolerance(double dryMass) => dryMass < 500 ? 5.0 : 12.0;
+        private static double DefaultGearTolerance(double dryMass) => dryMass < 500 ? 14.0 : 24.0;
     }
 }

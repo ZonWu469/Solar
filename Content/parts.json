@@ -620,7 +620,7 @@
     "Width": 1.2,
     "Height": 1.5,
     "CdA": 0.1,
-    "ImpactTolerance": 5,
+    "ImpactTolerance": 14,
     "TintR": 160,
     "TintG": 165,
     "TintB": 175
@@ -636,7 +636,7 @@
     "Width": 2,
     "Height": 2.2,
     "CdA": 0.2,
-    "ImpactTolerance": 12,
+    "ImpactTolerance": 24,
     "TintR": 150,
     "TintG": 155,
     "TintB": 165

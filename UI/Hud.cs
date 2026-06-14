@@ -146,6 +146,42 @@ namespace Solar.UI
 
             if (v == null) return result;
 
+            // ---- descent guidance (top center): shows only on a low approach so the player can judge a
+            // touchdown. The SAFE/DANGER chip uses the very verdict the landing logic applies, so what the
+            // box promises is what happens on contact. ----
+            if (!v.Destroyed && !v.Landed)
+            {
+                var up = v.Position.Normalized();
+                double vspeed = v.Velocity.Dot(up);        // + up / - down
+                bool descending = vspeed < -0.05;
+                if (v.Altitude < 2000 && descending)
+                {
+                    double speed = v.Velocity.Length;
+                    double horiz = Math.Sqrt(Math.Max(0, speed * speed - vspeed * vspeed));
+                    bool safe = v.SurvivesTouchdown(speed);
+                    var dp = new Rectangle(w / 2 - 96, 64, 192, 86);
+                    UiDraw.Panel(pb, dp);
+                    sb.DrawString(f, "DESCENT", new Vector2(dp.X + 10, dp.Y + 6), UiDraw.Accent);
+                    var chip = safe ? new Color(150, 220, 150) : new Color(255, 100, 90);
+                    string chipTxt = safe ? "SAFE" : "DANGER";
+                    var csz = f.MeasureString(chipTxt);
+                    sb.DrawString(f, chipTxt, new Vector2(dp.Right - csz.X - 10, dp.Y + 6), chip);
+                    void DRow(int i, string label, string value, Color c)
+                    {
+                        float ry = dp.Y + 26 + i * 19;
+                        sb.DrawString(f, label, new Vector2(dp.X + 10, ry), UiDraw.TextDim);
+                        sb.DrawString(f, value, new Vector2(dp.X + 78, ry), c);
+                    }
+                    DRow(0, "Altitude", UiDraw.Dist(v.Altitude), Color.White);
+                    DRow(1, "Descent", UiDraw.Speed(-vspeed), chip);
+                    DRow(2, "Lateral", UiDraw.Speed(horiz), horiz < 2 ? Color.White : new Color(255, 190, 90));
+                    // rated touchdown speed, so the player knows the margin they're aiming under
+                    string rated = $"rated {v.SafeLandingSpeed:0} m/s";
+                    var rsz = f.MeasureString(rated);
+                    sb.DrawString(f, rated, new Vector2(dp.Right - rsz.X - 10, dp.Bottom - 20), UiDraw.TextDim);
+                }
+            }
+
             // ---- heading dial + throttle (bottom center) ----
             var dial = new Vector2(w / 2f, h - 78);
             float dr = 48;
@@ -371,7 +407,7 @@ namespace Solar.UI
             // ---- controls hint (bottom right) ----
             string hint = mapMode
                 ? "[click] orbit=node  [drag] handles  X=del node  [Tab/T] target  [F] focus  [C] crew  [M] flight"
-                : "[Shift/Ctrl] throttle  [A/D] rotate  [H] SAS  [Space] stage  [Tab/T] target  [C] crew  [M] map  [,/.] warp";
+                : "[Shift/Ctrl] throttle  [A/D] rotate  [H] SAS  [Space] stage  [Tab/T] target  [C] crew  [B] base  [M] map  [,/.] warp";
             var hsz = f.MeasureString(hint);
             sb.DrawString(f, hint, new Vector2(w - hsz.X - 12, h - 24), new Color(120, 132, 150));
 

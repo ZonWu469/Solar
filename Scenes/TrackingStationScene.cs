@@ -40,6 +40,7 @@ namespace Solar.Scenes
             {
                 var v = s.ToVessel(Ctx.Universe, Ctx.State.Roster);
                 if (v.Body == null) continue;
+                Colony.AdvanceProduction(v, s.LastUT, ut, Ctx.Universe);   // show caught-up colony stocks
                 if (v.OnRails) v.UpdateFromRails(ut);
                 _ships.Add(v);
             }
@@ -142,8 +143,19 @@ namespace Solar.Scenes
                 }
                 var s = _cam.WorldToScreen(v.AbsolutePosition(ut));
                 bool hover = Vector2.Distance(s, Ctx.Input.MousePos) <= 12f;
-                pb.FillCircle(s, hover ? 7f : 5f, col);
-                sb.DrawString(Ctx.Font, Ctx.State.Ships[i].Name, s + new Vector2(9, -8), col);
+                if (v.IsColony)
+                {
+                    // a colony reads as a base: an amber square rather than a ship dot
+                    var bcol = new Color(255, 190, 90);
+                    float r = hover ? 7f : 5f;
+                    pb.FillRect(new Rectangle((int)(s.X - r), (int)(s.Y - r), (int)(2 * r), (int)(2 * r)), bcol);
+                    sb.DrawString(Ctx.Font, Ctx.State.Ships[i].Name, s + new Vector2(9, -8), bcol);
+                }
+                else
+                {
+                    pb.FillCircle(s, hover ? 7f : 5f, col);
+                    sb.DrawString(Ctx.Font, Ctx.State.Ships[i].Name, s + new Vector2(9, -8), col);
+                }
             }
         }
 
@@ -161,8 +173,10 @@ namespace Solar.Scenes
             for (int i = 0; i < Ctx.State.Ships.Count && i < 16; i++)
             {
                 var ship = Ctx.State.Ships[i];
-                string label = ship.Landed ? $"{ship.Name}  (landed {ship.BodyName})"
-                                           : $"{ship.Name}  ({ship.BodyName})";
+                int modules = (ship.Links?.Count ?? 0) + 1;
+                string label = ship.IsColony ? $"{ship.Name}  (COLONY {ship.BodyName}, {modules} mod)"
+                             : ship.Landed   ? $"{ship.Name}  (landed {ship.BodyName})"
+                                             : $"{ship.Name}  ({ship.BodyName})";
                 if (UiDraw.Button(pb, sb, f, new Rectangle(16, y, PanelW - 32, 34), label, Ctx.Input))
                 { ResumeShip(i); return; }
                 y += 40;

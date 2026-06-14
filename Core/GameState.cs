@@ -297,6 +297,8 @@ namespace Solar.Core
         public OrbitalElements Orbit;
         public bool Landed;
         public bool Destroyed;
+        public bool IsColony;        // an established surface base (offline production runs while unattended)
+        public double LastUT;        // UT this ship was last simulated, so a colony can catch up production on load
         public bool EnginesIgnited;
         public int CurrentStage;     // next stage to fire, so a resumed ship stages correctly
         public double ElectricCharge;
@@ -309,7 +311,7 @@ namespace Solar.Core
         public List<ManeuverState> Nodes;
         public ManeuverState Node;   // legacy single-node field, still read on load
 
-        public static ShipState From(Vessel v, string name, IReadOnlyList<Maneuver> nodes = null, string targetName = null)
+        public static ShipState From(Vessel v, string name, IReadOnlyList<Maneuver> nodes = null, string targetName = null, double ut = 0)
         {
             var s = new ShipState
             {
@@ -323,6 +325,8 @@ namespace Solar.Core
                 Orbit = v.Orbit,
                 Landed = v.Landed,
                 Destroyed = v.Destroyed,
+                IsColony = v.IsColony,
+                LastUT = ut,
                 EnginesIgnited = v.EnginesIgnited,
                 CurrentStage = v.CurrentStage,
                 ElectricCharge = v.ElectricCharge,
@@ -365,6 +369,7 @@ namespace Solar.Core
                 Orbit = Orbit,
                 Landed = Landed,
                 Destroyed = Destroyed,
+                IsColony = IsColony,
                 EnginesIgnited = EnginesIgnited,
                 CurrentStage = CurrentStage,
                 ElectricCharge = ElectricCharge,

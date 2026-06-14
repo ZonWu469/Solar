@@ -268,15 +268,16 @@ namespace Solar.Tests
                 Check("nose cone drag", coned.TotalCdA < bare.TotalCdA);
             }
 
-            // 17. landing legs (module) and landing-gear parts both raise the survivable touchdown speed
-            //     above the 8 m/s baseline; the heavier gear (authored ImpactTolerance in parts.json) more.
+            // 17. a bare hull survives only a gentle touchdown; landing legs (module) and landing-gear
+            //     parts both raise the survivable speed, the heavier gear (authored ImpactTolerance) more.
+            //     The verdict has a small tolerance, so an impact at exactly the rating still lands.
             {
                 var v = new Vessels.Vessel();
                 double baseSpeed = v.SafeLandingSpeed;
                 var pod = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
                 pod.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Landing Legs")));
                 v.Parts.Add(pod);
-                bool legsHelp = baseSpeed == 8.0 && v.SafeLandingSpeed > baseSpeed;
+                bool legsHelp = baseSpeed == Vessels.Vessel.BareLandingSpeed && v.SafeLandingSpeed > baseSpeed;
 
                 var geared = new Vessels.Vessel();
                 geared.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
@@ -284,9 +285,18 @@ namespace Solar.Tests
                 var heavyGeared = new Vessels.Vessel();
                 heavyGeared.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
                 heavyGeared.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Heavy Landing Gear")));
-                bool gearHelps = geared.SafeLandingSpeed > 8.0 && heavyGeared.SafeLandingSpeed > geared.SafeLandingSpeed;
+                bool gearHelps = geared.SafeLandingSpeed > baseSpeed
+                                 && heavyGeared.SafeLandingSpeed > geared.SafeLandingSpeed
+                                 && geared.SafeLandingSpeed >= 20.0;   // a legged lander clears a real touchdown
 
-                Check("landing tolerance", legsHelp && gearHelps);
+                // verdict: a touch at the rating (or a hair under) lands; clearly above crashes.
+                var bare = new Vessels.Vessel();
+                bare.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                bool verdict = bare.SurvivesTouchdown(bare.SafeLandingSpeed)
+                               && bare.SurvivesTouchdown(bare.SafeLandingSpeed - 0.5)
+                               && !bare.SurvivesTouchdown(bare.SafeLandingSpeed + 1.0);
+
+                Check("landing tolerance", legsHelp && gearHelps && verdict);
             }
 
             // 17b. parachutes carry per-part deployed drag (authored DeployedCdA): a deployed chute raises
@@ -712,6 +722,42 @@ namespace Solar.Tests
                                 && !colMs.Done(new Vessels.Vessel { Body = u["Earth"], Landed = true }, 0, gs);
 
                 Check("colony base", refuelled && colonyOk);
+            }
+
+            // 29b. offline production: a colony's drill keeps mining while unattended. AdvanceProduction over
+            //      an elapsed span adds fuel at the live rate (clamped to capacity); a non-colony, a non-landed
+            //      craft, and a zero/negative span are all no-ops.
+            {
+                var u = SolarSystemData.Create();
+                var moon = u["Moon"];
+                // a properly powered base: generation exceeds the drill's draw, so EC stays up and mining
+                // runs the whole span (an underpowered base would correctly stall once its EC ran out).
+                Vessels.Vessel MakeBase()
+                {
+                    var b = new Vessels.Vessel { Body = moon, Landed = true, ElectricCharge = 100 };
+                    var tank = new Parts.Part(Parts.PartCatalog.Get("Tank T400")) { Fuel = 0 };
+                    tank.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Battery")));        // EC storage
+                    for (int k = 0; k < 4; k++)                                                            // 4x RTG > drill draw
+                        tank.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("RTG")));
+                    tank.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Drill")) { Active = true });
+                    b.Parts.Add(tank);
+                    return b;
+                }
+                var colony = MakeBase(); colony.IsColony = true;
+                double cap = colony.Parts[0].Def.FuelCapacity;
+                Vessels.Colony.AdvanceProduction(colony, 100, 110, u);           // 10 s of drilling -> fuel mined
+                bool produced = colony.TotalLiquidFuel > 0;
+                var capped = MakeBase(); capped.IsColony = true;
+                Vessels.Colony.AdvanceProduction(capped, 0, 1e9, u);             // huge span must clamp, never overflow
+                bool clamped = capped.TotalLiquidFuel > 0 && capped.TotalLiquidFuel <= cap + 1e-6;
+
+                var notColony = MakeBase();                                       // IsColony false
+                Vessels.Colony.AdvanceProduction(notColony, 0, 1000, u);
+                var noTime = MakeBase(); noTime.IsColony = true;
+                Vessels.Colony.AdvanceProduction(noTime, 100, 100, u);            // zero span
+                bool noops = notColony.TotalLiquidFuel == 0 && noTime.TotalLiquidFuel == 0;
+
+                Check("colony production", produced && clamped && noops);
             }
 
             // 30. per-radial staging choice (explicit stages): all radials ignite with their host at stage 0;

@@ -23,6 +23,7 @@ namespace Solar.Vessels
         public OrbitalElements Orbit;
         public bool Landed;
         public bool Destroyed;
+        public bool IsColony;        // a landed base the player has established (see Colony); enables offline production
         public bool EnginesIgnited;  // first stage has been fired
         public int CurrentStage;     // next stage index to fire (0 = first); advanced by Staging.FireNext
         public bool IsDebris;
@@ -96,17 +97,28 @@ namespace Solar.Vessels
             get { int n = 0; foreach (var p in AllParts()) foreach (var m in p.Modules) if (m.Def.Kind == ModuleKind.LandingLeg) n++; return n; }
         }
 
-        /// <summary>Touchdown speed the vessel survives: an 8 m/s baseline, plus each part's authored
-        /// landing-gear <see cref="PartDef.ImpactTolerance"/> (from parts.json) and a margin per leg module.</summary>
+        /// <summary>A bare hull survives only a gentle touchdown; landing legs/gear are what make a
+        /// hard landing survivable. Tuned so a pod alone clears ~6 m/s, while a properly legged lander
+        /// (gear's authored <see cref="PartDef.ImpactTolerance"/> from parts.json + a margin per leg
+        /// module) clears ~20-30 m/s.</summary>
+        public const double BareLandingSpeed = 6.0;
+        public const double LandingLegMargin = 5.0;
+
+        /// <summary>Touchdown speed the vessel survives (see <see cref="BareLandingSpeed"/>).</summary>
         public double SafeLandingSpeed
         {
             get
             {
-                double t = 8.0 + 4.0 * LandingLegs;
+                double t = BareLandingSpeed + LandingLegMargin * LandingLegs;
                 foreach (var p in AllParts()) t += p.Def.ImpactTolerance;
                 return t;
             }
         }
+
+        /// <summary>Whether a touchdown at <paramref name="impactSpeed"/> (m/s) is survivable. A small
+        /// tolerance keeps the boundary from being brittle (an impact shown as "6" doesn't crash a craft
+        /// rated for 6). Pure so it can be exercised by the self-tests.</summary>
+        public bool SurvivesTouchdown(double impactSpeed) => impactSpeed <= SafeLandingSpeed + 0.05;
 
         public bool ChuteDeployed
         {
@@ -404,6 +416,16 @@ namespace Solar.Vessels
                 double take = Math.Min(p.Fuel, amount);
                 p.Fuel -= take; amount -= take;
             }
+        }
+
+        /// <summary>Spend <paramref name="amount"/> kg of liquid fuel from anywhere on the vessel as a raw
+        /// material cost (colony construction). Returns false and spends nothing if the stock is short.</summary>
+        public bool TrySpendFuel(double amount)
+        {
+            if (amount <= 0) return true;
+            if (TotalLiquidFuel < amount) return false;
+            DrainAnyFuel(amount);
+            return true;
         }
 
         /// <summary>Instantaneous electric-charge production and draw (per second) given the current
