@@ -14,6 +14,14 @@ namespace Solar.Vessels
         public double Fuel;         // kg burned by this stage
         public double FuelCap;      // kg capacity of that fuel (for the HUD fuel bar)
         public bool Decouples;      // this stage fires a decoupler / drops parts
+
+        // ---- KSP-style readout: what this stage actually does (drives the stage-list labels + icons) ----
+        public string Action = "";  // short verb: Liftoff / Ignite / Drop boosters / Decouple / Parachute
+        public List<string> Ignites = new();  // friendly grouped names of engines igniting (e.g. "2x Thumper-R")
+        public List<string> Drops = new();    // friendly grouped names of parts jettisoned this stage
+        public bool RadialEvent;    // a separate radial mount (strap-on) jettisons this stage
+        public bool AxialDecouple;  // an axial decoupler fires this stage
+        public bool Chute;          // a parachute deploys this stage
     }
 
     /// <summary>KSP-style staging: every stageable element carries an explicit <see cref="Part.Stage"/>
@@ -25,34 +33,54 @@ namespace Solar.Vessels
         public const double G0 = 9.81;
 
         /// <summary>Fill any unassigned (<c>Stage &lt; 0</c>) stage indices from stack geometry, leaving
-        /// explicit (player-edited) stages untouched. Bottom segment = stage 0; each decoupler going up
-        /// fires one stage later (separating the segment below it) and exposes the next segment's engines;
-        /// separate radial mounts drop one stage after their host ignites; parachutes deploy last.</summary>
+        /// explicit (player-edited) stages untouched. Bottom segment fires at stage 0; if a segment carries
+        /// separate radial strap-ons they jettison on their own dedicated stage (one after the segment
+        /// ignites), and only then does the decoupler above shed the segment and expose the next one's
+        /// engines. So a core with side boosters defaults to: launch -> drop boosters -> stage the core,
+        /// matching KSP. Parachutes deploy last.</summary>
         public static void AssignDefaultStages(List<Part> parts)
         {
             int n = parts.Count;
             if (n == 0) return;
-            var seg = new int[n];          // geometric stage of each axial part's segment
-            int stg = 0;
+
+            // segment index of each axial part: 0 = bottom, +1 above each decoupler.
+            var seg = new int[n];
+            int segCount = 0;
             for (int i = n - 1; i >= 0; i--)
             {
-                if (parts[i].Def.Kind == PartKind.Decoupler) stg++;  // decoupler + parts above ride the next stage up
-                seg[i] = stg;
+                if (parts[i].Def.Kind == PartKind.Decoupler) segCount++;  // decoupler + parts above ride the next segment up
+                seg[i] = segCount;
             }
-            int maxSeg = stg;
+            int maxSeg = segCount;
+
+            // which segments shed separate strap-ons (boosters / drop tanks) — each needs an extra stage
+            // so the strap-ons jettison on their own, before the decoupler that sheds the whole segment.
+            var segDrops = new bool[maxSeg + 1];
+            for (int i = 0; i < n; i++)
+                foreach (var r in parts[i].Radials)
+                    if (r.RadialSeparate && r.Def.Kind != PartKind.Parachute) segDrops[seg[i]] = true;
+
+            // base (launch/ignite) stage per segment, bottom up: one stage to fire the segment, plus one
+            // more if it drops strap-ons, before the decoupler exposes the next segment up.
+            var baseStage = new int[maxSeg + 1];
+            for (int g = 1; g <= maxSeg; g++)
+                baseStage[g] = baseStage[g - 1] + (segDrops[g - 1] ? 1 : 0) + 1;
+            int maxStage = baseStage[maxSeg];
+            for (int g = 0; g <= maxSeg; g++) if (segDrops[g]) maxStage = Math.Max(maxStage, baseStage[g] + 1);
+
             for (int i = 0; i < n; i++)
             {
                 var p = parts[i];
                 if (p.Stage < 0)
-                    p.Stage = p.Def.Kind == PartKind.Parachute ? maxSeg + 1 : seg[i];
+                    p.Stage = p.Def.Kind == PartKind.Parachute ? maxStage + 1 : baseStage[seg[i]];
                 foreach (var r in p.Radials)
                 {
                     if (r.Stage < 0)
-                        r.Stage = r.Def.Kind == PartKind.Parachute ? maxSeg + 1
-                                : r.RadialSeparate ? seg[i] + 1 : seg[i];
+                        r.Stage = r.Def.Kind == PartKind.Parachute ? maxStage + 1
+                                : r.RadialSeparate ? baseStage[seg[i]] + 1 : baseStage[seg[i]];
                     // fire/ignite stage: engines fire with their host by default; chutes deploy last
                     if (r.FireStage < 0)
-                        r.FireStage = r.Def.Kind == PartKind.Parachute ? maxSeg + 1 : p.Stage;
+                        r.FireStage = r.Def.Kind == PartKind.Parachute ? maxStage + 1 : p.Stage;
                 }
             }
         }
@@ -245,8 +273,11 @@ namespace Solar.Vessels
             for (int s = 0; s <= maxStage; s++)
             {
                 // actions occurring at stage s (evaluated before its drops are applied)
-                bool dropsThis = ActionAt(present, s, PartKind.Decoupler) || SepRadialAt(present, s);
+                bool axialDec = ActionAt(present, s, PartKind.Decoupler);
+                bool radialDrop = SepRadialAt(present, s);
+                bool dropsThis = axialDec || radialDrop;
                 bool chuteThis = ActionAt(present, s, PartKind.Parachute);
+                var dropNow = dropsThis ? DropSet(present, s) : null;   // the parts THIS stage jettisons (for the label)
 
                 ApplyDrops(present, s);
                 if (present.Count == 0) break;
@@ -284,10 +315,27 @@ namespace Solar.Vessels
 
                 if (agg.Thrust <= 0 && !dropsThis && !chuteThis) continue;   // nothing to show this stage
 
+                // parts that newly ignite THIS stage (axial Stage == s, radials FireStage == s) -> the ignite list
+                var igniteNow = new List<Part>();
+                for (int i = 0; i < present.Count; i++)
+                {
+                    var p = present[i];
+                    if ((p.Def.Kind == PartKind.Engine || p.Def.Kind == PartKind.SolidBooster) && p.Stage == s) igniteNow.Add(p);
+                    foreach (var r in p.Radials)
+                        if ((r.Def.Kind == PartKind.Engine || r.Def.Kind == PartKind.SolidBooster) && r.FireStage == s) igniteNow.Add(r);
+                }
+
                 string label = agg.Engines.Count > 0 ? string.Join("+", agg.Engines)
                              : chuteThis ? "(parachute)"
                              : dropsThis ? "(decouple)" : "(no engine)";
-                var st = new StageStat { Number = s, Engines = label, Fuel = fuel, FuelCap = fuelCap, Decouples = dropsThis };
+                var st = new StageStat
+                {
+                    Number = s, Engines = label, Fuel = fuel, FuelCap = fuelCap, Decouples = dropsThis,
+                    RadialEvent = radialDrop, AxialDecouple = axialDec, Chute = chuteThis,
+                    Ignites = GroupCount(igniteNow),
+                    Drops = dropNow != null ? GroupCount(dropNow) : new List<string>(),
+                    Action = DeriveAction(s, igniteNow.Count > 0, radialDrop, axialDec, chuteThis, agg.Thrust > 0),
+                };
                 if (agg.Thrust > 0 && fuel > 0 && m0 > fuel)
                 {
                     double isp = agg.Thrust / agg.Flow / G0;
@@ -299,6 +347,35 @@ namespace Solar.Vessels
                 if (finalHere) remainderDone = true;
             }
             return stats;
+        }
+
+        /// <summary>Friendly grouped part names with counts in first-seen order, e.g. a pair of boosters
+        /// becomes "2x Thumper-R" (ASCII 'x' per the font constraint), a lone part stays "Terrier".</summary>
+        private static List<string> GroupCount(List<Part> parts)
+        {
+            var order = new List<string>();
+            var count = new Dictionary<string, int>();
+            foreach (var p in parts)
+            {
+                var n = p.Def.Name;
+                if (!count.ContainsKey(n)) { count[n] = 0; order.Add(n); }
+                count[n]++;
+            }
+            var res = new List<string>();
+            foreach (var n in order) res.Add(count[n] > 1 ? count[n] + "x " + n : n);
+            return res;
+        }
+
+        /// <summary>Short verb for what a stage does, leading with the separation event (KSP-style): a strap-on
+        /// jettison reads "Drop boosters", an axial decoupler "Decouple", an ignition "Liftoff" (stage 0) or
+        /// "Ignite", a chute "Parachute"; a stage that only continues an existing burn is "Burn".</summary>
+        private static string DeriveAction(int stage, bool ignites, bool radialDrop, bool axialDec, bool chute, bool thrust)
+        {
+            if (radialDrop) return "Drop boosters";
+            if (axialDec) return "Decouple";
+            if (ignites) return stage == 0 ? "Liftoff" : "Ignite";
+            if (chute) return "Parachute";
+            return thrust ? "Burn" : "Stage";
         }
 
         private static bool ActionAt(List<Part> present, int stage, PartKind kind)

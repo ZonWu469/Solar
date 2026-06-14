@@ -291,17 +291,27 @@ namespace Solar.UI
                     if (hover) pb.FillRect(rowRect, new Color(60, 95, 140, 120));
                     if (hover && ctx.Input.LeftClick) result.FireStage = true;
                     Color rc = active ? Color.White : UiDraw.TextDim;
-                    // right-align the dV readout to the panel edge, then truncate the engine label so it can't reach it
-                    string dvText = $"dV {st.DeltaV:0} m/s";
+                    // icon + "S{n} {Action}" on the top line, right-aligned dV; truncate the label so it can't reach the dV
+                    UiDraw.StageIcon(pb, new Rectangle(sp.X + 8, (int)sy + 2, 12, 12), st);
+                    string dvText = st.DeltaV > 0 ? $"dV {st.DeltaV:0} m/s" : "";
                     float dvX = sp.Right - 8 - f.MeasureString(dvText).X;
-                    sb.DrawString(f, dvText, new Vector2(dvX, sy), active ? UiDraw.Accent : UiDraw.TextDim);
-                    string full = $"S{st.Number} {st.Engines}{(st.Decouples ? " [dec]" : "")}";
+                    if (dvText.Length > 0) sb.DrawString(f, dvText, new Vector2(dvX, sy), active ? UiDraw.Accent : UiDraw.TextDim);
+                    string full = $"S{st.Number} {st.Action}";
                     string label = full;
-                    float maxLabelW = dvX - (sp.X + 8) - 8;
+                    float labelX = sp.X + 24;
+                    float maxLabelW = dvX - labelX - 8;
                     while (label.Length > 3 && f.MeasureString(label).X > maxLabelW) label = label.Substring(0, label.Length - 1);
                     if (label != full) label = label.Substring(0, Math.Max(3, label.Length - 2)) + "..";
-                    sb.DrawString(f, label, new Vector2(sp.X + 8, sy), rc);
-                    UiDraw.Bar(pb, new Rectangle(sp.X + 8, (int)sy + 18, sp.Width - 16, 8), (float)StageFuelFrac(st), new Color(120, 200, 120));
+                    sb.DrawString(f, label, new Vector2(labelX, sy), rc);
+                    // second line: what the stage ignites/drops, scaled down and clipped to the panel
+                    string detail = UiDraw.StageDetail(st);
+                    if (detail.Length > 0)
+                    {
+                        float maxW = sp.Width - 32;
+                        while (detail.Length > 3 && f.MeasureString(detail).X * 0.78f > maxW) detail = detail.Substring(0, detail.Length - 1);
+                        UiDraw.SmallText(sb, f, detail, new Vector2(sp.X + 24, sy + 15), UiDraw.TextDim, 0.78f);
+                    }
+                    UiDraw.Bar(pb, new Rectangle(sp.X + 8, (int)sy + 28, sp.Width - 16, 6), (float)StageFuelFrac(st), new Color(120, 200, 120));
                     sy += 38;
                 }
             }

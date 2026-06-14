@@ -5,6 +5,7 @@ using Microsoft.Xna.Framework.Graphics;
 using Solar.Core;
 using Solar.Parts;
 using Solar.Rendering;
+using Solar.Vessels;
 
 namespace Solar.UI
 {
@@ -143,6 +144,50 @@ namespace Solar.UI
         {
             sb.DrawString(f, text, pos, c, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
             return f.MeasureString(text).X * scale;
+        }
+
+        // ---- staging list (shared by the editor stats panel and the flight HUD so they read identically) ----
+
+        /// <summary>A small procedural glyph for what a stage does, leading with its separation event:
+        /// a strap-on jettison = two side bars (the radial tell), an axial decoupler = split bars, an
+        /// ignition = a flame triangle, a parachute = a dome. Drawn inside <paramref name="r"/>.</summary>
+        public static void StageIcon(PrimitiveBatch pb, Rectangle r, StageStat st)
+        {
+            float x = r.X, y = r.Y, w = r.Width, h = r.Height;
+            if (st.RadialEvent)   // two vertical side bars = strap-ons flying off
+            {
+                Color c = new Color(120, 210, 255);
+                pb.FillRect(x, y, w * 0.28f, h, c);
+                pb.FillRect(x + w * 0.72f, y, w * 0.28f, h, c);
+                pb.FillRect(x + w * 0.44f, y + h * 0.35f, w * 0.12f, h * 0.3f, new Color(90, 110, 140));
+            }
+            else if (st.AxialDecouple)   // a horizontal split = stack separation
+            {
+                Color c = new Color(210, 195, 90);
+                pb.FillRect(x, y, w, h * 0.32f, c);
+                pb.FillRect(x, y + h * 0.62f, w, h * 0.32f, c);
+            }
+            else if (st.Chute && st.Ignites.Count == 0)   // dome = parachute
+            {
+                Color c = new Color(235, 140, 70);
+                pb.FillCircle(new Vector2(x + w / 2, y + h * 0.5f), w * 0.42f, c);
+                pb.FillRect(x + w * 0.46f, y + h * 0.5f, w * 0.08f, h * 0.5f, new Color(180, 180, 180));
+            }
+            else   // flame triangle = engines ignite / burn
+            {
+                Color c = new Color(255, 170, 70);
+                pb.Tri(new Vector2(x, y), new Vector2(x + w, y), new Vector2(x + w / 2, y + h), c);
+            }
+        }
+
+        /// <summary>One-line description of the parts a stage ignites/drops, e.g.
+        /// "drop 2x Thumper-R   ignite Terrier" — empty when the stage neither ignites nor drops anything.</summary>
+        public static string StageDetail(StageStat st)
+        {
+            var parts = new List<string>();
+            if (st.Drops.Count > 0) parts.Add("drop " + string.Join(" + ", st.Drops));
+            if (st.Ignites.Count > 0) parts.Add("ignite " + string.Join(" + ", st.Ignites));
+            return string.Join("   ", parts);
         }
 
         public static void Bar(PrimitiveBatch pb, Rectangle r, float frac, Color fill)

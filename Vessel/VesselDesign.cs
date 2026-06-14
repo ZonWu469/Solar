@@ -42,10 +42,13 @@ namespace Solar.Vessels
         public StackEntry(PartDef def) { Def = def; }
 
         /// <summary>Mount a radial part as a new symmetric pair. When <paramref name="separate"/> is left
-        /// unset, the staging choice defaults by part type: a booster/engine drops as its own stage (STG),
-        /// while a fuel tank or structural part rides the core (KEEP) so it actually feeds the rocket.</summary>
+        /// unset, the staging choice defaults by part type: a booster/engine or a radial decoupler drops as
+        /// its own stage (STG), while a fuel tank or structural part rides the core (KEEP) so it actually
+        /// feeds the rocket.</summary>
         public void AddRadial(PartDef def, bool? separate = null)
-            => Mounts.Add(new RadialMount(def, separate ?? (def != null && (def.Kind == PartKind.Engine || def.Kind == PartKind.SolidBooster))));
+            => Mounts.Add(new RadialMount(def, separate ?? (def != null && (def.Kind == PartKind.Engine
+                                                                          || def.Kind == PartKind.SolidBooster
+                                                                          || def.Kind == PartKind.RadialDecoupler))));
 
         /// <summary>Attach <paramref name="def"/> to the bottom of an existing radial mount's sub-stack
         /// (e.g. an engine below a radial tank).</summary>

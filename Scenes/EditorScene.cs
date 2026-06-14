@@ -762,13 +762,21 @@ namespace Solar.Scenes
             for (int i = 0; i < stages.Count; i++)
             {
                 var st = stages[i];
-                Str($"S{st.Number}: {st.Engines}{(st.Decouples ? "  [decouple]" : "")}", x, y, Color.White);
-                string line = st.DeltaV > 0
-                    ? $"   dV {st.DeltaV:0} m/s  TWR {st.Twr:0.00}  {st.BurnTime:0}s"
-                    : "   (no thrust)";
-                Color c = st.DeltaV > 0 && st.Number == stages.Count && st.Twr < 1.0 ? new Color(255, 150, 90) : UiDraw.TextDim;
-                Str(line, x, y + 18, c);
-                y += 38;
+                if (Vis(y, 32))
+                {
+                    UiDraw.StageIcon(pb, new Rectangle((int)x, (int)y + 2, 13, 13), st);
+                    sb.DrawString(f, $"S{st.Number}  {st.Action}", new Vector2(x + 19, y), Color.White);
+                    if (st.DeltaV > 0)
+                    {
+                        string perf = $"dV {st.DeltaV:0}  TWR {st.Twr:0.00}";
+                        Color pc = st.Twr < 1.0 ? new Color(255, 150, 90) : UiDraw.Accent;
+                        sb.DrawString(f, perf, new Vector2(w - 26 - f.MeasureString(perf).X, y), pc);
+                    }
+                    string detail = UiDraw.StageDetail(st);
+                    if (detail.Length == 0 && st.DeltaV <= 0) detail = "(no thrust)";
+                    if (detail.Length > 0) UiDraw.SmallText(sb, f, detail, new Vector2(x + 19, y + 17), UiDraw.TextDim);
+                }
+                y += 36;
             }
             y += 8;
             Str($"Total dV: {totalDv:0} m/s", x, y, UiDraw.Accent); y += 22;
@@ -910,8 +918,8 @@ namespace Solar.Scenes
             {
                 var entry = Stack[_selected];
                 Str($"RADIAL  {entry.Def.Name}", x, y, UiDraw.Accent); y += 20;
-                Str("STG = drops as own stage   KEEP = rides core", x, y, UiDraw.TextDim); y += 18;
-                Str("fire S# = ignite   drop S# = jettison", x, y, UiDraw.TextDim); y += 18;
+                Str("STG = radial decouple (jettison)   KEEP = stays on core", x, y, UiDraw.TextDim); y += 18;
+                Str("fire S# = ignite   decouple S# = jettison", x, y, UiDraw.TextDim); y += 18;
                 Str("Hold a part, hover a radial to stack below it", x, y, UiDraw.TextDim); y += 20;
                 int hostEff = EffectiveStages()[_selected];
                 int[] fireEff = EffectiveMountFireStages(_selected);
@@ -938,7 +946,7 @@ namespace Solar.Scenes
                     // drop-stage steppers for a separate mount
                     if (sep)
                     {
-                        Str($"drop S{drop}", x + 14, y + 3, modeCol);
+                        Str($"decouple S{drop}", x + 14, y + 3, modeCol);
                         if (Btn(new Rectangle(w - 110, (int)y, 21, 20), "-", drop > fire)) { dropMount = mi; dropDelta = -1; }
                         if (Btn(new Rectangle(w - 86, (int)y, 21, 20), "+")) { dropMount = mi; dropDelta = 1; }
                         y += 24;

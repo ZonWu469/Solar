@@ -910,6 +910,87 @@ namespace Solar.Tests
                 Check("parachute keeps final burn dV", engDv > 1000);
             }
 
+            // 33e. side boosters jettison on their OWN stage, before the core decoupler: a Pod / Decoupler /
+            //      Tank(+separate radial boosters) / Engine defaults to launch(0) -> drop boosters(1) ->
+            //      decouple core(2). Regression for the old bug where the radial drop shared the decoupler's
+            //      stage, so jettisoning the boosters also shed the core tank.
+            {
+                var vd = new Vessels.VesselDesign();
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Pod Mk1")));
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Decoupler")));
+                var core = new Vessels.StackEntry(Parts.PartCatalog.Get("Tank T400"));
+                core.AddRadial(Parts.PartCatalog.Get("Thumper-R"), separate: true);   // strap-on pair (STG)
+                vd.Stack.Add(core);
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Terrier")));
+                var v = vd.Instantiate();
+                var dec = v.Parts[1]; var tank = v.Parts[2]; var eng = v.Parts[3];
+                bool stagesOk = tank.Stage == 0 && eng.Stage == 0
+                                && tank.Radials[0].FireStage == 0 && tank.Radials[0].Stage == 1
+                                && dec.Stage == 2;
+
+                var d0 = Vessels.Staging.FireNext(v);   // stage 0: ignite engine + boosters, drop nothing
+                bool s0 = d0 == null && tank.Radials.Count == 2 && eng.Ignited;
+                var d1 = Vessels.Staging.FireNext(v);   // stage 1: drop ONLY the boosters
+                bool s1 = d1 != null && tank.Radials.Count == 0
+                          && v.Parts.Exists(p => p.Def.Name == "Tank T400")   // core tank survives
+                          && d1.Parts.TrueForAll(p => p.Def.Name == "Thumper-R");
+                var d2 = Vessels.Staging.FireNext(v);   // stage 2: decouple the core, leaving the pod
+                bool s2 = d2 != null && d2.Parts.Exists(p => p.Def.Name == "Tank T400")
+                          && v.Parts.Count == 1 && v.Parts[0].Def.Kind == Parts.PartKind.Pod;
+                Check("strap-ons drop on own stage", stagesOk && s0 && s1 && s2);
+            }
+
+            // 33f. instantiating a design materializes one runtime radial per (side x sub-stack slot) with
+            //      contiguous RadialMountId/Side/Slot tags matching the design mounts, so the flight
+            //      renderer (which groups by those tags) draws every radial decoupler/booster the editor
+            //      showed. Mount 0 = [Radial Decoupler, Thumper-R] sub-stack; mount 1 = lone Thumper-R.
+            {
+                var vd = new Vessels.VesselDesign();
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Pod Mk1")));
+                var core = new Vessels.StackEntry(Parts.PartCatalog.Get("Tank T400"));
+                core.AddRadial(Parts.PartCatalog.Get("Radial Decoupler"));   // mount 0: root = radial decoupler
+                core.AppendToMount(0, Parts.PartCatalog.Get("Thumper-R"));   //          + booster below it
+                core.AddRadial(Parts.PartCatalog.Get("Thumper-R"));          // mount 1: plain booster
+                vd.Stack.Add(core);
+                var rs = vd.Instantiate().Parts[1].Radials;
+                // expected: mount 0 has 2 slots x 2 sides = 4, mount 1 has 1 slot x 2 sides = 2 -> 6 total
+                int m0 = 0, m1 = 0; bool tagsOk = true;
+                foreach (var r in rs)
+                {
+                    if (r.RadialMountId == 0) m0++;
+                    else if (r.RadialMountId == 1) m1++;
+                    else tagsOk = false;
+                    if (r.RadialSide < 0 || r.RadialSide > 1 || r.RadialSlot < 0) tagsOk = false;
+                }
+                bool sidesOk = rs.FindAll(r => r.RadialMountId == 0 && r.RadialSide == 0).Count == 2   // both slots, one side
+                               && rs.FindAll(r => r.RadialMountId == 0 && r.RadialSide == 1).Count == 2;
+                Check("radial materialize tags", rs.Count == 6 && m0 == 4 && m1 == 2 && tagsOk && sidesOk);
+            }
+
+            // 33g. enriched StageStat: a Pod / Decoupler / Tank(+STG boosters) / Terrier reads as
+            //      Liftoff -> Drop boosters -> Decouple, each stage naming what it ignites/drops, with the
+            //      radial jettison flagged distinctly from the axial decouple (drives the KSP-style list).
+            {
+                var vd = new Vessels.VesselDesign();
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Pod Mk1")));
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Decoupler")));
+                var core = new Vessels.StackEntry(Parts.PartCatalog.Get("Tank T400"));
+                core.AddRadial(Parts.PartCatalog.Get("Thumper-R"), separate: true);
+                vd.Stack.Add(core);
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Terrier")));
+                var sts = Vessels.Staging.ComputeStages(vd.Instantiate().Parts);
+
+                bool s0 = sts.Count >= 1 && sts[0].Action == "Liftoff"
+                          && sts[0].Ignites.Contains("Terrier") && sts[0].Ignites.Contains("2x Thumper-R");
+                bool s1 = sts.Count >= 2 && sts[1].Action == "Drop boosters"
+                          && sts[1].RadialEvent && !sts[1].AxialDecouple
+                          && sts[1].Drops.Count == 1 && sts[1].Drops[0] == "2x Thumper-R";
+                bool s2 = sts.Count >= 3 && sts[2].Action == "Decouple"
+                          && sts[2].AxialDecouple && !sts[2].RadialEvent
+                          && sts[2].Drops.Contains("Tank T400");
+                Check("enriched stage labels", sts.Count == 3 && s0 && s1 && s2);
+            }
+
             string res = $"Physics self-test: {pass}/{total} PASS";
             if (fails.Count > 0) res += "  FAILED: " + string.Join(", ", fails);
             return res;

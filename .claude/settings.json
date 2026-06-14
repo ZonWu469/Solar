@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(dotnet run *)",
-      "Bash(echo \"exit=$?\")"
+      "Bash(echo \"exit=$?\")",
+      "Bash(timeout 12 dotnet run --no-build)",
+      "Bash(echo \"exit: $?\")",
+      "Read(//tmp/**)"
     ]
   }
 }
