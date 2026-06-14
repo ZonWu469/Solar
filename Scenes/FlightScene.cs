@@ -1822,7 +1822,7 @@ namespace Solar.Scenes
             foreach (var md in Solar.Parts.ModuleCatalog.All)
             {
                 if (shown >= maxRows) break;
-                if (!Solar.Progression.TechTree.ModuleAvailable(Ctx.State, md.Name)) continue;
+                if (!Solar.Progression.TechTree.ModuleAvailable(Ctx.State, md.Id)) continue;
                 bool fits = false;
                 foreach (var p in v.AllParts()) if (FreeSlots(p) >= md.SlotCost) { fits = true; break; }
                 if (!fits) continue;

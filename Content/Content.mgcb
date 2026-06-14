@@ -63,6 +63,18 @@
 /processorParam:TextureFormat=Color
 /build:Textures/modules/atmosphere-analyzer.png
 
+#begin Textures/modules/atmospheric-harvester.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/atmospheric-harvester.png
+
 #begin Textures/modules/barometer.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -159,6 +171,18 @@
 /processorParam:TextureFormat=Color
 /build:Textures/modules/comm-16.png
 
+#begin Textures/modules/comm-32.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/comm-32.png
+
 #begin Textures/modules/comm-88.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -206,6 +230,18 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:Textures/modules/cryo-tank.png
+
+#begin Textures/modules/cupola.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/cupola.png
 
 #begin Textures/modules/deep-space-lab.png
 /importer:TextureImporter
@@ -267,6 +303,18 @@
 /processorParam:TextureFormat=Color
 /build:Textures/modules/fuel-cell.png
 
+#begin Textures/modules/fuel-depot-pod.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/fuel-depot-pod.png
+
 #begin Textures/modules/fuel-storage-pod.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -302,6 +350,42 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:Textures/modules/gravioli-detector.png
+
+#begin Textures/modules/greenhouse-dome.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/greenhouse-dome.png
+
+#begin Textures/modules/habitation-ring.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/habitation-ring.png
+
+#begin Textures/modules/heavy-reaction-wheel.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/heavy-reaction-wheel.png
 
 #begin Textures/modules/hydroponics-bay.png
 /importer:TextureImporter
@@ -447,6 +531,18 @@
 /processorParam:TextureFormat=Color
 /build:Textures/modules/radiation-detector.png
 
+#begin Textures/modules/rcs-quad.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/rcs-quad.png
+
 #begin Textures/modules/rcs-thruster-block.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -530,6 +626,18 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:Textures/modules/signal-booster.png
+
+#begin Textures/modules/snack-container.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/modules/snack-container.png
 
 #begin Textures/modules/solar-panel.png
 /importer:TextureImporter
@@ -675,6 +783,18 @@
 /processorParam:TextureFormat=Color
 /build:Textures/parts/docking-port-jr.png
 
+#begin Textures/parts/docking-port-md.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/parts/docking-port-md.png
+
 #begin Textures/parts/docking-port-sr.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -710,6 +830,18 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:Textures/parts/heavy-landing-gear.png
+
+#begin Textures/parts/inflatable-habitat.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/parts/inflatable-habitat.png
 
 #begin Textures/parts/ion-drive.png
 /importer:TextureImporter

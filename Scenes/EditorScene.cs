@@ -194,7 +194,7 @@ namespace Solar.Scenes
                 foreach (var def in PartCatalog.All)
                 {
                     if (System.Array.IndexOf(kinds, def.Kind) < 0) continue;
-                    if (!Progression.TechTree.PartAvailable(Ctx.State, def.Name)) continue;
+                    if (!Progression.TechTree.PartAvailable(Ctx.State, def.Id)) continue;
                     if (searching && !def.Name.ToLowerInvariant().Contains(q)) continue;
                     list.Add(def);
                 }
@@ -1055,7 +1055,9 @@ namespace Solar.Scenes
                 bool unlocked = Progression.TechTree.IsUnlocked(gs, n.Id);
                 bool prereq = Progression.TechTree.PrereqsMet(gs, n);
                 bool canBuy = Progression.TechTree.CanUnlock(gs, n);
-                var items = string.Join(", ", System.Linq.Enumerable.Concat(n.Parts, n.Modules));
+                var items = string.Join(", ", System.Linq.Enumerable.Concat(
+                    System.Linq.Enumerable.Select(n.Parts, p => PartCatalog.GetById(p)?.Name ?? p),
+                    System.Linq.Enumerable.Select(n.Modules, m => ModuleCatalog.GetById(m)?.Name ?? m)));
 
                 var rowR = new Rectangle(px + 16, y, pw - 32, rowH - 6);
                 if (unlocked)
@@ -1148,7 +1150,7 @@ namespace Solar.Scenes
                     if (yc + rowH > bodyTop && yc < bodyBot)
                     {
                         var rowR = new Rectangle(px + 16, (int)yc + 2, pw - 32, rowH - 4);
-                        bool avail = Progression.TechTree.ModuleAvailable(gs, m.Name);
+                        bool avail = Progression.TechTree.ModuleAvailable(gs, m.Id);
                         bool fits = usedSlots + m.SlotCost <= totalSlots;
                         bool selectable = avail && fits && !full;
                         bool hover = selectable && rowR.Contains((int)inp.MousePos.X, (int)inp.MousePos.Y);
@@ -1171,7 +1173,7 @@ namespace Solar.Scenes
                         // col 3 (right-aligned): "cost" = slots + mass, or the gating reason
                         if (!avail)
                         {
-                            string node = Progression.TechTree.Node(Progression.TechTree.TechForModule(m.Name))?.Title ?? "R&D";
+                            string node = Progression.TechTree.Node(Progression.TechTree.TechForModule(m.Id))?.Title ?? "R&D";
                             string need = $"needs {node}";
                             sb.DrawString(f, need, new Vector2(rowR.Right - f.MeasureString(need).X - 10, rowR.Y + 8), new Color(160, 135, 105));
                         }

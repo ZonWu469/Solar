@@ -27,12 +27,12 @@
     <PackageReference Include="MonoGame.Content.Builder.Task" Version="3.8.*" />
   </ItemGroup>
   <ItemGroup>
+    <!-- parts.json and modules.json are the authoritative, moddable catalog source (no in-code fallback);
+         they must always ship to the output Content folder, where the catalogs are loaded from. -->
     <Content Include="Content\parts.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
-    <!-- These catalogs are regenerated at runtime from the in-code BuiltIn() lists when absent, so a
-         missing source copy must not fail the build (it is recreated in the output Content folder). -->
-    <Content Include="Content\modules.json" Condition="Exists('Content\modules.json')">
+    <Content Include="Content\modules.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
     <Content Include="Content\bodies.json" Condition="Exists('Content\bodies.json')">

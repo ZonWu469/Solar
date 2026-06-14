@@ -261,7 +261,7 @@ namespace Solar.Scenes
                         ty += 18;
                         foreach (var p in node.Parts)
                         {
-                            sb.DrawString(f, $"  + {p}", new Vector2(mx + 8, ty), new Color(200, 220, 200));
+                            sb.DrawString(f, $"  + {Parts.PartCatalog.GetById(p)?.Name ?? p}", new Vector2(mx + 8, ty), new Color(200, 220, 200));
                             ty += 18;
                         }
                     }
@@ -271,7 +271,7 @@ namespace Solar.Scenes
                         ty += 18;
                         foreach (var m in node.Modules)
                         {
-                            sb.DrawString(f, $"  + {m}", new Vector2(mx + 8, ty), new Color(200, 215, 230));
+                            sb.DrawString(f, $"  + {Parts.ModuleCatalog.GetById(m)?.Name ?? m}", new Vector2(mx + 8, ty), new Color(200, 215, 230));
                             ty += 18;
                         }
                     }

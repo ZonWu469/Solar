@@ -10,6 +10,12 @@ namespace Solar.Tests
     {
         public static string Run()
         {
+            // The catalogs are the sole source of truth (Content/parts.json + modules.json). --selftest
+            // returns before SolarGame initializes, so load them here or every part/module test sees an
+            // empty catalog. Idempotent re-load at normal startup.
+            Parts.PartCatalog.Load();
+            Parts.ModuleCatalog.Load();
+
             int pass = 0, total = 0;
             var fails = new List<string>();
             void Check(string name, bool ok) { total++; if (ok) pass++; else fails.Add(name); }
@@ -195,10 +201,10 @@ namespace Solar.Tests
                 Progression.TechTree.Unlock(gs, heavy);
                 bool unlocked = Progression.TechTree.IsUnlocked(gs, "heavy")
                                 && Math.Abs(gs.Science - (1000 - heavy.Cost)) < 1e-9;
-                bool startAvail = Progression.TechTree.PartAvailable(gs, "Pod Mk1")
-                                  && Progression.TechTree.PartAvailable(gs, "Mainsail");          // now unlocked
+                bool startAvail = Progression.TechTree.PartAvailable(gs, "pod-mk1")
+                                  && Progression.TechTree.PartAvailable(gs, "mainsail");          // now unlocked
                 var fresh = new GameState { UnlockedTech = Progression.TechTree.StartingNodes() };
-                bool gatedHidden = !Progression.TechTree.PartAvailable(fresh, "Mainsail");        // still locked
+                bool gatedHidden = !Progression.TechTree.PartAvailable(fresh, "mainsail");        // still locked
                 Check("tech tree", lockedNoSci && buyable && unlocked && startAvail && gatedHidden);
             }
 
@@ -1109,8 +1115,8 @@ namespace Solar.Tests
                 bool catalogOk = true;
                 foreach (var n in Progression.TechTree.Nodes)
                 {
-                    foreach (var p in n.Parts) if (Parts.PartCatalog.Get(p) == null) catalogOk = false;
-                    foreach (var m in n.Modules) if (Parts.ModuleCatalog.Get(m) == null) catalogOk = false;
+                    foreach (var p in n.Parts) if (Parts.PartCatalog.GetById(p) == null) catalogOk = false;
+                    foreach (var m in n.Modules) if (Parts.ModuleCatalog.GetById(m) == null) catalogOk = false;
                 }
                 var laidOut = new HashSet<string>();
                 foreach (var e in Scenes.RDScene.Layout) laidOut.Add(e.Id);

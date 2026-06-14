@@ -1,4 +1,4 @@
-[
+﻿[
   {
     "Name": "Pod Mk1",
     "Id": "pod-mk1",
@@ -784,8 +784,8 @@
     "FuelCapacity": 0,
     "Thrust": 0,
     "Isp": 0,
-    "Width": 2.3,
-    "Height": 0.8,
+    "Width": 1.3,
+    "Height": 2.3,
     "CdA": 0.1,
     "DeployedCdA": 0,
     "ControlAuthority": 0,
