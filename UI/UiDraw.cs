@@ -190,6 +190,70 @@ namespace Solar.UI
             return string.Join("   ", parts);
         }
 
+        /// <summary>A procedural SAS-mode button glyph drawn inside <paramref name="r"/>. <paramref name="icon"/>
+        /// is the SasMode index. The glyph is a bright mode colour when usable, dimmed when unavailable; the
+        /// box border highlights when the mode is active and lightens on hover. Font is ASCII-only, so every
+        /// symbol is built from primitives.</summary>
+        public static void SasIcon(PrimitiveBatch pb, Rectangle r, int icon, bool active, bool available, bool hover)
+        {
+            Color bg = active ? new Color(40, 60, 90, 230) : hover ? new Color(28, 38, 56, 230) : new Color(20, 26, 38, 220);
+            pb.FillRect(r, bg);
+            pb.RectOutline(r, 1, active ? Accent : available ? PanelBorder : new Color(50, 60, 75));
+
+            Color modeCol = icon switch
+            {
+                2 => new Color(120, 255, 120),    // prograde
+                3 => new Color(255, 110, 100),    // retrograde
+                4 or 5 => new Color(120, 210, 255), // radial in/out
+                6 or 7 => new Color(235, 130, 235), // target / anti-target
+                8 => new Color(255, 170, 235),    // kill relative
+                9 => new Color(120, 210, 255),    // maneuver
+                _ => Accent,                       // stability
+            };
+            Color fg = !available ? new Color(70, 80, 95) : modeCol;
+
+            float x = r.X, y = r.Y, w = r.Width, h = r.Height, cx = x + w / 2, cy = y + h / 2;
+            switch (icon)
+            {
+                case 0: // Off: a stop square
+                    pb.FillRect(x + w * 0.32f, y + h * 0.32f, w * 0.36f, h * 0.36f, !available ? fg : TextDim);
+                    break;
+                case 1: // Stability: hollow box (hold current attitude)
+                    pb.RectOutline(new Rectangle((int)(x + w * 0.28f), (int)(y + h * 0.28f), (int)(w * 0.44f), (int)(h * 0.44f)), 2, fg);
+                    break;
+                case 2: // Prograde: up triangle
+                    pb.Tri(new Vector2(cx, y + h * 0.2f), new Vector2(x + w * 0.22f, y + h * 0.78f), new Vector2(x + w * 0.78f, y + h * 0.78f), fg);
+                    break;
+                case 3: // Retrograde: down triangle
+                    pb.Tri(new Vector2(x + w * 0.22f, y + h * 0.22f), new Vector2(x + w * 0.78f, y + h * 0.22f), new Vector2(cx, y + h * 0.8f), fg);
+                    break;
+                case 4: // Radial in: left triangle
+                    pb.Tri(new Vector2(x + w * 0.22f, cy), new Vector2(x + w * 0.74f, y + h * 0.24f), new Vector2(x + w * 0.74f, y + h * 0.76f), fg);
+                    break;
+                case 5: // Radial out: right triangle
+                    pb.Tri(new Vector2(x + w * 0.78f, cy), new Vector2(x + w * 0.26f, y + h * 0.24f), new Vector2(x + w * 0.26f, y + h * 0.76f), fg);
+                    break;
+                case 6: // Target: crosshair ring with filled centre
+                    pb.CircleOutline(new Vector2(cx, cy), w * 0.32f, 1.5f, fg);
+                    pb.FillCircle(new Vector2(cx, cy), w * 0.1f, fg);
+                    break;
+                case 7: // Anti-target: hollow crosshair ring with tick marks
+                    pb.CircleOutline(new Vector2(cx, cy), w * 0.32f, 1.5f, fg);
+                    pb.Line(new Vector2(x + w * 0.18f, cy), new Vector2(x + w * 0.82f, cy), 1.5f, fg);
+                    break;
+                case 8: // Kill relative: two opposed chevrons (converge)
+                    pb.Line(new Vector2(x + w * 0.2f, y + h * 0.3f), new Vector2(cx, cy), 1.5f, fg);
+                    pb.Line(new Vector2(x + w * 0.8f, y + h * 0.3f), new Vector2(cx, cy), 1.5f, fg);
+                    pb.Line(new Vector2(x + w * 0.2f, y + h * 0.7f), new Vector2(cx, cy), 1.5f, fg);
+                    pb.Line(new Vector2(x + w * 0.8f, y + h * 0.7f), new Vector2(cx, cy), 1.5f, fg);
+                    break;
+                case 9: // Maneuver: filled dot inside a ring (the burn marker)
+                    pb.CircleOutline(new Vector2(cx, cy), w * 0.3f, 1.5f, fg);
+                    pb.FillCircle(new Vector2(cx, cy), w * 0.16f, fg);
+                    break;
+            }
+        }
+
         public static void Bar(PrimitiveBatch pb, Rectangle r, float frac, Color fill)
         {
             pb.FillRect(r, new Color(20, 26, 38, 220));

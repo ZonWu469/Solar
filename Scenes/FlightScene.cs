@@ -53,8 +53,10 @@ namespace Solar.Scenes
         private double _proxTimer;
 
         // ----- attitude hold (SAS) -----
-        private enum SasMode { Off, Prograde, Retrograde, Target, AntiTarget, RelRetro }
+        private enum SasMode { Off, Stability, Prograde, Retrograde, RadialIn, RadialOut, Target, AntiTarget, RelRetro, Maneuver }
+        private const int SasModeCount = 10;
         private SasMode _sas = SasMode.Off;
+        private double _sasHold;            // captured world heading for Stability mode
 
         private Prediction _pred;
         private double _predTimer;
@@ -317,6 +319,10 @@ namespace Solar.Scenes
                         double dir = left ? 1 : -1;          // +CCW
                         _vessel.AngularVelocity = Math.Clamp(_vessel.AngularVelocity + dir * alpha * realDt, -maxRate, maxRate);
                         _sas = SasMode.Off;                  // manual input releases the hold
+                    }
+                    else if (_sas != SasMode.Off && !_vessel.SasAvailable)
+                    {
+                        _sas = SasMode.Off;                  // power lost (or SAS part gone): drop the hold
                     }
                     else if (_sas != SasMode.Off && SasHoldAngle(clock.UT) is double hold)
                     {
@@ -910,36 +916,72 @@ namespace Solar.Scenes
         private Vec2d TargetVel(double ut) =>
             _targetBody != null ? _targetBody.AbsoluteVelocityAt(ut) : _targetVessel.AbsoluteVelocity(ut);
 
-        /// <summary>Advance the attitude-hold mode, skipping target-relative modes when no target is set.</summary>
+        /// <summary>Advance the attitude-hold mode, skipping modes unavailable this frame. No-op without power.</summary>
         private void CycleSas()
         {
-            do { _sas = (SasMode)(((int)_sas + 1) % 6); }
-            while (_sas != SasMode.Off && SasHoldAngle(Ctx.Clock.UT) == null);
+            if (!_vessel.SasAvailable) { _sas = SasMode.Off; return; }
+            double ut = Ctx.Clock.UT;
+            var m = _sas;
+            do { m = (SasMode)(((int)m + 1) % SasModeCount); }
+            while (m != SasMode.Off && !SasModeAvailable(m, ut));
+            SetSas(m);
+        }
+
+        /// <summary>Engage a SAS mode (from the H key or an icon click): ignored without power, toggles off
+        /// when re-selecting the active mode, and captures the current heading for Stability.</summary>
+        private void SetSas(SasMode m)
+        {
+            if (m != SasMode.Off && !_vessel.SasAvailable) return;
+            if (m == _sas) m = SasMode.Off;                 // re-click deactivates
+            if (m == SasMode.Stability) _sasHold = _vessel.Heading;
+            _sas = m;
+        }
+
+        /// <summary>Whether a SAS mode can be engaged right now (its target/node/velocity precondition is met).</summary>
+        private bool SasModeAvailable(SasMode m, double ut)
+        {
+            if (m == SasMode.Off) return true;
+            if (!_vessel.SasAvailable) return false;
+            return m switch
+            {
+                SasMode.Stability or SasMode.RadialIn or SasMode.RadialOut => true,
+                _ => HoldAngleFor(m, ut) != null,
+            };
         }
 
         /// <summary>World angle the current SAS mode points at, or null if unavailable this frame.</summary>
-        private double? SasHoldAngle(double ut)
+        private double? SasHoldAngle(double ut) => HoldAngleFor(_sas, ut);
+
+        /// <summary>World angle a given SAS mode points at, or null if it can't be computed this frame.</summary>
+        private double? HoldAngleFor(SasMode m, double ut)
         {
             if (_vessel == null || _vessel.Destroyed) return null;
-            switch (_sas)
+            switch (m)
             {
+                case SasMode.Stability: return _sasHold;
                 case SasMode.Prograde: return _vessel.Velocity.Length > 0.1 ? _vessel.Velocity.Angle() : (double?)null;
                 case SasMode.Retrograde: return _vessel.Velocity.Length > 0.1 ? (-_vessel.Velocity).Angle() : (double?)null;
+                case SasMode.RadialOut: return _vessel.Position.Length > 1 ? _vessel.Position.Angle() : (double?)null;
+                case SasMode.RadialIn: return _vessel.Position.Length > 1 ? (-_vessel.Position).Angle() : (double?)null;
                 case SasMode.Target: return HasTarget ? (TargetPos(ut) - _vessel.AbsolutePosition(ut)).Angle() : (double?)null;
                 case SasMode.AntiTarget: return HasTarget ? (_vessel.AbsolutePosition(ut) - TargetPos(ut)).Angle() : (double?)null;
                 case SasMode.RelRetro:
                     if (!HasTarget) return null;
                     Vec2d rel = _vessel.AbsoluteVelocity(ut) - TargetVel(ut);
                     return rel.Length > 0.1 ? (-rel).Angle() : (double?)null;
+                case SasMode.Maneuver:
+                    double bd = BurnDirAngle(ut);
+                    return double.IsNaN(bd) ? (double?)null : bd;
                 default: return null;
             }
         }
 
         private string SasLabel() => _sas switch
         {
-            SasMode.Prograde => "PRO", SasMode.Retrograde => "RETRO",
+            SasMode.Stability => "STAB", SasMode.Prograde => "PRO", SasMode.Retrograde => "RETRO",
+            SasMode.RadialIn => "RAD-IN", SasMode.RadialOut => "RAD-OUT",
             SasMode.Target => "TGT", SasMode.AntiTarget => "ANTI-TGT",
-            SasMode.RelRetro => "KILL REL", _ => "",
+            SasMode.RelRetro => "KILL REL", SasMode.Maneuver => "MNVR", _ => "",
         };
 
         /// <summary>Bottom-left readout telling the player what the fitted instruments can collect here and
@@ -1084,6 +1126,12 @@ namespace Solar.Scenes
         private NavMarkers BuildNavMarkers(double ut)
         {
             var nav = new NavMarkers { SasMode = (int)_sas, SasLabel = SasLabel(), Target = double.NaN, RelPro = double.NaN };
+            bool sasOn = _vessel != null && !_vessel.Destroyed && _vessel.SasAvailable;
+            nav.SasEnabled = sasOn;
+            var icons = new SasIconInfo[SasModeCount];
+            for (int i = 0; i < SasModeCount; i++)
+                icons[i] = new SasIconInfo { Icon = i, Available = sasOn && SasModeAvailable((SasMode)i, ut), Active = (int)_sas == i };
+            nav.SasIcons = icons;
             if (HasTarget && _vessel != null && !_vessel.Destroyed && !_vessel.Landed)
             {
                 nav.Active = true;
@@ -1347,6 +1395,7 @@ namespace Solar.Scenes
             var hud = Hud.Draw(Ctx, _vessel, _pred, _map, FocusName(), NextNode(ut), BurnDirAngle(ut), _burnSpent, _nodes.Count, BuildNavMarkers(ut));
             if (hud.WarpToUT.HasValue) _warpTo = hud.WarpToUT;
             if (hud.FireStage) FireNextStage();
+            if (hud.RequestedSas.HasValue) SetSas((SasMode)hud.RequestedSas.Value);
 
             DrawTargetPanel(pb, sb, ut);
             DrawTargetWindow(pb, sb);

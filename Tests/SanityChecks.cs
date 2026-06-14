@@ -991,6 +991,21 @@ namespace Solar.Tests
                 Check("enriched stage labels", sts.Count == 3 && s0 && s1 && s2);
             }
 
+            // SAS radial-hold geometry: radial-out points along the body-relative position,
+            // radial-in is its exact opposite (what FlightScene.HoldAngleFor uses for those modes).
+            {
+                bool radOk = true;
+                for (int i = 0; i < 40 && radOk; i++)
+                {
+                    var pos = new Vec2d((rnd.NextDouble() - 0.5) * 2e6, (rnd.NextDouble() - 0.5) * 2e6);
+                    if (pos.Length < 1) continue;
+                    double outAng = pos.Angle();
+                    double inAng = (-pos).Angle();
+                    if (Math.Abs(Kepler.WrapPi(inAng - outAng - Math.PI)) > 1e-9) radOk = false;
+                }
+                Check("SAS radial in/out opposed", radOk);
+            }
+
             string res = $"Physics self-test: {pass}/{total} PASS";
             if (fails.Count > 0) res += "  FAILED: " + string.Join(", ", fails);
             return res;

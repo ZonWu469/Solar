@@ -14,6 +14,15 @@ namespace Solar.UI
     {
         public double? WarpToUT;   // set when the "Warp to maneuver" button was clicked
         public bool FireStage;     // set when the player clicked the stage list to fire the next stage
+        public int? RequestedSas;  // set to a SasMode index when an SAS icon was clicked
+    }
+
+    /// <summary>One SAS-mode icon's render state, computed by the flight scene.</summary>
+    public struct SasIconInfo
+    {
+        public int Icon;        // SasMode index (also selects the glyph)
+        public bool Available;  // can be engaged this frame (else greyed, not clickable)
+        public bool Active;     // currently the engaged mode
     }
 
     /// <summary>Target-relative navball cues, computed by the flight scene where target data lives.
@@ -26,6 +35,8 @@ namespace Solar.UI
         public string Readout;    // distance + closing speed line under the navball
         public int SasMode;       // 0 = off; >0 = active hold (for the navball label)
         public string SasLabel;   // short hold-mode name, ASCII
+        public bool SasEnabled;   // SAS is available (capable part + power); else the icon column is greyed
+        public SasIconInfo[] SasIcons; // per-mode icon states for the icon column (null = none)
     }
 
     public static class Hud
@@ -249,6 +260,25 @@ namespace Solar.UI
             pb.FillRect(thrRect.X + 1, thrRect.Y + 1 + (thrRect.Height - 2) * (1 - tf), thrRect.Width - 2, (thrRect.Height - 2) * tf, new Color(255, 170, 60));
             pb.RectOutline(thrRect, 1, UiDraw.PanelBorder);
             sb.DrawString(f, $"THR {v.Throttle * 100:0}%", new Vector2(thrRect.X - 6, thrRect.Bottom + 4), UiDraw.TextDim);
+
+            // ---- SAS mode icon column (left of the throttle bar) ----
+            if (nav.SasIcons != null && nav.SasIcons.Length > 0)
+            {
+                const int isz = 22, gap = 4;
+                int n = nav.SasIcons.Length;
+                int colH = n * isz + (n - 1) * gap;
+                int ix = thrRect.X - gap - isz;
+                int iy0 = thrRect.Bottom - colH;            // bottom-aligned to the throttle bar, growing upward
+                for (int i = 0; i < n; i++)
+                {
+                    var icon = nav.SasIcons[i];
+                    var r = new Rectangle(ix, iy0 + i * (isz + gap), isz, isz);
+                    bool clickable = nav.SasEnabled && icon.Available;
+                    bool hover = clickable && r.Contains((int)ctx.Input.MousePos.X, (int)ctx.Input.MousePos.Y);
+                    UiDraw.SasIcon(pb, r, icon.Icon, icon.Active, clickable, hover);
+                    if (hover && ctx.Input.LeftClick) result.RequestedSas = icon.Icon;
+                }
+            }
 
             // ---- propulsion strip (above the navball) ----
             if (!v.Destroyed)

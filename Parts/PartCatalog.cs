@@ -181,6 +181,7 @@ namespace Solar.Parts
         public double CdA { get; set; }
         public double DeployedCdA { get; set; }
         public double ControlAuthority { get; set; }
+        public bool Sas { get; set; }
         public double ImpactTolerance { get; set; }
         public int TintR { get; set; }
         public int TintG { get; set; }
@@ -191,7 +192,7 @@ namespace Solar.Parts
         {
             Name = p.Name, Id = p.Id, Kind = p.Kind, DryMass = p.DryMass, FuelCapacity = p.FuelCapacity,
             Thrust = p.Thrust, Isp = p.Isp, Width = p.Width, Height = p.Height, CdA = p.CdA,
-            DeployedCdA = p.DeployedCdA, ControlAuthority = p.ControlAuthority, ImpactTolerance = p.ImpactTolerance,
+            DeployedCdA = p.DeployedCdA, ControlAuthority = p.ControlAuthority, Sas = p.Sas, ImpactTolerance = p.ImpactTolerance,
             TintR = p.Tint.R, TintG = p.Tint.G, TintB = p.Tint.B,
             DefaultModules = p.DefaultModules.Count > 0 ? new List<string>(p.DefaultModules) : null,
         };
@@ -204,6 +205,7 @@ namespace Solar.Parts
             // migration-safe fallbacks so older parts.json (missing these fields) still behaves:
             DeployedCdA = DeployedCdA > 0 ? DeployedCdA : (Kind == PartKind.Parachute ? PartCatalog.ChuteDeployedCdA : 0),
             ControlAuthority = ControlAuthority > 0 ? ControlAuthority : (Kind == PartKind.Pod ? DefaultPodAuthority(DryMass) : 0),
+            Sas = Sas || Kind == PartKind.Pod,   // command pods/probe cores carry SAS unless JSON says otherwise
             ImpactTolerance = ImpactTolerance > 0 ? ImpactTolerance : (Kind == PartKind.LandingGear ? DefaultGearTolerance(DryMass) : 0),
             Tint = new Color(TintR, TintG, TintB),
             DefaultModules = DefaultModules ?? new List<string>(),

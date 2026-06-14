@@ -186,6 +186,17 @@ namespace Solar.Vessels
         /// a higher cap, but it stays bounded so fine attitude control is preserved.</summary>
         public double MaxTurnRate => Math.Min(0.35 + 0.22 * (ElectricCharge > 0 ? ReactionWheels : 0), 1.6);
 
+        /// <summary>Whether the craft can run attitude hold (SAS) at all: a fitted SAS-capable command
+        /// part (<see cref="PartDef.Sas"/>) or any reaction wheel. Power is checked by <see cref="SasAvailable"/>.</summary>
+        public bool HasSas
+        {
+            get { foreach (var p in AllParts()) if (p.Def.Sas) return true; return ReactionWheels > 0; }
+        }
+
+        /// <summary>SAS can be engaged right now: it needs a SAS-capable part and electric charge,
+        /// mirroring how reaction wheels in <see cref="ControlTorque"/> are gated on power.</summary>
+        public bool SasAvailable => HasSas && ElectricCharge > 0;
+
         /// <summary>Inclusive index ranges between decouplers (decouplers belong to no segment).</summary>
         public List<(int start, int end)> Segments()
         {

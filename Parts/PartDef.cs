@@ -20,6 +20,7 @@ namespace Solar.Parts
         public double CdA;           // drag coefficient * reference area, m^2
         public double DeployedCdA;   // extra CdA a deployed parachute adds (0 = not a chute / use legacy default)
         public double ControlAuthority; // command-part minimum steering authority, rad/s^2 (0 = no control)
+        public bool Sas;                // provides attitude-hold / SAS (a command part the player can engage)
         public double ImpactTolerance;  // m/s added to the safe landing speed (landing gear)
         public Color Tint;
 
