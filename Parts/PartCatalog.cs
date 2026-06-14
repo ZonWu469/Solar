@@ -31,8 +31,10 @@ namespace Solar.Parts
         };
 
         /// <summary>The built-in fallback catalog, also used to seed parts.json on first run.</summary>
-        public static List<PartDef> BuiltIn() => new()
+        public static List<PartDef> BuiltIn()
         {
+            var list = new List<PartDef>
+            {
             new PartDef { Name = "Pod Mk1", Id = "pod-mk1", Kind = PartKind.Pod, DryMass = 800, Width = 1.7, Height = 1.7, CdA = 1.2, ControlAuthority = 0.14, Tint = new Color(225, 228, 235) },
             new PartDef { Name = "Parachute", Id = "parachute", Kind = PartKind.Parachute, DryMass = 100, Width = 1.2, Height = 0.6, CdA = 0.4, DeployedCdA = 550, Tint = new Color(235, 130, 60) },
             new PartDef { Name = "Drogue Chute", Id = "drogue-chute", Kind = PartKind.Parachute, DryMass = 70, Width = 0.9, Height = 0.5, CdA = 0.3, DeployedCdA = 250, Tint = new Color(220, 150, 70) },
@@ -105,6 +107,8 @@ namespace Solar.Parts
             new PartDef { Name = "Toroidal Tank T1200", Id = "toroidal-tank-t1200", Kind = PartKind.Tank, DryMass = 1300, FuelCapacity = 10800, Width = 2.3, Height = 2.0, CdA = 0.4, Tint = new Color(170, 185, 200) },
             // ---- NEW: pod ----
             new PartDef { Name = "Mk1 Lander Can",    Id = "mk1-lander-can",     Kind = PartKind.Pod, DryMass = 1200, Width = 2.3, Height = 1.8, CdA = 1.0, ControlAuthority = 0.14, Tint = new Color(210, 215, 225) },
+            new PartDef { Name = "Lander Can 2",      Id = "lander-can-2",       Kind = PartKind.Pod, DryMass = 1800, Width = 2.5, Height = 2.0, CdA = 1.2, ControlAuthority = 0.20, Sas = true, Slots = 3, Tint = new Color(205, 212, 222) },
+            new PartDef { Name = "Big Pod",           Id = "big-pod",            Kind = PartKind.Pod, DryMass = 6500, Width = 2.5, Height = 3.6, CdA = 2.0, ControlAuthority = 0.30, Sas = true, Slots = 4, Tint = new Color(200, 208, 222) },
             // ---- NEW: advanced parts (ship with modules pre-fitted in their slots; still editable) ----
             new PartDef { Name = "Service Pod Mk1", Id = "service-pod-mk1", Kind = PartKind.Pod, DryMass = 1100, Width = 1.7, Height = 1.9, CdA = 1.2, ControlAuthority = 0.14, Tint = new Color(220, 222, 232),
                           DefaultModules = { "Solar Panel", "Battery", "Antenna" } },
@@ -112,7 +116,11 @@ namespace Solar.Parts
                           DefaultModules = { "RTG", "Battery", "Relay Antenna" } },
             new PartDef { Name = "Power Service Bay", Id = "power-service-bay", Kind = PartKind.StructuralBay, DryMass = 220, Width = 1.7, Height = 1.1, CdA = 0.3, Tint = new Color(140, 152, 168),
                           DefaultModules = { "Solar Panel", "Battery" } },
-        };
+            };
+            // built-in defs declare Slots only where it differs from the per-kind default; backfill the rest
+            foreach (var p in list) if (p.Slots == 0) p.Slots = PartDef.DefaultSlots(p.Kind);
+            return list;
+        }
 
         private static readonly JsonSerializerOptions JsonOpts = new()
         {
@@ -183,6 +191,7 @@ namespace Solar.Parts
         public double ControlAuthority { get; set; }
         public bool Sas { get; set; }
         public double ImpactTolerance { get; set; }
+        public int Slots { get; set; }
         public int TintR { get; set; }
         public int TintG { get; set; }
         public int TintB { get; set; }
@@ -193,6 +202,7 @@ namespace Solar.Parts
             Name = p.Name, Id = p.Id, Kind = p.Kind, DryMass = p.DryMass, FuelCapacity = p.FuelCapacity,
             Thrust = p.Thrust, Isp = p.Isp, Width = p.Width, Height = p.Height, CdA = p.CdA,
             DeployedCdA = p.DeployedCdA, ControlAuthority = p.ControlAuthority, Sas = p.Sas, ImpactTolerance = p.ImpactTolerance,
+            Slots = p.Slots,
             TintR = p.Tint.R, TintG = p.Tint.G, TintB = p.Tint.B,
             DefaultModules = p.DefaultModules.Count > 0 ? new List<string>(p.DefaultModules) : null,
         };
@@ -207,6 +217,7 @@ namespace Solar.Parts
             ControlAuthority = ControlAuthority > 0 ? ControlAuthority : (Kind == PartKind.Pod ? DefaultPodAuthority(DryMass) : 0),
             Sas = Sas || Kind == PartKind.Pod,   // command pods/probe cores carry SAS unless JSON says otherwise
             ImpactTolerance = ImpactTolerance > 0 ? ImpactTolerance : (Kind == PartKind.LandingGear ? DefaultGearTolerance(DryMass) : 0),
+            Slots = Slots > 0 ? Slots : PartDef.DefaultSlots(Kind),
             Tint = new Color(TintR, TintG, TintB),
             DefaultModules = DefaultModules ?? new List<string>(),
         };

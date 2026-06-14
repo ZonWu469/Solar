@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
@@ -592,9 +592,12 @@ namespace Solar.Scenes
                 var mount = e.Mounts[mi];
                 if (mount.Parts.Count == 0) continue;
                 float colW = 0, colH = 0;   // column width = widest part; height = sum of sub-stack heights
-                foreach (var rd in mount.Parts) { colW = Math.Max(colW, (float)(rd.Width * scale)); colH += (float)(rd.Height * scale); }
+                bool gear = false;
+                foreach (var rd in mount.Parts) { colW = Math.Max(colW, (float)(rd.Width * scale)); colH += (float)(rd.Height * scale); if (rd.Kind == PartKind.LandingGear) gear = true; }
                 float cxOff = colX + colW / 2;
-                float yTop = y + (ph - colH) * 0.5f;   // vertically center the whole sub-stack on the host
+                // landing gear attaches at the bottom third of the host (matching FlightScene's y + h*0.33);
+                // everything else centers vertically on the host
+                float yTop = gear ? y + ph * 0.67f : y + (ph - colH) * 0.5f;
                 for (int s = -1; s <= 1; s += 2)
                 {
                     float side = cx + s * cxOff;
@@ -1157,7 +1160,7 @@ namespace Solar.Scenes
 
                         // col 1: icon (dimmed when not selectable)
                         var iconR = new Rectangle(rowR.X + 6, rowR.Y + (rowR.Height - 26) / 2, 26, 26);
-                        UiDraw.Icon(pb, Ctx.Textures.Module(m.Id), iconR, m.Tint, !selectable);
+                        UiDraw.Icon(pb, Ctx.Textures.Module(m.Id), iconR, Color.White, !selectable);
                         pb.RectOutline(iconR, 1, new Color(50, 66, 92));
 
                         // col 2: name

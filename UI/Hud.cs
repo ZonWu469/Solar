@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Solar.Core;
@@ -261,22 +261,66 @@ namespace Solar.UI
             pb.RectOutline(thrRect, 1, UiDraw.PanelBorder);
             sb.DrawString(f, $"THR {v.Throttle * 100:0}%", new Vector2(thrRect.X - 6, thrRect.Bottom + 4), UiDraw.TextDim);
 
-            // ---- SAS mode icon column (left of the throttle bar) ----
+            // ---- SAS mode icons in 2 columns (left of the throttle bar), paired normal/anti ----
             if (nav.SasIcons != null && nav.SasIcons.Length > 0)
             {
-                const int isz = 22, gap = 4;
-                int n = nav.SasIcons.Length;
-                int colH = n * isz + (n - 1) * gap;
-                int ix = thrRect.X - gap - isz;
-                int iy0 = thrRect.Bottom - colH;            // bottom-aligned to the throttle bar, growing upward
-                for (int i = 0; i < n; i++)
+                const int isz = 22, gap = 4, colGap = 6;
+                // rows: (left icon, right icon); -1 means "span both columns"
+                var rows = new (int left, int right)[] {
+                    (2, 3),   // Prograde / Retrograde
+                    (4, 5),   // Radial In / Radial Out
+                    (6, 7),   // Target / Anti-Target
+                    (8, 9),   // Kill Relative / Maneuver
+                    (1, -1),  // Stability (span)
+                    (0, -1),  // Off (span)
+                };
+                int nRows = rows.Length;
+                int gridH = nRows * isz + (nRows - 1) * gap;
+                // two-column grid sits left of the throttle bar, bottom-aligned with it
+                int gridLeft = thrRect.X - gap - colGap - isz * 2;
+                int gridTop = thrRect.Bottom - gridH;
+
+                SasIconInfo ByIdx(int idx)
                 {
-                    var icon = nav.SasIcons[i];
-                    var r = new Rectangle(ix, iy0 + i * (isz + gap), isz, isz);
-                    bool clickable = nav.SasEnabled && icon.Available;
-                    bool hover = clickable && r.Contains((int)ctx.Input.MousePos.X, (int)ctx.Input.MousePos.Y);
-                    UiDraw.SasIcon(pb, r, icon.Icon, icon.Active, clickable, hover);
-                    if (hover && ctx.Input.LeftClick) result.RequestedSas = icon.Icon;
+                    foreach (var icon in nav.SasIcons)
+                        if (icon.Icon == idx) return icon;
+                    return default;
+                }
+
+                for (int row = 0; row < nRows; row++)
+                {
+                    var spec = rows[row];
+                    int iy = gridTop + row * (isz + gap);
+
+                    void DrawCell(int iconIdx, int col)
+                    {
+                        if (iconIdx < 0) return;
+                        var icon = ByIdx(iconIdx);
+                        int ix = gridLeft + col * (isz + colGap);
+                        var r = new Rectangle(ix, iy, isz, isz);
+                        bool clickable = nav.SasEnabled && icon.Available;
+                        bool hover = clickable && r.Contains((int)ctx.Input.MousePos.X, (int)ctx.Input.MousePos.Y);
+                        UiDraw.SasIcon(pb, r, icon.Icon, icon.Active, clickable, hover);
+                        if (hover && ctx.Input.LeftClick) result.RequestedSas = icon.Icon;
+                    }
+
+                    if (spec.right < 0)
+                    {
+                        // span both columns: draw a single centered icon
+                        var icon = ByIdx(spec.left);
+                        int spanW = isz * 2 + colGap;
+                        int ix = gridLeft;
+                        var r = new Rectangle(ix, iy, spanW, isz);
+                        bool clickable = nav.SasEnabled && icon.Available;
+                        bool hover = clickable && r.Contains((int)ctx.Input.MousePos.X, (int)ctx.Input.MousePos.Y);
+                        UiDraw.SasIcon(pb, r, icon.Icon, icon.Active, clickable, hover);
+                        if (hover && ctx.Input.LeftClick) result.RequestedSas = icon.Icon;
+                    }
+                    else
+                    {
+                        DrawCell(spec.left, 0);
+                        DrawCell(spec.right, 1);
+                    }
                 }
             }
 
@@ -288,7 +332,7 @@ namespace Solar.UI
                 double mass = v.TotalMass;
                 double twr = g > 0 ? thrust / (mass * g) : 0;
                 double accel = thrust / mass;
-                var ps = new Rectangle((int)(dial.X - 150), (int)(dial.Y - dr - 56), 300, 44);
+                var ps = new Rectangle((int)(dial.X - 150), (int)(dial.Y - dr - 120), 300, 44);
                 UiDraw.Panel(pb, ps);
                 void Cell(int col, string label, string value, Color c)
                 {
@@ -447,7 +491,7 @@ namespace Solar.UI
             // ---- controls hint (bottom right) ----
             string hint = mapMode
                 ? "[click] orbit=node  [drag] handles  X=del node  [Tab/T] target  [F] focus  [C] crew  [M] flight"
-                : "[Shift/Ctrl] throttle  [A/D] rotate  [H] SAS  [Space] stage  [Tab/T] target  [C] crew  [B] base  [M] map  [,/.] warp";
+                : "[Shift/Ctrl] throttle  [A/D] rotate  [H] SAS  [L] gear  [Space] stage  [Tab/T] target  [C] crew  [B] base  [M] map  [,/.] warp";
             var hsz = f.MeasureString(hint);
             sb.DrawString(f, hint, new Vector2(w - hsz.X - 12, h - 24), new Color(120, 132, 150));
 

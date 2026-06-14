@@ -98,6 +98,11 @@ namespace Solar.Rendering
                                 d.Tint, d.Tint, d.Tint, d.Tint);
                         break;
 
+                    case PartKind.LandingGear:
+                        // landing gear is always radial; the axial case is unreachable but kept for safety.
+                        // When not deployed, draw nothing — gear is completely hidden.
+                        break;
+
                     default: // Tank
                         pb.Quad(P(-w / 2, y), P(-w / 2, y + h), P(w / 2, y + h), P(w / 2, y),
                                 dark, dark, light, light);
@@ -118,6 +123,20 @@ namespace Solar.Rendering
                     pb.Line(P(-w * 0.4f, y + h), P(-4.4f, y + h + 6f), Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
                     pb.Line(P(w * 0.4f, y + h), P(4.4f, y + h + 6f), Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
                     pb.FillCircle(canopy, 5.5f * pxPerM, new Color(235, 130, 60), PlanetRenderer.Darken(new Color(235, 130, 60), 0.3f));
+                }
+                // landing gear deploy: strut+pad extending downward from the bottom-third of the axial part
+                // (unreachable in practice since landing gear is always radial; kept for completeness).
+                // Skip the procedural placeholder when a texture already depicts the deployed gear.
+                if (d.Kind == PartKind.LandingGear && p.Deployed && pt == null)
+                {
+                    float gx = 0, gy = y + h * 0.33f;
+                    float strutLen = h * 0.8f, padW = w * 0.65f, padH = h * 0.15f;
+                    Color strutC = new Color(180, 185, 195);
+                    pb.Line(P(gx - w * 0.12f, gy), P(gx - w * 0.35f, gy - strutLen), Math.Max(1.2f, 1.8f * pxPerM), strutC);
+                    pb.Line(P(gx + w * 0.12f, gy), P(gx + w * 0.35f, gy - strutLen), Math.Max(1.2f, 1.8f * pxPerM), strutC);
+                    pb.Quad(P(gx - padW / 2, gy - strutLen - padH), P(gx + padW / 2, gy - strutLen - padH),
+                            P(gx + padW / 2, gy - strutLen), P(gx - padW / 2, gy - strutLen),
+                            d.Tint, d.Tint, dark, dark);
                 }
 
                 // slot modules visible on the hull when deployed/active: drawn from the module's icon
@@ -197,29 +216,40 @@ namespace Solar.Rendering
                         float sign = (r.RadialSide == 0) ? 1f : -1f;
                         xc = sign * mountOffset[r.RadialMountId];
                         // flight local-Y increases toward the nose, so invert the slot offset to keep
-                        // sub-stack slot 0 at the nose side (matching the editor's top-down sub-stack)
-                        yb = y + (h - colH) * 0.5f + (colH - yOff - rh);
+                        // sub-stack slot 0 at the nose side (matching the editor's top-down sub-stack);
+                        // landing gear attaches at the bottom third of the host part
+                        yb = rd.Kind == PartKind.LandingGear
+                            ? y + h * 0.33f - rh
+                            : y + (h - colH) * 0.5f + (colH - yOff - rh);
                     }
                     else
                     {
                         float sign = (k % 2 == 0) ? 1f : -1f;   // legacy untagged fallback
                         int slot = k / 2;
                         xc = sign * (w / 2f + rw / 2f + 0.15f + slot * (rw + 0.1f));
-                        yb = y + (h - rh) * 0.5f;
+                        // landing gear attaches at the bottom third rather than centered
+                        yb = rd.Kind == PartKind.LandingGear ? y + h * 0.33f - rh : y + (h - rh) * 0.5f;
                     }
                     Color rdark = PlanetRenderer.Darken(rd.Tint, 0.40f), rlight = PlanetRenderer.Lighten(rd.Tint, 0.12f);
 
                     var rt = tex?.Part(rd.Id);
                     if (rt != null)
+                    {
                         // textures are authored right-oriented; mirror the left-side (RadialSide 1) copy
-                        pb.TexturedQuad(rt, P(xc - rw / 2, yb + rh), P(xc + rw / 2, yb + rh), P(xc + rw / 2, yb), P(xc - rw / 2, yb), Color.White, r.RadialSide != 0);
+                        // landing gear only shows its textured body when deployed
+                        if (rd.Kind != PartKind.LandingGear || r.Deployed)
+                            pb.TexturedQuad(rt, P(xc - rw / 2, yb + rh), P(xc + rw / 2, yb + rh), P(xc + rw / 2, yb), P(xc - rw / 2, yb), Color.White, r.RadialSide != 0);
+                    }
                     else if (rd.Kind == PartKind.SolidBooster)
                     {
                         pb.Tri(P(xc, yb + rh), P(xc - rw / 2, yb + rh * 0.9f), P(xc + rw / 2, yb + rh * 0.9f), rlight);
                         pb.Quad(P(xc - rw / 2, yb), P(xc - rw / 2, yb + rh * 0.9f), P(xc + rw / 2, yb + rh * 0.9f), P(xc + rw / 2, yb), rdark, rdark, rlight, rlight);
                     }
-                    else
+                    else if (rd.Kind != PartKind.LandingGear || r.Deployed)
+                    {
+                        // hide the gear body when retracted
                         pb.Quad(P(xc - rw / 2, yb), P(xc - rw / 2, yb + rh), P(xc + rw / 2, yb + rh), P(xc + rw / 2, yb), rdark, rdark, rlight, rlight);
+                    }
 
                     // a radial liquid engine carries no fuel of its own (it burns the radial tank's
                     // cross-fed pool), so gate its flame on vessel thrust like the axial engines above;
@@ -243,6 +273,20 @@ namespace Solar.Rendering
                         pb.Line(P(xc - rw * 0.4f, yb + rh), P(xc - 4.4f, yb + rh + 6f), Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
                         pb.Line(P(xc + rw * 0.4f, yb + rh), P(xc + 4.4f, yb + rh + 6f), Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
                         pb.FillCircle(canopy, 5.5f * pxPerM, new Color(235, 130, 60), PlanetRenderer.Darken(new Color(235, 130, 60), 0.3f));
+                    }
+                    // deployed radial landing gear: when no texture is authored, draw a procedural
+                    // strut + foot pad. The texture (when present) already depicts the deployed gear,
+                    // so skip the placeholder strut/pad over it.
+                    if (rd.Kind == PartKind.LandingGear && r.Deployed && rt == null)
+                    {
+                        float gearTop = yb + rh;
+                        float strutLen = rh * 0.85f, padW = rw * 0.7f, padH = rh * 0.16f;
+                        Color strutC = new Color(180, 185, 195);
+                        pb.Line(P(xc - rw * 0.14f, gearTop), P(xc - rw * 0.38f, gearTop - strutLen), Math.Max(1.2f, 1.8f * pxPerM), strutC);
+                        pb.Line(P(xc + rw * 0.14f, gearTop), P(xc + rw * 0.38f, gearTop - strutLen), Math.Max(1.2f, 1.8f * pxPerM), strutC);
+                        pb.Quad(P(xc - padW / 2, gearTop - strutLen - padH), P(xc + padW / 2, gearTop - strutLen - padH),
+                                P(xc + padW / 2, gearTop - strutLen), P(xc - padW / 2, gearTop - strutLen),
+                                rd.Tint, rd.Tint, rdark, rdark);
                     }
                 }
                 y += h;

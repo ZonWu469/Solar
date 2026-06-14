@@ -5,7 +5,9 @@
       "Bash(echo \"exit=$?\")",
       "Bash(timeout 12 dotnet run --no-build)",
       "Bash(echo \"exit: $?\")",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "PowerShell(dotnet run -- --selftest)",
+      "PowerShell($j = Get-Content \"Content/parts.json\" -Raw | ConvertFrom-Json; \"Entries: $\\($j.Count\\)\"; $j | Where-Object { $_.Id -in @\\('lander-can-2','big-pod','pod-mk1','tank-t200','landing-gear','docking-port-sr'\\) } | Select-Object Id, Kind, Slots | Format-Table -AutoSize)"
     ]
   }
 }

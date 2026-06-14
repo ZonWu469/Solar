@@ -37,9 +37,13 @@ namespace Solar.Parts
         public bool Radial => Kind == PartKind.RadialDecoupler || Kind == PartKind.LandingGear
                               || (Id != null && (Id.EndsWith("-r") || Id.StartsWith("radial-")));
 
-        /// <summary>Number of module slots this part exposes (derived from kind so it needs no
-        /// catalog/JSON migration). Pods and tanks carry equipment; structural parts don't.</summary>
-        public int Slots => Kind switch
+        /// <summary>Number of module slots this part exposes (set per-part in parts.json). Pods and
+        /// tanks carry equipment; structural parts don't. Entries that omit it fall back to
+        /// <see cref="DefaultSlots"/>.</summary>
+        public int Slots;
+
+        /// <summary>Per-kind slot defaults, used to backfill entries whose JSON omits <see cref="Slots"/>.</summary>
+        public static int DefaultSlots(PartKind kind) => kind switch
         {
             PartKind.Pod => 3,
             PartKind.Tank => 2,

@@ -296,6 +296,7 @@ namespace Solar.Scenes
                 if (inp.Pressed(Keys.Z)) _vessel.Throttle = 1;
                 if (inp.Pressed(Keys.X)) _vessel.Throttle = 0;
                 if (inp.Pressed(Keys.G)) ToggleSolar();
+                if (inp.Pressed(Keys.L)) ToggleGear();
                 if (inp.Pressed(Keys.H)) CycleSas();
                 if (inp.Pressed(Keys.R)) _vessel.RcsEnabled = !_vessel.RcsEnabled;
                 _vessel.RcsCommand = Vec2d.Zero;
@@ -677,6 +678,17 @@ namespace Solar.Scenes
             foreach (var p in _vessel.Parts)
                 foreach (var m in p.Modules)
                     if (m.Def.Kind == Parts.ModuleKind.SolarPanel) m.Active = anyStowed;
+        }
+
+        /// <summary>Deploy all landing gear if any are retracted, otherwise retract them all.</summary>
+        private void ToggleGear()
+        {
+            if (_vessel == null) return;
+            bool anyRetracted = false;
+            foreach (var p in _vessel.AllParts())
+                if (p.Def.Kind == Solar.Parts.PartKind.LandingGear && !p.Deployed) anyRetracted = true;
+            foreach (var p in _vessel.AllParts())
+                if (p.Def.Kind == Solar.Parts.PartKind.LandingGear) p.Deployed = anyRetracted;
         }
 
         private void UpdateClosestApproach(double ut)
