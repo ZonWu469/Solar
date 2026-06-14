@@ -28,6 +28,13 @@ namespace Solar.Physics
         public int AtmoR { get; set; }
         public int AtmoG { get; set; }
         public int AtmoB { get; set; }
+
+        // Terrain relief (all optional; null falls back to a sensible default so older bodies.json files
+        // still get terrain). TerrainAmp is the peak elevation as a fraction of the body radius; 0 disables
+        // terrain (smooth ball). The star is always smooth regardless (it has no surface).
+        public double? TerrainAmp { get; set; }
+        public int? TerrainSeed { get; set; }
+        public int? TerrainPlains { get; set; }
     }
 
     /// <summary>The celestial-body catalog. Loaded from Content/bodies.json at startup, falling back to

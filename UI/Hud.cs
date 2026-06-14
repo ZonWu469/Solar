@@ -169,8 +169,10 @@ namespace Solar.UI
                 {
                     double speed = v.Velocity.Length;
                     double horiz = Math.Sqrt(Math.Max(0, speed * speed - vspeed * vspeed));
-                    bool safe = v.SurvivesTouchdown(speed);
-                    var dp = new Rectangle(w / 2 - 96, 64, 192, 86);
+                    double slope = v.Body.Terrain?.SlopeAt(v.Position.Angle()) ?? 0;
+                    bool flat = slope <= Solar.Physics.Terrain.LandableSlope;
+                    bool safe = v.SurvivesTouchdown(speed) && flat;   // both speed and slope must be OK
+                    var dp = new Rectangle(w / 2 - 96, 64, 192, 104);
                     UiDraw.Panel(pb, dp);
                     sb.DrawString(f, "DESCENT", new Vector2(dp.X + 10, dp.Y + 6), UiDraw.Accent);
                     var chip = safe ? new Color(150, 220, 150) : new Color(255, 100, 90);
@@ -183,10 +185,15 @@ namespace Solar.UI
                         sb.DrawString(f, label, new Vector2(dp.X + 10, ry), UiDraw.TextDim);
                         sb.DrawString(f, value, new Vector2(dp.X + 78, ry), c);
                     }
-                    DRow(0, "Altitude", UiDraw.Dist(v.Altitude), Color.White);
+                    DRow(0, "Altitude", UiDraw.Dist(v.Altitude), Color.White);   // above ground (terrain)
                     DRow(1, "Descent", UiDraw.Speed(-vspeed), chip);
                     DRow(2, "Lateral", UiDraw.Speed(horiz), horiz < 2 ? Color.White : new Color(255, 190, 90));
-                    // rated touchdown speed, so the player knows the margin they're aiming under
+                    // surface verdict for the spot directly below + the rated touchdown speed (margin)
+                    if (v.Body.Terrain != null)
+                    {
+                        var sc = flat ? new Color(150, 220, 150) : new Color(255, 100, 90);
+                        sb.DrawString(f, flat ? "LANDABLE" : "TOO STEEP", new Vector2(dp.X + 10, dp.Bottom - 20), sc);
+                    }
                     string rated = $"rated {v.SafeLandingSpeed:0} m/s";
                     var rsz = f.MeasureString(rated);
                     sb.DrawString(f, rated, new Vector2(dp.Right - rsz.X - 10, dp.Bottom - 20), UiDraw.TextDim);
@@ -425,7 +432,7 @@ namespace Solar.UI
                 else
                 {
                     // ignition is half the burn before the node; warp to 2 minutes before that
-                    double ignition = node.UT - (enough && bt > 0 ? bt / 2 : 0);
+                    double ignition = node.UT - (enough && bt > 0 ? bt : 0);
                     double warpTarget = ignition - 120;
                     bool canWarp = warpTarget > now + 1;
                     var br = new Rectangle(mp.X + 10, mp.Bottom - 30, mp.Width - 20, 22);

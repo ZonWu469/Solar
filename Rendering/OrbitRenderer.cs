@@ -73,6 +73,38 @@ namespace Solar.Rendering
             }
         }
 
+        /// <summary>Place a few chevrons along the conic pointing in the direction of travel (prograde),
+        /// so the player can read which way a body or vessel is moving along its orbit.</summary>
+        public static void DrawDirectionArrows(PrimitiveBatch pb, Camera2D cam, in OrbitalElements el,
+                                               Vec2d primaryAbs, Color col, int count = 6)
+        {
+            double p = el.SemiLatus;
+            double start, span;
+            if (!el.Hyperbolic) { start = -Math.PI; span = 2 * Math.PI; }
+            else { double nuInf = Math.Acos(-1 / el.E); start = -0.6 * nuInf; span = 1.2 * nuInf; }
+
+            for (int i = 0; i < count; i++)
+            {
+                double nu = start + span * (i + 0.5) / count;
+                double r = p / (1 + el.E * Math.Cos(nu));
+                if (r <= 0) continue;
+                Vec2d world = primaryAbs + Vec2d.FromAngle(el.ArgPe + el.Dir * nu) * r;
+                Vec2d sD = cam.WorldToScreenD(world);
+                if (!cam.OnScreen(sD, 0)) continue;
+
+                var (_, vel) = Kepler.StateAtTrueAnomaly(el, nu, r);
+                var d = new Vector2((float)vel.X, -(float)vel.Y);   // world dir -> screen (Y flipped)
+                float dl = d.Length();
+                if (dl < 1e-9f) continue;
+                d /= dl;
+                var perp = new Vector2(-d.Y, d.X);
+                var tip = new Vector2((float)sD.X, (float)sD.Y) + d * 5f;
+                var back = tip - d * 9f;
+                pb.Line(back + perp * 5f, tip, 1.6f, col);
+                pb.Line(back - perp * 5f, tip, 1.6f, col);
+            }
+        }
+
         /// <summary>World position of periapsis/apoapsis markers for a conic around primaryAbs.</summary>
         public static Vec2d PeriapsisPoint(in OrbitalElements el, Vec2d primaryAbs) =>
             primaryAbs + Vec2d.FromAngle(el.ArgPe) * el.Periapsis;

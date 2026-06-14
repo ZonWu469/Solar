@@ -16,9 +16,16 @@ namespace Solar.Physics
         public OrbitalElements Orbit;  // valid when Parent != null
         public double SoiRadius = double.PositiveInfinity;
         public Atmosphere Atmo;
+        public Terrain Terrain;     // null = perfectly smooth (the star); otherwise organic surface relief
         public Color BodyColor;
         public Color AtmoColor;
         public readonly List<CelestialBody> Children = new();
+
+        /// <summary>Surface radius (m) at a body-local angle, including terrain relief.</summary>
+        public double SurfaceRadiusAt(double angle) => Terrain == null ? Radius : Radius + Terrain.HeightAt(angle);
+
+        /// <summary>Highest the surface ever reaches (m), for culling and view-extent math.</summary>
+        public double MaxRadius => Radius + (Terrain?.MaxAmplitude ?? 0);
 
         // per-frame memo: LocalPositionAt is called many times with the same ut
         private double _posUt = double.NaN, _velUt = double.NaN;

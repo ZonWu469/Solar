@@ -34,6 +34,7 @@ namespace Solar.Scenes
         private readonly DustField _dust = new();
 
         private bool _map;
+        private bool _slopeView;             // terrain colored by slope (landing-spot finder) instead of elevation
         private double _flightZoom = 0.35;   // m per pixel
         private double _mapZoom;
         private int _focus;                  // 0 = vessel, otherwise body index + 1
@@ -262,6 +263,7 @@ namespace Solar.Scenes
             if (inp.Pressed(Keys.Escape)) _showExitDialog = !_showExitDialog;
             if (_showExitDialog) return;
             if (inp.Pressed(Keys.M)) _map = !_map;
+            if (inp.Pressed(Keys.N)) _slopeView = !_slopeView;   // toggle the slope (landing-spot) overlay
             if (inp.Pressed(Keys.Tab)) CycleTarget(inp.Down(Keys.LeftShift) || inp.Down(Keys.RightShift) ? -1 : 1);
             if (inp.Pressed(Keys.T)) _showTargetWindow = !_showTargetWindow;
             if (inp.Pressed(Keys.V)) TakeControlOfTarget();
@@ -778,14 +780,22 @@ namespace Solar.Scenes
         private bool CheckSurface(double impactSpeed)
         {
             var v = _vessel;
-            if (v.Position.Length > v.Body.Radius) return false;
-            v.Position = v.Position.Normalized() * v.Body.Radius;
-            if (v.SurvivesTouchdown(impactSpeed))
+            double ang = v.Position.Angle();
+            double surfR = v.Body.SurfaceRadiusAt(ang);
+            if (v.Position.Length > surfR) return false;
+            v.Position = v.Position.Normalized() * surfR;
+            double slope = v.Body.Terrain?.SlopeAt(ang) ?? 0;
+            if (slope > Solar.Physics.Terrain.LandableSlope)
+            {
+                v.Destroyed = true;
+                _endMessage = $"CRASHED on {v.Body.Name}: terrain too steep to land   [Esc] to base";
+            }
+            else if (v.SurvivesTouchdown(impactSpeed))
             {
                 v.Velocity = Vec2d.Zero;
                 v.Landed = true;
                 v.Throttle = 0;
-                v.Heading = v.Position.Angle();
+                v.Heading = SurfaceNormalAngle(v.Body, ang);   // rest aligned to the local slope
                 _endMessage = $"Landed safely on {v.Body.Name}!   [Esc] to base";
             }
             else
@@ -794,6 +804,17 @@ namespace Solar.Scenes
                 _endMessage = $"CRASHED into {v.Body.Name} at {impactSpeed:0.0} m/s   [Esc] to base";
             }
             return true;
+        }
+
+        /// <summary>Outward surface-normal angle at a body-local angle, tilted by the terrain slope so a
+        /// lander rests leaning on a hill rather than always pointing straight up.</summary>
+        private static double SurfaceNormalAngle(Solar.Physics.CelestialBody body, double ang)
+        {
+            const double e = 1e-3;
+            Vec2d pA = Vec2d.FromAngle(ang - e, body.SurfaceRadiusAt(ang - e));
+            Vec2d pB = Vec2d.FromAngle(ang + e, body.SurfaceRadiusAt(ang + e));
+            Vec2d tangent = pB - pA;
+            return new Vec2d(tangent.Y, -tangent.X).Angle();   // tangent rotated -90 deg -> outward normal
         }
 
         private void UpdateDebris(double realDt)
@@ -1784,7 +1805,8 @@ namespace Solar.Scenes
         private void DrawWorld(PrimitiveBatch pb, double ut)
         {
             foreach (var b in Ctx.Universe.Bodies)
-                PlanetRenderer.Draw(pb, _cam, b, ut, false, Ctx.Sb, Ctx.Textures.Body(b.TextureId));
+                PlanetRenderer.Draw(pb, _cam, b, ut, false, Ctx.Sb, Ctx.Textures.Body(b.TextureId),
+                                    slopeOverlay: _slopeView);
 
             if (_vessel != null && !_vessel.Destroyed && !_vessel.Landed)
                 _dust.Draw(pb, _cam, _vessel.Velocity);
@@ -1849,6 +1871,7 @@ namespace Solar.Scenes
                 if (b.Parent == null) continue;
                 Vec2d parentAbs = b.Parent.AbsolutePositionAt(ut);
                 OrbitRenderer.DrawConic(pb, _cam, b.Orbit, parentAbs, b.BodyColor * 0.4f, 1.2f);
+                OrbitRenderer.DrawDirectionArrows(pb, _cam, b.Orbit, parentAbs, b.BodyColor * 0.7f);
             }
 
             // SOI circles
@@ -1862,9 +1885,13 @@ namespace Solar.Scenes
                 pb.DashedCircleOutline(new Vector2((float)s.X, (float)s.Y), (float)soiPx, 1f, b.BodyColor * 0.45f);
             }
 
-            // bodies
+            // bodies (+ landing-site markers on the guaranteed flat plains)
             foreach (var b in u.Bodies)
-                PlanetRenderer.Draw(pb, _cam, b, ut, true, Ctx.Sb, Ctx.Textures.Body(b.TextureId));
+            {
+                PlanetRenderer.Draw(pb, _cam, b, ut, true, Ctx.Sb, Ctx.Textures.Body(b.TextureId),
+                                    slopeOverlay: _slopeView);
+                DrawPlainMarkers(pb, b, ut);
+            }
 
             // body labels
             foreach (var b in u.Bodies)
@@ -1887,6 +1914,7 @@ namespace Solar.Scenes
                 if (_pred.Type == TransitionType.None)
                 {
                     OrbitRenderer.DrawConicGlow(pb, _cam, el, primaryAbs, trajColor, _pred.Body.SoiRadius);
+                    OrbitRenderer.DrawDirectionArrows(pb, _cam, el, primaryAbs, trajColor);
                     DrawApPeMarkers(pb, sb, el, primaryAbs, _pred.Body.Radius, PeColor, ApColor);
                 }
                 else
@@ -1928,6 +1956,30 @@ namespace Solar.Scenes
 
             if (alive)
                 VesselRenderer.Draw(pb, _cam, _vessel, ut, _anim, forceIcon: true);
+        }
+
+        /// <summary>Small green ticks on a body's rim at its guaranteed flat plains, so a safe landing
+        /// site is visible in map view even before zooming in to read the slope shading.</summary>
+        private void DrawPlainMarkers(PrimitiveBatch pb, Solar.Physics.CelestialBody b, double ut)
+        {
+            if (b.Terrain == null) return;
+            double rPx = b.Radius / _cam.MetersPerPixel;
+            if (rPx < 18 || rPx > 4000) return;   // too small to matter / too zoomed in (horizon view)
+            Vec2d pos = b.AbsolutePositionAt(ut);
+            Vector2 cs = _cam.WorldToScreen(pos);
+            var col = new Color(90, 230, 120);
+            foreach (double a in b.Terrain.PlainCenters)
+            {
+                Vec2d dir = Vec2d.FromAngle(a);
+                Vector2 baseS = _cam.WorldToScreen(pos + dir * b.SurfaceRadiusAt(a));
+                if (!_cam.OnScreen(new Vec2d(baseS.X, baseS.Y), 30)) continue;
+                Vector2 outDir = baseS - cs;
+                float l = outDir.Length();
+                if (l < 1e-3f) continue;
+                outDir /= l;
+                pb.Line(baseS, baseS + outDir * 9f, 2f, col);
+                pb.FillCircle(baseS + outDir * 13f, 3f, col);
+            }
         }
 
         private static readonly Color TargetColor = new Color(235, 130, 235);

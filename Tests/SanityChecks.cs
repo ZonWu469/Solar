@@ -1006,6 +1006,54 @@ namespace Solar.Tests
                 Check("SAS radial in/out opposed", radOk);
             }
 
+            // 38. terrain height field: deterministic for a given seed, bounded by the amplitude, periodic in
+            //     theta, and the analytic slope matches a finite-difference of the height.
+            {
+                double R = 6.371e5, amp = 1.2e4;
+                var t1 = new Terrain(R, amp, 1234);
+                var t2 = new Terrain(R, amp, 1234);
+                bool deterministic = true, bounded = true, periodic = true, slopeOk = true;
+                for (int i = 0; i < 200; i++)
+                {
+                    double a = (rnd.NextDouble() - 0.5) * 20;   // arbitrary angles incl. outside [0,2pi]
+                    if (Math.Abs(t1.HeightAt(a) - t2.HeightAt(a)) > 1e-9) deterministic = false;
+                    if (Math.Abs(t1.HeightAt(a)) > amp + 1e-6) bounded = false;
+                    if (Math.Abs(t1.HeightAt(a) - t1.HeightAt(a + 2 * Math.PI)) > 1e-6) periodic = false;
+                    double fd = (t1.HeightAt(a + 1e-3) - t1.HeightAt(a - 1e-3)) / (2 * 1e-3 * R);
+                    if (Math.Abs(Math.Abs(fd) - t1.SlopeAt(a)) > 1e-9) slopeOk = false;
+                }
+                Check("terrain field", deterministic && bounded && periodic && slopeOk);
+            }
+
+            // 39. guaranteed flat plains: every plain centre is landable (slope below the threshold) and the
+            //     flat window around it spans a usable arc, so a safe landing site always exists.
+            {
+                var t = new Terrain(6.371e5, 1.5e4, 99, plains: 3);
+                bool plainsExist = t.PlainCenters.Count > 0;
+                bool allFlat = true; bool wideEnough = true;
+                foreach (double c in t.PlainCenters)
+                {
+                    if (t.SlopeAt(c) > Terrain.LandableSlope) allFlat = false;
+                    int landable = 0;
+                    for (int k = -10; k <= 10; k++)
+                        if (t.SlopeAt(c + k * 0.005) <= Terrain.LandableSlope) landable++;
+                    if (landable < 7) wideEnough = false;   // a contiguous flat arc, not a single point
+                }
+                Check("terrain plains", plainsExist && allFlat && wideEnough);
+            }
+
+            // 40. terrain wiring: orbiting bodies get relief (SurfaceRadiusAt varies, MaxRadius >= Radius)
+            //     while the root star stays a smooth sphere.
+            {
+                var u = SolarSystemData.Create();
+                var earth = u["Earth"]; var sun = u.Root;
+                bool sunSmooth = sun.Terrain == null
+                                 && Math.Abs(sun.SurfaceRadiusAt(1.0) - sun.Radius) < 1e-9;
+                bool earthRelief = earth.Terrain != null && earth.MaxRadius > earth.Radius
+                                   && Math.Abs(earth.SurfaceRadiusAt(0.3) - earth.SurfaceRadiusAt(2.1)) > 1e-3;
+                Check("terrain wiring", sunSmooth && earthRelief);
+            }
+
             string res = $"Physics self-test: {pass}/{total} PASS";
             if (fails.Count > 0) res += "  FAILED: " + string.Join(", ", fails);
             return res;

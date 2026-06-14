@@ -114,7 +114,9 @@ namespace Solar.Scenes
             foreach (var b in u.Bodies)
             {
                 if (b.Parent == null) continue;
-                OrbitRenderer.DrawConic(pb, _cam, b.Orbit, b.Parent.AbsolutePositionAt(ut), b.BodyColor * 0.4f, 1.2f);
+                Vec2d parentAbs = b.Parent.AbsolutePositionAt(ut);
+                OrbitRenderer.DrawConic(pb, _cam, b.Orbit, parentAbs, b.BodyColor * 0.4f, 1.2f);
+                OrbitRenderer.DrawDirectionArrows(pb, _cam, b.Orbit, parentAbs, b.BodyColor * 0.7f);
             }
             foreach (var b in u.Bodies)
                 PlanetRenderer.Draw(pb, _cam, b, ut, true, sb, Ctx.Textures.Body(b.TextureId));

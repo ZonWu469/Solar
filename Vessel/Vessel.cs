@@ -52,7 +52,7 @@ namespace Solar.Vessels
         public const double G0 = 9.81;
 
         public Vec2d Up => Vec2d.FromAngle(Heading);
-        public double Altitude => Position.Length - Body.Radius;
+        public double Altitude => Position.Length - Body.SurfaceRadiusAt(Position.Angle());
 
         /// <summary>The axial stack plus every radially-attached part — the single iteration source for
         /// mass / drag / power / thrust aggregates. Height and stage boundaries use the axial stack only.</summary>
