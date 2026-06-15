@@ -43,10 +43,15 @@ namespace Solar.Scenes
         private static string DbgShip(string tag, string name, double clockUT, Vessel v)
         {
             var o = v.Orbit;
+            var ap = v.Body != null ? v.AbsolutePosition(clockUT) : v.Position;
+            var av = v.Body != null ? v.AbsoluteVelocity(clockUT) : v.Velocity;
             return $"{tag} name={name} clockUT={clockUT:F3} onRails={v.OnRails} landed={v.Landed} " +
-                   $"pos=({v.Position.X:F2},{v.Position.Y:F2}) heading={v.Heading:F3} " +
+                   $"pos=({v.Position.X:F2},{v.Position.Y:F2}) abs=({ap.X:F2},{ap.Y:F2}) absV=({av.X:F2},{av.Y:F2}) heading={v.Heading:F3} " +
                    $"orbit[A={o.A:F2} E={o.E:F5} epoch={o.Epoch:F3} dEpoch={clockUT - o.Epoch:F3}]";
         }
+
+        /// <summary>Frames remaining to dump tracked-ship positions after an undock (diagnostic).</summary>
+        private int _dbgFrames;
 
         // map-view ship popup (click a ship -> Switch / Set as target)
         private Vessel _menuVessel;
@@ -132,6 +137,7 @@ namespace Solar.Scenes
                 if (!_vessel.Landed && !_vessel.Destroyed) RefreshPrediction(Ctx.Clock.UT);
                 SpawnOthers();
                 RestoreTarget(_resume.TargetName);
+                _dbgFrames = 5;   // dump the active vessel + near others for the first frames after resume
                 return;
             }
 
@@ -186,6 +192,7 @@ namespace Solar.Scenes
                     && (v.Position - _vessel.Position).Length < 8.0) continue;
                 if (!v.Landed && !v.OnRails) v.GoOnRails(Ctx.Clock.UT);
                 _others.Add(new TrackedShip { Name = s.Name, V = v });
+                Dbg(DbgShip("LOAD-other", s.Name, Ctx.Clock.UT, v));
             }
         }
 
@@ -197,12 +204,16 @@ namespace Solar.Scenes
             // Mirror PersistOthers: a vessel held off rails only by close-proximity physics (KSP-style)
             // has a stale Orbit; re-derive it from the live state so the save is self-consistent and
             // reloads/propagates like every other ship. Don't disturb a genuine physics state (burn/atmo).
-            if (!_vessel.Landed && !_vessel.OnRails && !_vessel.Destroyed)
+            if (!_vessel.Landed && !_vessel.Destroyed && _vessel.Body != null)
             {
                 var body = _vessel.Body;
-                bool inAtmo = body?.Atmo != null && _vessel.Altitude < body.Atmo.Top + 500;
+                bool inAtmo = body.Atmo != null && _vessel.Altitude < body.Atmo.Top + 500;
                 bool thrusting = _vessel.CurrentThrust > 0;
-                if (!inAtmo && !thrusting && !_vessel.RcsActive) _vessel.GoOnRails(ut);
+                // off-rails only by close-proximity physics? convert to rails so the save self-propagates.
+                if (!_vessel.OnRails && !inAtmo && !thrusting && !_vessel.RcsActive) _vessel.GoOnRails(ut);
+                // otherwise keep the live state authoritative, but refresh the stored conic from it so an
+                // on-rails save is never stale (a saved-off-rails burn/atmo ship reloads from Position).
+                else _vessel.Orbit = Kepler.ElementsFromState(_vessel.Position, _vessel.Velocity, body.Mu, ut);
             }
             Ctx.State.UT = ut;
             Ctx.State.UpsertShip(ShipState.From(_vessel, _shipName, _nodes, _targetName, ut));
@@ -217,8 +228,13 @@ namespace Solar.Scenes
             {
                 var v = ts.V;
                 if (v.Destroyed) { Ctx.State.RemoveShip(ts.Name); continue; }
-                if (!v.Landed && !v.OnRails) v.GoOnRails(Ctx.Clock.UT);
+                if (!v.Landed && v.Body != null)
+                {
+                    if (!v.OnRails) v.GoOnRails(Ctx.Clock.UT);
+                    else v.Orbit = Kepler.ElementsFromState(v.Position, v.Velocity, v.Body.Mu, Ctx.Clock.UT);
+                }
                 Ctx.State.UpsertShip(ShipState.From(v, ts.Name, ut: Ctx.Clock.UT));
+                Dbg(DbgShip("SAVE-other", ts.Name, Ctx.Clock.UT, v));
             }
         }
 
@@ -508,7 +524,9 @@ namespace Solar.Scenes
                 }
                 else if (needsPhysics)
                 {
-                    if (_vessel.OnRails) _vessel.GoOffRails(clock.UT);
+                    // frame-start ut: keep the exact live state if still at the conic epoch (just loaded),
+                    // then the substeps below advance exactly one frame -- matching the tracked others.
+                    if (_vessel.OnRails) LeaveRails(_vessel, clock.UT);
                     int steps = Math.Clamp((int)Math.Ceiling(sdt / SubstepDt), 1, 64);
                     double h = sdt / steps;
                     for (int s = 0; s < steps; s++)
@@ -646,6 +664,16 @@ namespace Solar.Scenes
             return false;
         }
 
+        /// <summary>Take a vessel off rails for physics. If the conic is still at its epoch (just loaded or
+        /// just synced) the live Position/Velocity are exact — keep them; only catch up from the conic when
+        /// real time has elapsed past the epoch. Caller must not also integrate the same frame after this
+        /// (the vessel is already at <paramref name="ut"/>; integrating again overshoots by one step).</summary>
+        private static void LeaveRails(Vessel v, double ut)
+        {
+            if (ut > v.Orbit.Epoch + 1e-6) v.GoOffRails(ut);   // stale conic: propagate to now
+            else v.OnRails = false;                            // fresh: preserve the exact live state
+        }
+
         private void UpdateOthers(double ut, double realDt)
         {
             var clock = Ctx.Clock;
@@ -664,16 +692,39 @@ namespace Solar.Scenes
 
                 if (physWarp && OtherNear(v))
                 {
-                    if (v.OnRails) v.GoOffRails(ut);
-                    int steps = Math.Clamp((int)Math.Ceiling(sdt / SubstepDt), 1, 32);
-                    double h = sdt / steps;
-                    for (int s = 0; s < steps; s++) Integrator.Step(v, h);
+                    bool integrate = true;
+                    if (v.OnRails)
+                    {
+                        // Stale conic (coasting other just entered range): snap it to the current ut and do
+                        // NOT integrate this frame -- it's already at ut, so integrating would push it ~one
+                        // step past the active vessel. Fresh conic at its epoch (just loaded): keep the exact
+                        // live state and integrate this frame exactly like the active vessel, so a reloaded
+                        // close formation stays put to the bit (this is the save/reload "gap reopens" bug).
+                        if (ut > v.Orbit.Epoch + 1e-6) { v.GoOffRails(ut); integrate = false; }
+                        else v.OnRails = false;
+                    }
+                    if (integrate)
+                    {
+                        int steps = Math.Clamp((int)Math.Ceiling(sdt / SubstepDt), 1, 32);
+                        double h = sdt / steps;
+                        for (int s = 0; s < steps; s++) Integrator.Step(v, h);
+                        // Keep the stored conic synced to the live state, exactly as the active vessel does
+                        // (see the comment near _vessel's Orbit re-sync): otherwise a later GoOffRails / save /
+                        // reload snaps this ship back onto the stale pre-physics conic, reopening a closed gap.
+                        v.Orbit = Kepler.ElementsFromState(v.Position, v.Velocity, v.Body.Mu, ut);
+                    }
                 }
                 else
                 {
                     if (!v.OnRails) v.GoOnRails(ut);
                     v.UpdateFromRails(ut);
                 }
+                if (_dbgFrames > 0) Dbg(DbgShip("OTHER-frame", ts.Name, ut, v));
+            }
+            if (_dbgFrames > 0)
+            {
+                if (_vessel != null) Dbg(DbgShip("ACTIVE-frame", _shipName, ut, _vessel));
+                _dbgFrames--;
             }
         }
 
@@ -788,14 +839,22 @@ namespace Solar.Scenes
         {
             if (_vessel == null || !_vessel.CanUndock) return;
             double ut = Ctx.Clock.UT;
+            bool parentOnRails = _vessel.OnRails;
             if (_vessel.OnRails) _vessel.GoOffRails(ut);
             var detached = _vessel.Undock();
             if (detached == null) return;
-            detached.GoOnRails(ut);
+            // Keep the freshly-detached module on the SAME footing as the active vessel: when we're flying
+            // off-rails (the normal proximity/rendezvous case), leave it off-rails so UpdateOthers RK4-
+            // integrates the pair together and they stay rigidly co-located. Round-tripping it onto an
+            // analytic conic built from its off-center point would shift it apart (the undock "teleport").
+            if (parentOnRails) detached.GoOnRails(ut);
             string name = UniqueShipName(_shipName + " module");
             _others.Add(new TrackedShip { Name = name, V = detached });
             Ctx.State.UpsertShip(ShipState.From(detached, name, ut: ut));
             if (!_vessel.Landed && !_vessel.Destroyed) RefreshPrediction(ut);
+            Dbg(DbgShip("UNDOCK-keep", _shipName, ut, _vessel));
+            Dbg(DbgShip("UNDOCK-det ", name, ut, detached));
+            _dbgFrames = 4;   // dump the pair for the next few frames to catch any post-undock snap
             _toast = $"Undocked {name}"; _toastT = 4;
         }
 

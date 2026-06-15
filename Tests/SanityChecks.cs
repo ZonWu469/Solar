@@ -750,6 +750,39 @@ namespace Solar.Tests
                 Check("dock geometry", snapOk && portGap < 1e-6 && undockPose);
             }
 
+            // 27c. undock co-location: every part of the detached module sits at exactly the world position
+            //      it had while docked (no teleport). Deterministic guard for the undock pose reconstruction.
+            {
+                var u = SolarSystemData.Create();
+                var earth = u["Earth"];
+                var a = new Vessels.Vessel { Body = earth, Position = new Vec2d(earth.Radius + 400000, 0), Heading = 0.3 };
+                a.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Docking Port Jr")));
+                a.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                var b = new Vessels.Vessel { Body = earth, Position = a.Position, Heading = 0.3 + 1.55 };  // ~90 deg
+                b.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Docking Port Jr")));
+                b.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Tank T400")));
+
+                var myPort = a.FirstFreeDockingPort();
+                var theirPort = b.FirstFreeDockingPort();
+                int q = ((int)Math.Round((b.Heading - a.Heading) / (Math.PI / 2))) & 3;
+                var offset = a.PartLocalCenter(myPort) - Vessels.Vessel.RotQuarter(q, b.PartLocalCenter(theirPort));
+                var bParts = new List<Parts.Part>(b.Parts);   // shared Part refs survive the merge
+                a.DockWith(b, myPort, theirPort, q, offset);
+
+                // compare body-relative centers (not heliocentric absolute, which carries ~1.5e11 m and
+                // would swamp a 1e-6 tolerance in float noise): the Body offset cancels, the geometry doesn't
+                Vec2d Rel(Vessels.Vessel v, Parts.Part p) { var c = v.PartLocalCenter(p); return v.Position + v.Right * c.X + v.Up * c.Y; }
+                var docked = new List<Vec2d>();
+                foreach (var p in bParts) docked.Add(Rel(a, p));
+
+                var det = a.Undock(0);   // no separation impulse: exact co-location
+                bool coLocated = det != null && det.Parts.Count == bParts.Count;
+                if (coLocated)
+                    for (int i = 0; i < bParts.Count; i++)
+                        if ((Rel(det, bParts[i]) - docked[i]).Length > 1e-6) coLocated = false;
+                Check("undock co-location", coLocated);
+            }
+
             // 28. a docked station persists its assembly graph: serialize -> reload keeps the parts and
             //     the dock link, so the reloaded station can still be undocked back into modules.
             {
@@ -1340,6 +1373,25 @@ namespace Solar.Tests
                 bool syncedTracks = (rFresh - v.Position).Length < 1.0;          // round-trip is faithful (<1 m)
                 bool staleWouldRevert = (rStale - v.Position).Length > 100.0;    // old conic is genuinely off (the bug)
                 Check("off-rails orbit sync", syncedTracks && staleWouldRevert);
+            }
+
+            // 33. close-formation rails round-trip: two craft 15 m apart in a Moon orbit, put on rails then
+            //     taken off at the same epoch (a save/reload handoff), keep their separation to sub-meter.
+            //     Guards against a docking target drifting off when the gap is serialized and restored.
+            {
+                var u = SolarSystemData.Create();
+                var moon = u["Moon"];
+                double ut = 284160.538;                                   // a large UT like the live save
+                double r = moon.Radius + 1.0e6;
+                var a = new Vessels.Vessel { Body = moon, Position = new Vec2d(r, 0), Velocity = new Vec2d(-200, Math.Sqrt(moon.Mu / r) * 1.02) };
+                a.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                var b = new Vessels.Vessel { Body = moon, Position = a.Position + new Vec2d(3, 14.7), Velocity = a.Velocity };
+                b.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                double sep0 = (a.Position - b.Position).Length;           // ~15 m
+                a.GoOnRails(ut); b.GoOnRails(ut);                         // save: derive each conic
+                a.GoOffRails(ut); b.GoOffRails(ut);                       // reload: evaluate at the same epoch
+                double sep1 = (a.Position - b.Position).Length;
+                Check("close-formation rails round-trip", Math.Abs(sep1 - sep0) < 1.0);
             }
 
             string res = $"Physics self-test: {pass}/{total} PASS";
