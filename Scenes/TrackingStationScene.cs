@@ -41,7 +41,8 @@ namespace Solar.Scenes
                 var v = s.ToVessel(Ctx.Universe, Ctx.State.Roster);
                 if (v.Body == null) continue;
                 Colony.AdvanceProduction(v, s.LastUT, ut, Ctx.Universe);   // show caught-up colony stocks
-                if (v.OnRails) v.UpdateFromRails(ut);
+                // keep the saved position unless the world has advanced past the save (matches FlightScene.Enter)
+                if (v.OnRails && ut > v.Orbit.Epoch + 1e-6) v.UpdateFromRails(ut);
                 _ships.Add(v);
             }
         }

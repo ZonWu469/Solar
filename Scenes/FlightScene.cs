@@ -36,6 +36,17 @@ namespace Solar.Scenes
         private bool _map;
         private bool _slopeView;             // terrain colored by slope (landing-spot finder) instead of elevation
 
+        // ---- TEMPORARY save/reload diagnostics (remove once report-4 revert is confirmed fixed) ----
+        private static readonly string _dbgPath = System.IO.Path.Combine(System.AppContext.BaseDirectory, "solar_debug.log");
+        private static void Dbg(string line) { try { System.IO.File.AppendAllText(_dbgPath, line + "\n"); } catch { } }
+        private static string DbgShip(string tag, string name, double clockUT, Vessel v)
+        {
+            var o = v.Orbit;
+            return $"{tag} name={name} clockUT={clockUT:F3} onRails={v.OnRails} landed={v.Landed} " +
+                   $"pos=({v.Position.X:F2},{v.Position.Y:F2}) heading={v.Heading:F3} " +
+                   $"orbit[A={o.A:F2} E={o.E:F5} epoch={o.Epoch:F3} dEpoch={clockUT - o.Epoch:F3}]";
+        }
+
         // map-view ship popup (click a ship -> Switch / Set as target)
         private Vessel _menuVessel;
         private string _menuName;
@@ -108,7 +119,12 @@ namespace Solar.Scenes
                 _vessel.Body = b;
                 // a colony kept producing while we were away: catch its tanks up to now
                 Colony.AdvanceProduction(_vessel, _resume.LastUT, Ctx.Clock.UT, Ctx.Universe);
-                if (_vessel.OnRails) _vessel.UpdateFromRails(Ctx.Clock.UT);
+                Dbg(DbgShip("LOAD ", _shipName, Ctx.Clock.UT, _vessel));
+                // Only re-derive position from the conic when the world has advanced past the save; otherwise
+                // the saved Position is authoritative -- re-deriving it reverts the ship if Position/Orbit
+                // disagree, or if the clock sits at/just before the orbit epoch.
+                if (_vessel.OnRails && Ctx.Clock.UT > _vessel.Orbit.Epoch + 1e-6) _vessel.UpdateFromRails(Ctx.Clock.UT);
+                Dbg(DbgShip("LOADpost", _shipName, Ctx.Clock.UT, _vessel));
                 _lastBody = b;
                 _lastCamRel = _vessel.Position;
                 _mapZoom = b.SoiRadius * 2.4 / Math.Min(Ctx.W, Ctx.H);
@@ -176,8 +192,20 @@ namespace Solar.Scenes
         private void PersistShip()
         {
             if (_vessel == null) return;
-            Ctx.State.UT = Ctx.Clock.UT;
-            Ctx.State.UpsertShip(ShipState.From(_vessel, _shipName, _nodes, _targetName, Ctx.Clock.UT));
+            double ut = Ctx.Clock.UT;
+            // Mirror PersistOthers: a vessel held off rails only by close-proximity physics (KSP-style)
+            // has a stale Orbit; re-derive it from the live state so the save is self-consistent and
+            // reloads/propagates like every other ship. Don't disturb a genuine physics state (burn/atmo).
+            if (!_vessel.Landed && !_vessel.OnRails && !_vessel.Destroyed)
+            {
+                var body = _vessel.Body;
+                bool inAtmo = body?.Atmo != null && _vessel.Altitude < body.Atmo.Top + 500;
+                bool thrusting = _vessel.CurrentThrust > 0;
+                if (!inAtmo && !thrusting && !_vessel.RcsActive) _vessel.GoOnRails(ut);
+            }
+            Ctx.State.UT = ut;
+            Ctx.State.UpsertShip(ShipState.From(_vessel, _shipName, _nodes, _targetName, ut));
+            Dbg(DbgShip("SAVE ", _shipName, ut, _vessel));
         }
 
         /// <summary>Snapshot every tracked co-orbiting ship back into the savegame (so undocked modules
@@ -442,7 +470,10 @@ namespace Solar.Scenes
                 var body = _vessel.Body;
                 bool inAtmo = body.Atmo != null && _vessel.Altitude < body.Atmo.Top + 500;
                 bool thrusting = _vessel.CurrentThrust > 0;
-                bool needsPhysics = !_vessel.Landed && (thrusting || inAtmo || _vessel.RcsActive);
+                // A ship in close proximity is RK4-integrated; integrate the focused vessel the same
+                // way so the pair stays rigidly co-located (matching an analytic conic against RK4
+                // makes them slowly drift and jump across rails round-trips at pause/scene boundaries).
+                bool needsPhysics = !_vessel.Landed && (thrusting || inAtmo || _vessel.RcsActive || AnyOtherNear());
 
                 clock.MaxWarpIndex = _vessel.Landed
                     ? (thrusting ? SimClock.PhysicsMaxIndex : SimClock.Levels.Length - 1)
@@ -490,10 +521,17 @@ namespace Solar.Scenes
                         CheckSoiOffRails(clock.UT);
                         if (CheckSurface(approach)) break;
                     }
-                    // Recompute every physics frame so the drawn conic tracks the live state instead of
-                    // lagging and snapping (most visible mid-burn / at the 4x physics-warp cap).
+                    // Keep the stored conic synced to the live state every off-rails frame. Otherwise
+                    // Orbit holds the stale pre-physics conic (it's only rewritten by GoOnRails), and any
+                    // later reader of it -- a save, GoOffRails, a reload -- snaps the ship back onto that
+                    // old conic (e.g. undoing an RCS nudge during a rendezvous).
                     if (!_vessel.Destroyed && !_vessel.Landed)
+                    {
+                        _vessel.Orbit = Kepler.ElementsFromState(_vessel.Position, _vessel.Velocity, _vessel.Body.Mu, clock.UT);
+                        // Recompute every physics frame so the drawn conic tracks the live state instead of
+                        // lagging and snapping (most visible mid-burn / at the 4x physics-warp cap).
                         _pred = TrajectoryPredictor.Predict(_vessel.CurrentElements(clock.UT), _vessel.Body, clock.UT);
+                    }
                 }
                 else // coasting in vacuum: on rails
                 {

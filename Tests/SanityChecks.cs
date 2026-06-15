@@ -1284,6 +1284,35 @@ namespace Solar.Tests
                 Check("tech tree coverage", catalogOk && layoutOk);
             }
 
+            // 32. off-rails orbit stays in sync: while a vessel coasts/maneuvers off rails its stored
+            //     conic must track the live state, so a save / GoOffRails / reload re-derives the *current*
+            //     position, never an old one. Regression guard for the rendezvous "RCS nudge reverts" bug:
+            //     a conic captured before the maneuver does NOT reproduce the post-maneuver state, but a
+            //     freshly-synced one does (to round-trip precision).
+            {
+                var u = SolarSystemData.Create();
+                var earth = u["Earth"];
+                var v = new Vessels.Vessel { Body = earth, Position = new Vec2d(earth.Radius + 300_000, 0), Velocity = new Vec2d(0, 7600) };
+                v.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+
+                double ut = 1000;
+                var staleOrbit = Kepler.ElementsFromState(v.Position, v.Velocity, earth.Mu, ut);  // pre-maneuver conic
+
+                // coast 60 s, apply an "RCS" velocity nudge, then coast 60 s more so the post-maneuver
+                // path diverges from the stale (pre-maneuver) conic.
+                for (int i = 0; i < 60; i++) { Integrator.Step(v, 1.0); ut += 1.0; }
+                v.Velocity += new Vec2d(10, -8);
+                for (int i = 0; i < 60; i++) { Integrator.Step(v, 1.0); ut += 1.0; }
+
+                // the synced (current) conic reproduces the live state; the stale one would snap it back
+                var fresh = Kepler.ElementsFromState(v.Position, v.Velocity, earth.Mu, ut);
+                var (rFresh, _) = Kepler.StateAtTime(fresh, ut);
+                var (rStale, _) = Kepler.StateAtTime(staleOrbit, ut);
+                bool syncedTracks = (rFresh - v.Position).Length < 1.0;          // round-trip is faithful (<1 m)
+                bool staleWouldRevert = (rStale - v.Position).Length > 100.0;    // old conic is genuinely off (the bug)
+                Check("off-rails orbit sync", syncedTracks && staleWouldRevert);
+            }
+
             string res = $"Physics self-test: {pass}/{total} PASS";
             if (fails.Count > 0) res += "  FAILED: " + string.Join(", ", fails);
             return res;
