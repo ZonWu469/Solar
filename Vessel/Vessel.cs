@@ -292,6 +292,58 @@ namespace Solar.Vessels
             }
         }
 
+        /// <summary>Propellant mass flow right now (kg/s): solids at full rate, liquids scaled by
+        /// throttle. Mirrors <see cref="DrainFuel"/> so a finite-burn projection can derive the
+        /// effective exhaust velocity and remaining burn time without re-deriving staging.</summary>
+        public double CurrentMassFlow
+        {
+            get
+            {
+                double flow = 0;
+                foreach (var p in AllParts())
+                    if (p.Def.Kind == PartKind.SolidBooster && p.Ignited && p.Fuel > 0)
+                        flow += p.Def.FuelFlowAtMax;
+                if (Throttle > 0)
+                    foreach (var seg in Segments())
+                    {
+                        if (SegmentFuel(seg) <= 0) continue;
+                        for (int i = seg.start; i <= seg.end; i++)
+                        {
+                            if (Parts[i].Def.Kind == PartKind.Engine && Parts[i].Ignited) flow += Parts[i].Def.FuelFlowAtMax * Throttle;
+                            foreach (var r in Parts[i].Radials)
+                                if (r.Def.Kind == PartKind.Engine && r.Ignited) flow += r.Def.FuelFlowAtMax * Throttle;
+                        }
+                    }
+                return flow;
+            }
+        }
+
+        /// <summary>Propellant the currently-firing engines can still draw before a staging event
+        /// (burning solids' own fuel + the cross-fed pool of each segment with an ignited liquid
+        /// engine). Divided by <see cref="CurrentMassFlow"/> this gives the max burn time.</summary>
+        public double ActiveBurnFuel
+        {
+            get
+            {
+                double fuel = 0;
+                foreach (var p in AllParts())
+                    if (p.Def.Kind == PartKind.SolidBooster && p.Ignited && p.Fuel > 0)
+                        fuel += p.Fuel;
+                foreach (var seg in Segments())
+                {
+                    bool hasLiquidEngine = false;
+                    for (int i = seg.start; i <= seg.end && !hasLiquidEngine; i++)
+                    {
+                        if (Parts[i].Def.Kind == PartKind.Engine && Parts[i].Ignited) { hasLiquidEngine = true; break; }
+                        foreach (var r in Parts[i].Radials)
+                            if (r.Def.Kind == PartKind.Engine && r.Ignited) { hasLiquidEngine = true; break; }
+                    }
+                    if (hasLiquidEngine) fuel += SegmentFuel(seg);
+                }
+                return fuel;
+            }
+        }
+
         /// <summary>Drain fuel for dt seconds: liquid engines scale with throttle; solids burn their
         /// own fuel at full rate once ignited (throttle-independent).</summary>
         public void DrainFuel(double dt)

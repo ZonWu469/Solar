@@ -273,10 +273,29 @@ namespace Solar.Scenes
                     if (refreshNodes) { node.Source = src; node.Body = body; node.HasSource = true; node.FrameUT = bodyRefUT; }
                     // While this node is being burned, project its *remaining* delta-v so the planned
                     // orbit holds steady as the live orbit rises to meet it, instead of drifting.
-                    var burnNode = node;
-                    if (node.UT == _burnTargetUT && _burnSpent > 0 && node.DeltaV > 0)
-                        burnNode = node.Scaled(Math.Clamp((node.DeltaV - _burnSpent) / node.DeltaV, 0, 1));
-                    var res = burnNode.ResultOrbit(src, body.Mu);
+                    OrbitalElements res;
+                    bool activeBurn = node.UT == _burnTargetUT && _burnSpent > 0 && node.DeltaV > 0
+                                      && _vessel != null && !_vessel.OnRails && _vessel.CurrentThrust > 0
+                                      && segStart == ut && body == liveBody;
+                    if (activeBurn && _vessel.CurrentMassFlow > 1e-9)
+                    {
+                        // finite-burn projection of the node's remaining delta-v from the live state
+                        double remaining = Math.Max(0, node.DeltaV - _burnSpent);
+                        double flow = _vessel.CurrentMassFlow;
+                        var captured = node;
+                        res = BurnProjector.Project(
+                            _vessel.Position, _vessel.Velocity, body.Mu, ut,
+                            _vessel.CurrentThrust, flow, _vessel.TotalMass,
+                            _vessel.ActiveBurnFuel / flow, remaining,
+                            (r, vv) => captured.BurnDelta(r, vv).Normalized(), out _);
+                    }
+                    else
+                    {
+                        var burnNode = node;
+                        if (node.UT == _burnTargetUT && _burnSpent > 0 && node.DeltaV > 0)
+                            burnNode = node.Scaled(Math.Clamp((node.DeltaV - _burnSpent) / node.DeltaV, 0, 1));
+                        res = burnNode.ResultOrbit(src, body.Mu);
+                    }
                     ni++;
                     if (double.IsNaN(res.A)) break;
                     src = res; segStart = node.UT; planned = true;   // same body: bodyRefUT unchanged
@@ -541,7 +560,12 @@ namespace Solar.Scenes
                 if (burnTarget.UT != _burnTargetUT) { _burnSpent = 0; _burnTargetUT = burnTarget.UT; }
                 if (alive)
                 {
-                    bool burning = _vessel.Throttle > 0 && _vessel.MaxAvailableThrust > 0 && clock.UT >= burnTarget.UT - 1.0;
+                    // Count delta-v across the *whole* burn (it's centred on the node, starting at
+                    // node - bt/2), not just its last second -- otherwise the projected orbit grows
+                    // for the first half of the burn before the projection kicks in.
+                    double bt = Staging.BurnTime(_vessel, burnTarget.DeltaV);
+                    double winStart = burnTarget.UT - (bt > 0 ? bt : 1.0);
+                    bool burning = _vessel.Throttle > 0 && _vessel.MaxAvailableThrust > 0 && clock.UT >= winStart;
                     if (burning) _burnSpent += _vessel.CurrentThrust / _vessel.TotalMass * realDt * clock.Warp;
                 }
             }

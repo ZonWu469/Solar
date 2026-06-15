@@ -128,6 +128,27 @@ namespace Solar.Tests
                 Check("maneuver node", noop && apOnly);
             }
 
+            // 6b. finite-burn projection: a very short, high-thrust burn converges to the impulsive
+            //     maneuver result, and a sustained prograde burn raises apoapsis while retrograde lowers it.
+            {
+                var el = new OrbitalElements { A = 7e6, E = 0.1, ArgPe = 0.7, M0 = 0, Epoch = 0, Mu = mu, Dir = 1 };
+                double tPe = Kepler.TimeAtTrueAnomaly(el, 0, 0);
+                var (r, v) = Kepler.StateAtTime(el, tPe);
+                const double dv = 50;
+                Vec2d proDir = v.Normalized();
+                // high thrust + negligible mass flow -> effectively impulsive
+                var fin = BurnProjector.Project(r, v, mu, tPe, 5e6, 1e-3, 1000, 1e9, dv, (rr, vv) => proDir, out _);
+                var imp = new Maneuver { UT = tPe, Prograde = dv, Radial = 0 }.ResultOrbit(el, mu);
+                bool converge = Math.Abs(fin.Apoapsis - imp.Apoapsis) < 0.005 * imp.Apoapsis;
+
+                // a sustained finite burn (real mass loss) still moves apoapsis the right way
+                var up = BurnProjector.Project(r, v, mu, tPe, 3e4, 10, 1000, 1e9, 100, (rr, vv) => vv.Normalized(), out _);
+                var down = BurnProjector.Project(r, v, mu, tPe, 3e4, 10, 1000, 1e9, 100, (rr, vv) => (-vv).Normalized(), out _);
+                bool dirOk = up.Apoapsis > el.Apoapsis + 1 && down.Apoapsis < el.Apoapsis - 1;
+
+                Check("finite burn projection", converge && dirOk);
+            }
+
             // 7. warp-to-node stops before the node: burn is centred on the node, so the stop
             //    time node - bt/2 must lie in (node - bt, node]. Guards the off-by-half-burn sign.
             {

@@ -14,7 +14,8 @@
       "Bash(grep -q 'Name = \"__TRACKED_VAR__\"' Parts/PartCatalog.cs)",
       "Bash(grep -q 'Name = \"__TRACKED_VAR__\"' Parts/ModuleCatalog.cs)",
       "Bash(cp Content/parts.json /tmp/parts.json.bak)",
-      "Bash(cp Content/modules.json /tmp/modules.json.bak)"
+      "Bash(cp Content/modules.json /tmp/modules.json.bak)",
+      "PowerShell(dotnet run --no-build -- --selftest)"
     ]
   }
 }
