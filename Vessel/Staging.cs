@@ -78,9 +78,17 @@ namespace Solar.Vessels
                     if (r.Stage < 0)
                         r.Stage = r.Def.Kind == PartKind.Parachute ? maxStage + 1
                                 : r.RadialSeparate ? baseStage[seg[i]] + 1 : baseStage[seg[i]];
-                    // fire/ignite stage: engines fire with their host by default; chutes deploy last
+                    // fire/ignite stage: a separate strap-on ignites when its segment first lights
+                    // (liftoff for the bottom segment) rather than inheriting a possibly-late host
+                    // stage; a welded ("KEEP") radial fires with its host; a chute deploys last.
                     if (r.FireStage < 0)
-                        r.FireStage = r.Def.Kind == PartKind.Parachute ? maxStage + 1 : p.Stage;
+                        r.FireStage = r.Def.Kind == PartKind.Parachute ? maxStage + 1
+                                    : r.RadialSeparate ? baseStage[seg[i]] : p.Stage;
+                    // A separate strap-on can never be jettisoned at or before the stage it ignites,
+                    // or it would vanish before firing. Enforced unconditionally (covers explicit and
+                    // derived stages, and normalizes old designs loaded with a bad drop/fire pair).
+                    if (r.RadialSeparate && r.Def.Kind != PartKind.Parachute && r.Stage <= r.FireStage)
+                        r.Stage = r.FireStage + 1;
                 }
             }
         }
@@ -262,9 +270,29 @@ namespace Solar.Vessels
             double f = 0; foreach (var p in parts) f += p.Fuel; return f;
         }
 
+        /// <summary>A staging-only shallow clone of a part: enough fields for mass/thrust/stage math, with
+        /// its own (cloned) radial list so the drop simulation can mutate it without touching the live vessel.
+        /// Module instances are shared (read-only here); crew is irrelevant to staging.</summary>
+        private static Part ClonePart(Part p)
+        {
+            var c = new Part(p.Def)
+            {
+                Fuel = p.Fuel, Ignited = p.Ignited, Deployed = p.Deployed,
+                Stage = p.Stage, FireStage = p.FireStage, RadialSeparate = p.RadialSeparate,
+                RadialMountId = p.RadialMountId, RadialSide = p.RadialSide, RadialSlot = p.RadialSlot,
+            };
+            foreach (var m in p.Modules) c.Modules.Add(m);
+            foreach (var r in p.Radials) c.Radials.Add(ClonePart(r));
+            return c;
+        }
+
         public static List<StageStat> ComputeStages(List<Part> partsIn, double surfaceG = G0)
         {
-            var present = new List<Part>(partsIn);
+            // Clone before simulating: ApplyDrops removes radials from the parts it walks, and a live
+            // vessel passes its real Part list here (the HUD recomputes the stage list every frame), so
+            // mutating shared parts would silently strip a craft's strap-on boosters on the pad.
+            var present = new List<Part>();
+            foreach (var p in partsIn) present.Add(ClonePart(p));
             AssignDefaultStages(present);
             int maxStage = MaxStage(present);
 

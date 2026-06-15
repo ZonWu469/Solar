@@ -1002,6 +1002,75 @@ namespace Solar.Tests
                 Check("strap-ons drop on own stage", stagesOk && s0 && s1 && s2);
             }
 
+            // 33e-bis. regression: a strap-on booster on a core that is staged LATE must still ignite at
+            //      liftoff and be jettisoned strictly AFTER it fires. Previously a separate radial's ignite
+            //      stage inherited its (late) host's stage while its drop stage stayed at geometry, so the
+            //      booster was jettisoned before it ever ignited ("disappears on the pad before firing").
+            {
+                var vd = new Vessels.VesselDesign();
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Pod Mk1")));
+                var core = new Vessels.StackEntry(Parts.PartCatalog.Get("Tank T400")) { Stage = 2 }; // core staged late
+                core.AddRadial(Parts.PartCatalog.Get("Thumper-R"), separate: true);                  // strap-on, default stages
+                vd.Stack.Add(core);
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Terrier")) { Stage = 2 }); // core engine fires at 2
+                var v = vd.Instantiate();
+                var tank = v.Parts[1];
+                var srb = tank.Radials[0];
+                bool ordered = srb.FireStage < srb.Stage;   // ignite strictly before drop
+                bool firesEarly = srb.FireStage == 0;        // at liftoff, not inheriting the late host
+
+                var d0 = Vessels.Staging.FireNext(v);        // stage 0: ignite the boosters, drop nothing
+                bool s0 = d0 == null && tank.Radials.Count == 2 && srb.Ignited && v.SolidThrust > 0;
+                Check("radial booster ignites before it drops", ordered && firesEarly && s0);
+            }
+
+            // 33e-ter. exact on-pad craft from the user's save ("Ship 1 3"): a Decoupler splits the stack,
+            //      the bottom segment is Tank T800 + Fin Set + Swivel with two [Radial Decoupler, Thumper SRB]
+            //      sub-stack mounts on the tank. The entire S0/liftoff stage (Swivel + boosters) must survive
+            //      instantiate and FireNext#0 must keep the boosters attached. Repro for "boosters + S0 vanish".
+            {
+                var vd = new Vessels.VesselDesign();
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Parachute")));
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Pod Mk1")));
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Tank T400")));
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Terrier")));
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Decoupler")));
+                var t800 = new Vessels.StackEntry(Parts.PartCatalog.Get("Tank T800"));
+                for (int b = 0; b < 2; b++)   // two strap-on sub-stacks: radial decoupler + booster
+                {
+                    t800.AddRadial(Parts.PartCatalog.Get("Radial Decoupler"));
+                    t800.AppendToMount(b, Parts.PartCatalog.Get("Thumper SRB"));
+                }
+                vd.Stack.Add(t800);
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Fin Set")));
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Swivel")));
+
+                var v = vd.Instantiate();
+                var tank = v.Parts[5];   // Tank T800
+                int srbN = 0, decN = 0;
+                Parts.Part anySrb = null;
+                foreach (var r in tank.Radials)
+                {
+                    if (r.Def.Name == "Thumper SRB") { srbN++; anySrb = r; }
+                    else if (r.Def.Name == "Radial Decoupler") decN++;
+                }
+                // 2 mounts x 2 sides x 2 slots = 8 radials (4 boosters + 4 radial decouplers)
+                bool present = tank.Radials.Count == 8 && srbN == 4 && decN == 4;
+                bool stagesOk = anySrb != null && anySrb.FireStage == 0 && anySrb.Stage == 1;
+
+                // The HUD recomputes the stage list every frame against the LIVE parts. That must be a pure
+                // read: ComputeStages must NOT strip the vessel's radials (the actual launchpad bug).
+                var sts = Vessels.Staging.ComputeStages(v.Parts);
+                bool notMutated = tank.Radials.Count == 8;
+                var st0 = sts.Find(s => s.Number == 0);
+                bool s0Exists = st0 != null && st0.Ignites.Contains("4x Thumper SRB") && st0.Ignites.Contains("Swivel");
+
+                var d0 = Vessels.Staging.FireNext(v);   // S0: ignite Swivel + boosters, drop nothing
+                bool fired = d0 == null && tank.Radials.Count == 8 && anySrb.Ignited && v.SolidThrust > 0;
+
+                Check("on-pad booster stack keeps S0", present && stagesOk && notMutated && s0Exists && fired);
+            }
+
             // 33f. instantiating a design materializes one runtime radial per (side x sub-stack slot) with
             //      contiguous RadialMountId/Side/Slot tags matching the design mounts, so the flight
             //      renderer (which groups by those tags) draws every radial decoupler/booster the editor

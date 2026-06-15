@@ -951,7 +951,7 @@ namespace Solar.Scenes
                     if (sep)
                     {
                         Str($"decouple S{drop}", x + 14, y + 3, modeCol);
-                        if (Btn(new Rectangle(w - 110, (int)y, 21, 20), "-", drop > fire)) { dropMount = mi; dropDelta = -1; }
+                        if (Btn(new Rectangle(w - 110, (int)y, 21, 20), "-", drop > fire + 1)) { dropMount = mi; dropDelta = -1; }
                         if (Btn(new Rectangle(w - 86, (int)y, 21, 20), "+")) { dropMount = mi; dropDelta = 1; }
                         y += 24;
                     }
@@ -970,10 +970,10 @@ namespace Solar.Scenes
                     var m = entry.Mounts[fireMount];
                     int cur = m.FireStage >= 0 ? m.FireStage : fireEff[fireMount];
                     m.FireStage = Math.Max(0, cur + fireDelta);
-                    if (m.Separate)   // a booster can't be jettisoned before it ignites
+                    if (m.Separate)   // a booster must ignite strictly before it can be jettisoned
                     {
                         int dropEff = m.Stage >= 0 ? m.Stage : hostEff + 1;
-                        if (dropEff < m.FireStage) m.Stage = m.FireStage;
+                        if (dropEff <= m.FireStage) m.Stage = m.FireStage + 1;
                     }
                 }
                 else if (dropMount >= 0)
@@ -981,7 +981,7 @@ namespace Solar.Scenes
                     var m = entry.Mounts[dropMount];
                     int cur = m.Stage >= 0 ? m.Stage : hostEff + 1;
                     int fire = m.FireStage >= 0 ? m.FireStage : fireEff[dropMount];
-                    m.Stage = Math.Max(fire, cur + dropDelta);
+                    m.Stage = Math.Max(fire + 1, cur + dropDelta);
                 }
                 else if (delPartMount >= 0) entry.RemoveFromMount(delPartMount, delPart);
                 else if (delMount >= 0) entry.RemoveRadial(delMount);
