@@ -506,7 +506,7 @@ namespace Solar.UI
             // ---- controls hint (bottom right) ----
             string hint = mapMode
                 ? "[click] orbit=node  [drag] handles  X=del node  [Tab/T] target  [F] focus  [C] crew  [M] flight"
-                : "[Shift/Ctrl] throttle  [A/D] rotate  [H] SAS  [L] gear  [Space] stage  [Tab/T] target  [C] crew  [B] base  [M] map  [,/.] warp";
+                : "[Shift/Ctrl] throttle  [A/D] rotate  [H] SAS  [L] gear  [Space] stage  [Tab/T] target  [K] dock  [U] undock  [C] crew  [B] base  [M] map  [,/.] warp";
             var hsz = f.MeasureString(hint);
             sb.DrawString(f, hint, new Vector2(w - hsz.X - 12, h - 24), new Color(120, 132, 150));
 

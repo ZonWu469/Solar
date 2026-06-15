@@ -780,10 +780,86 @@ namespace Solar.Vessels
             public Part PortA;       // port that belongs to the part of the stack we keep
             public Part PortB;       // port on the docked-on module
             public int ModuleStart;  // index in Parts where the docked module begins
+            // Pose of the docked module's sub-stack in THIS vessel's local frame:
+            // vesselLocal = RotQuarter(QuarterTurns, subStackLocal) + Offset.
+            public int QuarterTurns; // 0..3 (CCW 90-degree steps)
+            public Vec2d Offset;     // meters, in the vessel local frame (base at origin, +Y up the stack)
         }
 
         /// <summary>Joins recorded when other vessels docked onto this one (newest last).</summary>
         public readonly List<DockLink> DockLinks = new();
+
+        /// <summary>Rotate a local vector by <paramref name="q"/> quarter-turns CCW (Perp = +90 deg).</summary>
+        public static Vec2d RotQuarter(int q, Vec2d v)
+        {
+            q &= 3;
+            for (int i = 0; i < q; i++) v = v.Perp();
+            return v;
+        }
+
+        /// <summary>World-space unit vector pointing right of the stack (perpendicular to <see cref="Up"/>),
+        /// matching the renderer's screen-space <c>rightS</c> convention.</summary>
+        public Vec2d Right { get { var u = Up; return new Vec2d(u.Y, -u.X); } }
+
+        /// <summary>The contiguous part ranges that make up this vessel: the root stack [0, firstModuleStart),
+        /// then each docked module [ModuleStart, nextModuleStart). The link is null for the root stack.</summary>
+        public IEnumerable<(int start, int end, DockLink link)> SubStacks()
+        {
+            int firstModule = Parts.Count;
+            foreach (var dl in DockLinks) if (dl.ModuleStart < firstModule) firstModule = dl.ModuleStart;
+            yield return (0, firstModule, null);
+            var links = new List<DockLink>(DockLinks);
+            links.Sort((a, b) => a.ModuleStart.CompareTo(b.ModuleStart));
+            for (int k = 0; k < links.Count; k++)
+            {
+                int start = links[k].ModuleStart;
+                int end = (k + 1 < links.Count) ? links[k + 1].ModuleStart : Parts.Count;
+                yield return (start, end, links[k]);
+            }
+        }
+
+        /// <summary>Center of an axial part in this vessel's local frame, honoring any docked-module
+        /// transform. Parts stack from the sub-stack base (highest index, local y=0) toward its nose.</summary>
+        public Vec2d PartLocalCenter(Part p)
+        {
+            int idx = Parts.IndexOf(p);
+            if (idx < 0) return Vec2d.Zero;
+            foreach (var (start, end, link) in SubStacks())
+            {
+                if (idx < start || idx >= end) continue;
+                double y = 0;
+                for (int i = end - 1; i > idx; i--) y += Parts[i].Def.Height;
+                y += Parts[idx].Def.Height * 0.5;
+                Vec2d c = new Vec2d(0, y);
+                if (link != null) c = RotQuarter(link.QuarterTurns, c) + link.Offset;
+                return c;
+            }
+            return Vec2d.Zero;
+        }
+
+        /// <summary>World-space center of a docking port (used for port-to-port proximity / overlap).</summary>
+        public Vec2d PortWorldCenter(Part p, double ut)
+        {
+            Vec2d c = PartLocalCenter(p);
+            return AbsolutePosition(ut) + Right * c.X + Up * c.Y;
+        }
+
+        /// <summary>The nearest pair of free docking ports between two vessels, by world-space center
+        /// distance. Returns (null, null, +inf) if either vessel has no free port.</summary>
+        public static (Part mine, Part theirs, double dist) ClosestFreePortPair(Vessel a, Vessel b, double ut)
+        {
+            Part bestA = null, bestB = null; double best = double.MaxValue;
+            foreach (var pa in a.FreeDockingPorts())
+            {
+                Vec2d wa = a.PortWorldCenter(pa, ut);
+                foreach (var pb in b.FreeDockingPorts())
+                {
+                    double d = (wa - b.PortWorldCenter(pb, ut)).Length;
+                    if (d < best) { best = d; bestA = pa; bestB = pb; }
+                }
+            }
+            return (bestA, bestB, best);
+        }
 
         private bool PortOccupied(Part port)
         {
@@ -809,15 +885,24 @@ namespace Solar.Vessels
         /// <summary>Dock <paramref name="other"/> onto this vessel: append its parts as a new module,
         /// record the join, and pool the shared resources. The caller is responsible for the rigid-body
         /// snap (position/velocity). Returns false if either port is missing.</summary>
-        public bool DockWith(Vessel other, Part myPort, Part theirPort)
+        public bool DockWith(Vessel other, Part myPort, Part theirPort, int quarterTurns, Vec2d offset)
         {
             if (other == null || myPort == null || theirPort == null) return false;
+            quarterTurns &= 3;
             int moduleStart = Parts.Count;
             foreach (var p in other.Parts) Parts.Add(p);
-            DockLinks.Add(new DockLink { PortA = myPort, PortB = theirPort, ModuleStart = moduleStart });
-            // carry over the other vessel's own joins, shifted into this stack's index space
+            DockLinks.Add(new DockLink { PortA = myPort, PortB = theirPort, ModuleStart = moduleStart, QuarterTurns = quarterTurns, Offset = offset });
+            // carry over the other vessel's own joins, shifted into this stack's index space and composing
+            // their module pose with the new attach transform so they land in THIS vessel's local frame
             foreach (var dl in other.DockLinks)
-                DockLinks.Add(new DockLink { PortA = dl.PortA, PortB = dl.PortB, ModuleStart = dl.ModuleStart + moduleStart });
+                DockLinks.Add(new DockLink
+                {
+                    PortA = dl.PortA,
+                    PortB = dl.PortB,
+                    ModuleStart = dl.ModuleStart + moduleStart,
+                    QuarterTurns = (quarterTurns + dl.QuarterTurns) & 3,
+                    Offset = RotQuarter(quarterTurns, dl.Offset) + offset,
+                });
             other.DockLinks.Clear();
             // pool shared resources (capacities recompute from the merged parts automatically)
             ElectricCharge += other.ElectricCharge;
@@ -835,15 +920,21 @@ namespace Solar.Vessels
         public Vessel Undock(double sepImpulse = 0.4)
         {
             if (DockLinks.Count == 0) return null;
-            var link = DockLinks[DockLinks.Count - 1];
-            DockLinks.RemoveAt(DockLinks.Count - 1);
+            // Detach the outermost leaf module: the link with the greatest ModuleStart. Its parts are a
+            // clean suffix of the stack, so no other join references them and no sub-links travel with it.
+            int li = 0;
+            for (int i = 1; i < DockLinks.Count; i++) if (DockLinks[i].ModuleStart > DockLinks[li].ModuleStart) li = i;
+            var link = DockLinks[li];
+            DockLinks.RemoveAt(li);
 
+            // reconstruct the detached vessel's pose from the stored module transform (so it pops off
+            // exactly where it was rendered): its base is at the link Offset, rotated by the quarter-turns
             var detached = new Vessel
             {
                 Body = Body,
-                Position = Position,
+                Position = Position + Right * link.Offset.X + Up * link.Offset.Y,
                 Velocity = Velocity,
-                Heading = Heading,
+                Heading = Heading + link.QuarterTurns * (Math.PI / 2),
                 OnRails = false,
             };
             for (int i = Parts.Count - 1; i >= link.ModuleStart; i--)

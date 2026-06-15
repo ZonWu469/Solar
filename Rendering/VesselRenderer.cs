@@ -30,8 +30,6 @@ namespace Solar.Rendering
                 return;
             }
 
-            Vector2 P(float lx, float ly) => baseS + rightS * (lx * pxPerM) + upS * (ly * pxPerM);
-
             bool flaming = !v.IsDebris && v.CurrentThrust > 0;   // solids flame at any throttle
 
             // RCS translation cue: while actively translating, the gas is expelled OPPOSITE the
@@ -43,8 +41,19 @@ namespace Solar.Rendering
             float jx = 0, jy = 0;
             if (rcsLen > 1e-6) { jx = -(float)(v.RcsCommand.X / rcsLen); jy = -(float)(v.RcsCommand.Y / rcsLen); }
 
+            // Draw one sub-stack (the root stack, or a docked module) in the vessel's local frame.
+            // A module's parts are rotated by `q` quarter-turns and shifted by `off` so its ports overlap.
+            void DrawStack(int from, int to, int q, Vec2d off)
+            {
+            Vector2 P(float lx, float ly)
+            {
+                float mx = lx, my = ly;
+                for (int t = 0; t < (q & 3); t++) { float nx = -my, ny = mx; mx = nx; my = ny; }   // Perp = +90 CCW
+                mx += (float)off.X; my += (float)off.Y;
+                return baseS + rightS * (mx * pxPerM) + upS * (my * pxPerM);
+            }
             float y = 0;
-            for (int i = v.Parts.Count - 1; i >= 0; i--)
+            for (int i = to - 1; i >= from; i--)
             {
                 var p = v.Parts[i];
                 var d = p.Def;
@@ -328,6 +337,10 @@ namespace Solar.Rendering
                 }
                 y += h;
             }
+            }
+
+            foreach (var (start, end, link) in v.SubStacks())
+                DrawStack(start, end, link?.QuarterTurns ?? 0, link?.Offset ?? Vec2d.Zero);
         }
     }
 }

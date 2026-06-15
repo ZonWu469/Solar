@@ -706,7 +706,7 @@ namespace Solar.Tests
                 double massSum = a.TotalMass + b.TotalMass;
                 int partsSum = a.Parts.Count + b.Parts.Count;
                 bool hadFree = a.HasFreeDockingPort && b.HasFreeDockingPort;
-                bool docked = a.DockWith(b, a.FirstFreeDockingPort(), b.FirstFreeDockingPort());
+                bool docked = a.DockWith(b, a.FirstFreeDockingPort(), b.FirstFreeDockingPort(), 0, Vec2d.Zero);
                 bool mergedOk = docked && a.Parts.Count == partsSum
                                 && Math.Abs(a.TotalMass - massSum) < 1e-6
                                 && Math.Abs(a.Monoprop - 1000) < 1e-6
@@ -721,6 +721,35 @@ namespace Solar.Tests
                 Check("docking merge", hadFree && mergedOk && undockOk);
             }
 
+            // 27b. dock geometry: approaching at ~90 deg snaps the docked module to a quarter turn, places
+            //      it so the two ports overlap, and undock restores the module's snapped heading/pose.
+            {
+                var u = SolarSystemData.Create();
+                var earth = u["Earth"];
+                var a = new Vessels.Vessel { Body = earth, Position = new Vec2d(earth.Radius + 300000, 0), Heading = Math.PI / 2 };
+                a.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Docking Port Jr")));   // nose port
+                a.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                var b = new Vessels.Vessel { Body = earth, Position = a.Position, Heading = Math.PI / 2 + 1.55 };  // ~88.8 deg off
+                b.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Docking Port Jr")));
+                b.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+
+                var myPort = a.FirstFreeDockingPort();
+                var theirPort = b.FirstFreeDockingPort();
+                int q = ((int)Math.Round((b.Heading - a.Heading) / (Math.PI / 2))) & 3;
+                var offset = a.PartLocalCenter(myPort) - Vessels.Vessel.RotQuarter(q, b.PartLocalCenter(theirPort));
+                a.DockWith(b, myPort, theirPort, q, offset);
+
+                double portGap = (a.PortWorldCenter(myPort, 0) - a.PortWorldCenter(theirPort, 0)).Length;
+                double expectHead = a.Heading + q * (Math.PI / 2);
+                var det = a.Undock(0);
+                bool undockPose = det != null && det.Parts.Count == 2 && Math.Abs(det.Heading - expectHead) < 1e-6;
+
+                bool snapOk = q == 1
+                    && ((int)Math.Round(200 * Math.PI / 180 / (Math.PI / 2)) & 3) == 2
+                    && ((int)Math.Round(40 * Math.PI / 180 / (Math.PI / 2)) & 3) == 0;
+                Check("dock geometry", snapOk && portGap < 1e-6 && undockPose);
+            }
+
             // 28. a docked station persists its assembly graph: serialize -> reload keeps the parts and
             //     the dock link, so the reloaded station can still be undocked back into modules.
             {
@@ -732,7 +761,7 @@ namespace Solar.Tests
                 var b = new Vessels.Vessel();
                 b.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Docking Port Jr")));
                 b.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
-                a.DockWith(b, a.FirstFreeDockingPort(), b.FirstFreeDockingPort());
+                a.DockWith(b, a.FirstFreeDockingPort(), b.FirstFreeDockingPort(), 0, Vec2d.Zero);
 
                 var s = ShipState.From(a, "Station");
                 var a2 = s.ToVessel(u);
@@ -763,7 +792,7 @@ namespace Solar.Tests
                 var landerTank = new Parts.Part(Parts.PartCatalog.Get("Tank T400")) { Fuel = 0 };
                 lander.Parts.Add(landerTank);
 
-                baseV.DockWith(lander, baseV.FirstFreeDockingPort(), lander.FirstFreeDockingPort());
+                baseV.DockWith(lander, baseV.FirstFreeDockingPort(), lander.FirstFreeDockingPort(), 0, Vec2d.Zero);
                 double f0 = baseV.TotalLiquidFuel;
                 baseV.UpdateResources(10, 0, u);               // drill +3 fuel/s for 10 s, pooled base-wide
                 bool refuelled = baseV.TotalLiquidFuel > f0 + 29 && landerTank.Fuel > 0;  // reached the lander

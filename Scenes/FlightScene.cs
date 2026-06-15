@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
 using Solar.Core;
+using Solar.Parts;
 using Solar.Physics;
 using Solar.Rendering;
 using Solar.UI;
@@ -370,7 +371,7 @@ namespace Solar.Scenes
             if (inp.Pressed(Keys.T)) _showTargetWindow = !_showTargetWindow;
             if (inp.Pressed(Keys.V)) TakeControlOfTarget();
             if (inp.Pressed(Keys.U)) Undock();
-            if (inp.Pressed(Keys.K)) ConnectSurface(clock.UT);   // confirm a surface connection into a base
+            if (inp.Pressed(Keys.K)) ConfirmDock(clock.UT);      // confirm an orbital dock or surface connection
             if (inp.Pressed(Keys.C)) _showCrew = !_showCrew;
             // colony / base management, available while landed
             if (inp.Pressed(Keys.B) && _vessel != null && _vessel.Landed && !_vessel.Destroyed)
@@ -676,9 +677,9 @@ namespace Solar.Scenes
             }
         }
 
-        /// <summary>Capture distance / closing-speed limit for an orbital dock, and the (looser) range
-        /// for connecting two craft that are both parked on a surface into a compound base.</summary>
-        private const double CaptureDist = 15.0;
+        /// <summary>Port-to-port distance for an orbital dock and the closing-speed limit (soft dock), plus
+        /// the (looser) center range for connecting two craft parked on a surface into a compound base.</summary>
+        private const double PortDockDist = 1.0;   // meters between the two nearest free docking ports
         private const double SoftDockSpeed = 2.5;
         private const double ConnectDist = 75.0;   // hand-landing tolerance: park within this of a base to connect
 
@@ -686,12 +687,18 @@ namespace Solar.Scenes
         /// player can join into a base by pressing the connect key. Null when none is in range.</summary>
         private TrackedShip _surfaceConnect;
 
-        /// <summary>Auto-perform an orbital dock (a soft capture has no decision to make), and surface every
-        /// eligible surface connection as a candidate the player confirms with a key — so two craft don't
-        /// silently weld together the instant they touch down near each other.</summary>
+        /// <summary>An orbital-dock candidate found this frame: a tracked ship whose nearest free port is
+        /// within capture distance of ours and is closing slowly. The player confirms it with [K].</summary>
+        private struct DockCandidate { public TrackedShip Ship; public Part Mine; public Part Theirs; }
+        private DockCandidate? _dockCandidate;
+
+        /// <summary>Surface every eligible dock / surface connection as a candidate the player confirms with
+        /// a key — nothing welds together automatically. Orbital docking keys off the two nearest free
+        /// docking ports being within <see cref="PortDockDist"/> and closing slower than the soft-dock speed.</summary>
         private void TryDock(double ut)
         {
             _surfaceConnect = null;
+            _dockCandidate = null;
             if (_vessel == null || _vessel.Destroyed || !_vessel.HasFreeDockingPort) return;
             foreach (var ts in _others)
             {
@@ -705,37 +712,60 @@ namespace Solar.Scenes
                     continue;
                 }
                 if (_vessel.Landed || o.Landed) continue;   // can't dock a flying craft to a landed one
-                if ((o.Position - _vessel.Position).Length >= CaptureDist) continue;
                 if ((o.Velocity - _vessel.Velocity).Length >= SoftDockSpeed) continue;
-                DoDock(ts, o, false, ut);
+                var (mine, theirs, d) = Vessel.ClosestFreePortPair(_vessel, o, ut);
+                if (mine == null || d > PortDockDist) continue;
+                _dockCandidate = new DockCandidate { Ship = ts, Mine = mine, Theirs = theirs };
                 return;
             }
         }
 
-        /// <summary>Connect the active landed vessel to the pending surface candidate (the [K] action).</summary>
-        private void ConnectSurface(double ut)
+        /// <summary>Confirm a pending dock — orbital (two ports within range) or surface (two landed craft).
+        /// The [K] action.</summary>
+        private void ConfirmDock(double ut)
         {
-            if (_surfaceConnect == null) return;
-            var ts = _surfaceConnect; _surfaceConnect = null;
-            if (ts.V == null || ts.V.Destroyed || !_vessel.Landed || !ts.V.Landed) return;
-            if (!_vessel.HasFreeDockingPort || !ts.V.HasFreeDockingPort) return;
-            DoDock(ts, ts.V, true, ut);
+            if (_dockCandidate is DockCandidate dc)
+            {
+                _dockCandidate = null;
+                var ts = dc.Ship;
+                if (ts.V == null || ts.V.Destroyed || _vessel == null || _vessel.Destroyed) return;
+                if (PortOccupiedOrGone(_vessel, dc.Mine) || PortOccupiedOrGone(ts.V, dc.Theirs)) return;
+                DoDock(ts, ts.V, dc.Mine, dc.Theirs, false, ut);
+                return;
+            }
+            if (_surfaceConnect != null)
+            {
+                var ts = _surfaceConnect; _surfaceConnect = null;
+                if (ts.V == null || ts.V.Destroyed || !_vessel.Landed || !ts.V.Landed) return;
+                if (!_vessel.HasFreeDockingPort || !ts.V.HasFreeDockingPort) return;
+                DoDock(ts, ts.V, _vessel.FirstFreeDockingPort(), ts.V.FirstFreeDockingPort(), true, ut);
+            }
+        }
+
+        private static bool PortOccupiedOrGone(Vessel v, Part port)
+        {
+            if (port == null) return true;
+            foreach (var p in v.FreeDockingPorts()) if (p == port) return false;
+            return true;
         }
 
         /// <summary>Merge a tracked ship into the active vessel as one compound vessel, dropping it from the
-        /// tracked/saved set. Shared by an orbital dock and a surface connection.</summary>
-        private void DoDock(TrackedShip ts, Vessel o, bool surface, double ut)
+        /// tracked/saved set. Shared by an orbital dock and a surface connection. The docked module is placed
+        /// so the two chosen ports overlap, at the approach orientation snapped to the nearest 90 degrees.</summary>
+        private void DoDock(TrackedShip ts, Vessel o, Part myPort, Part theirPort, bool surface, double ut)
         {
-            var myPort = _vessel.FirstFreeDockingPort();
-            var theirPort = o.FirstFreeDockingPort();
             if (_vessel.OnRails) _vessel.GoOffRails(ut);
+            // snap the relative heading to the nearest quarter turn, then offset the docked module so its
+            // port center lands on ours (the two ports overlap)
+            int q = ((int)Math.Round((o.Heading - _vessel.Heading) / (Math.PI / 2))) & 3;
+            Vec2d offset = _vessel.PartLocalCenter(myPort) - Vessel.RotQuarter(q, o.PartLocalCenter(theirPort));
             if (!surface)
             {
                 // conserve momentum into the merged rigid body (landed craft are already at rest)
                 double m1 = _vessel.TotalMass, m2 = o.TotalMass;
                 _vessel.Velocity = (_vessel.Velocity * m1 + o.Velocity * m2) / (m1 + m2);
             }
-            _vessel.DockWith(o, myPort, theirPort);
+            _vessel.DockWith(o, myPort, theirPort, q, offset);
             _others.Remove(ts);
             Ctx.State.RemoveShip(ts.Name);
             ClearTarget();
@@ -1683,15 +1713,17 @@ namespace Solar.Scenes
                 sb.DrawString(f, _toast, pos, new Color(150, 230, 150) * alpha);
             }
 
-            // surface-rendezvous prompt: a parked ship is in connect range — confirm the merge with [K]
-            if (_surfaceConnect != null && _vessel != null && _vessel.Landed && !_vessel.Destroyed && !_showExitDialog)
+            // rendezvous prompt: a craft is in range to dock/connect — confirm the merge with [K]
+            string dockMsg = null;
+            if (_dockCandidate is DockCandidate dcp) dockMsg = $"[K] dock with {dcp.Ship.Name}";
+            else if (_surfaceConnect != null && _vessel != null && _vessel.Landed) dockMsg = $"[K] connect to {_surfaceConnect.Name}";
+            if (dockMsg != null && _vessel != null && !_vessel.Destroyed && !_showExitDialog)
             {
                 var f = Ctx.FontBig;
-                string msg = $"[K] connect to {_surfaceConnect.Name}";
-                var sz = f.MeasureString(msg);
+                var sz = f.MeasureString(dockMsg);
                 var pos = new Vector2(Ctx.W / 2 - sz.X / 2, Ctx.H - 150);
                 pb.FillRect((int)pos.X - 12, (int)pos.Y - 6, (int)sz.X + 24, (int)sz.Y + 12, new Color(20, 30, 40, 200));
-                sb.DrawString(f, msg, pos, new Color(150, 230, 150));
+                sb.DrawString(f, dockMsg, pos, new Color(150, 230, 150));
             }
 
             DrawExitDialog(pb, sb);
@@ -1976,19 +2008,20 @@ namespace Solar.Scenes
                 && _vessel.HasFreeDockingPort && _targetVessel.HasFreeDockingPort
                 && _targetVessel.Body == _vessel.Body)
             {
-                double d = (_targetVessel.Position - _vessel.Position).Length;
                 var green = new Color(150, 230, 150); var blue = new Color(120, 190, 230);
                 if (_vessel.Landed && _targetVessel.Landed)
                 {
-                    bool ready = d < ConnectDist;
+                    bool ready = (_targetVessel.Position - _vessel.Position).Length < ConnectDist;
                     Row("Connect", ready ? "[K] to connect" : $"approach < {ConnectDist:0} m", ready ? green : blue);
                 }
                 else if (!_vessel.Landed && !_targetVessel.Landed)
                 {
+                    // key off the two nearest free ports, the same geometry the dock itself uses
+                    var (_, _, pd) = Vessel.ClosestFreePortPair(_vessel, _targetVessel, ut);
                     double rs = (_targetVessel.Velocity - _vessel.Velocity).Length;
-                    bool ready = d < CaptureDist && rs < SoftDockSpeed;
-                    string txt = ready ? "capturing..."
-                               : d >= CaptureDist ? $"close to {CaptureDist:0} m"
+                    bool ready = pd <= PortDockDist && rs < SoftDockSpeed;
+                    string txt = ready ? "[K] to dock"
+                               : pd > PortDockDist ? $"ports to {PortDockDist:0.0} m ({UiDraw.Dist(pd)})"
                                : $"slow below {SoftDockSpeed:0.0} m/s";
                     Row("Dock", txt, ready ? green : blue);
                 }

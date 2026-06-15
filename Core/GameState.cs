@@ -256,6 +256,11 @@ namespace Solar.Core
         public int PortA;
         public int PortB;
         public int ModuleStart;
+        // Pose of the docked module in the vessel local frame (see Vessel.DockLink). Null/absent on
+        // pre-pose saves, which are migrated to the old straight-stack look on load.
+        public int? QuarterTurns;
+        public double? OffsetX;
+        public double? OffsetY;
     }
 
     public sealed class ManeuverState
@@ -352,6 +357,9 @@ namespace Solar.Core
                         PortA = v.Parts.IndexOf(dl.PortA),
                         PortB = v.Parts.IndexOf(dl.PortB),
                         ModuleStart = dl.ModuleStart,
+                        QuarterTurns = dl.QuarterTurns,
+                        OffsetX = dl.Offset.X,
+                        OffsetY = dl.Offset.Y,
                     });
             }
             return s;
@@ -392,7 +400,28 @@ namespace Solar.Core
                     if (ls.ModuleStart < 0 || ls.ModuleStart > v.Parts.Count) continue;
                     var a = v.Parts[ls.PortA]; var b = v.Parts[ls.PortB];
                     if (a.Def.Kind != PartKind.DockingPort || b.Def.Kind != PartKind.DockingPort) continue;
-                    v.DockLinks.Add(new Vessel.DockLink { PortA = a, PortB = b, ModuleStart = ls.ModuleStart });
+                    int q; Vec2d off;
+                    if (ls.QuarterTurns.HasValue && ls.OffsetX.HasValue && ls.OffsetY.HasValue)
+                    {
+                        q = ls.QuarterTurns.Value & 3;
+                        off = new Vec2d(ls.OffsetX.Value, ls.OffsetY.Value);
+                    }
+                    else
+                    {
+                        // legacy save: the old model appended a docked module to the END of the part list,
+                        // so it rendered as a straight stack hanging below the root (higher index = base).
+                        // Reproduce that by placing the module directly below the root: its nose at y=0,
+                        // extending down by the module's own height.
+                        q = 0;
+                        int end = v.Parts.Count;
+                        if (Links != null)
+                            foreach (var other in Links)
+                                if (other.ModuleStart > ls.ModuleStart && other.ModuleStart < end) end = other.ModuleStart;
+                        double modH = 0;
+                        for (int i = ls.ModuleStart; i < end && i < v.Parts.Count; i++) modH += v.Parts[i].Def.Height;
+                        off = new Vec2d(0, -modH);
+                    }
+                    v.DockLinks.Add(new Vessel.DockLink { PortA = a, PortB = b, ModuleStart = ls.ModuleStart, QuarterTurns = q, Offset = off });
                 }
             // migrate pre-resource saves: if no per-resource data but the old pool had supply, top up
             if (Water <= 0 && Oxygen <= 0 && Food <= 0 && LifeSupport > 0)
