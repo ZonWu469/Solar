@@ -1347,18 +1347,6 @@
 /processorParam:TextureFormat=Color
 /build:Textures/parts/tank-t400-r.png
 
-#begin Textures/parts/tank-t800 (1).png
-/importer:TextureImporter
-/processor:TextureProcessor
-/processorParam:ColorKeyColor=255,0,255,255
-/processorParam:ColorKeyEnabled=True
-/processorParam:GenerateMipmaps=False
-/processorParam:PremultiplyAlpha=True
-/processorParam:ResizeToPowerOfTwo=False
-/processorParam:MakeSquare=False
-/processorParam:TextureFormat=Color
-/build:Textures/parts/tank-t800 (1).png
-
 #begin Textures/parts/tank-t800.png
 /importer:TextureImporter
 /processor:TextureProcessor
