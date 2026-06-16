@@ -20,6 +20,7 @@ namespace Solar.Scenes
         private int _focus;                 // 0 = system (Sun), else body index + 1
         private double _zoom;
         private readonly List<Vessel> _ships = new();   // live rebuilds for drawing/picking
+        private readonly Dictionary<string, double> _supply = new();   // colony name -> life-support endurance (s)
 
         public TrackingStationScene(GameContext ctx) : base(ctx) { }
 
@@ -35,12 +36,14 @@ namespace Solar.Scenes
         private void RebuildShips()
         {
             _ships.Clear();
+            _supply.Clear();
             double ut = Ctx.Clock.UT;
             foreach (var s in Ctx.State.Ships)
             {
                 var v = s.ToVessel(Ctx.Universe, Ctx.State.Roster);
                 if (v.Body == null) continue;
                 Colony.AdvanceProduction(v, s.LastUT, ut, Ctx.Universe);   // show caught-up colony stocks
+                if (v.IsColony && v.CrewCount > 0) _supply[s.Name] = v.LifeSupportEndurance();
                 // keep the saved position unless the world has advanced past the save (matches FlightScene.Enter)
                 if (v.OnRails && ut > v.Orbit.Epoch + 1e-6) v.UpdateFromRails(ut);
                 _ships.Add(v);
@@ -177,7 +180,9 @@ namespace Solar.Scenes
             {
                 var ship = Ctx.State.Ships[i];
                 int modules = (ship.Links?.Count ?? 0) + 1;
-                string label = ship.IsColony ? $"{ship.Name}  (COLONY {ship.BodyName}, {modules} mod)"
+                string supply = ship.IsColony && _supply.TryGetValue(ship.Name, out double end)
+                    ? (double.IsInfinity(end) ? ", self-sustaining" : $", supply {UiDraw.Time(end)}") : "";
+                string label = ship.IsColony ? $"{ship.Name}  (COLONY {ship.BodyName}, {modules} mod{supply})"
                              : ship.Landed   ? $"{ship.Name}  (landed {ship.BodyName})"
                                              : $"{ship.Name}  ({ship.BodyName})";
                 if (UiDraw.Button(pb, sb, f, new Rectangle(16, y, PanelW - 32, 34), label, Ctx.Input))

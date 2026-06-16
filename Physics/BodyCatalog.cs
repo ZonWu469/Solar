@@ -29,12 +29,25 @@ namespace Solar.Physics
         public int AtmoG { get; set; }
         public int AtmoB { get; set; }
 
+        // Surface ore concentration (0..1): scales how fast a landed drill mines ore. 0 = barren
+        // (the star, gas giants); rocky/icy worlds carry more. Absent in older bodies.json files,
+        // where it defaults to 0 — re-save (delete bodies.json) to pick up the built-in values.
+        public double OreRichness { get; set; }
+
         // Terrain relief (all optional; null falls back to a sensible default so older bodies.json files
         // still get terrain). TerrainAmp is the peak elevation as a fraction of the body radius; 0 disables
         // terrain (smooth ball). The star is always smooth regardless (it has no surface).
         public double? TerrainAmp { get; set; }
         public int? TerrainSeed { get; set; }
         public int? TerrainPlains { get; set; }
+
+        // Radiation belt (a trapped-particle band, like the Van Allen belts): crew take a dose while
+        // flying through the altitude band [RadBeltInnerKm, RadBeltOuterKm] above the surface. All
+        // pre-scale (km / dose units per second). RadBeltDose 0 (or absent) = no belt. Absent in older
+        // bodies.json files, where BackfillRadBelts inherits the built-in values.
+        public double RadBeltInnerKm { get; set; }
+        public double RadBeltOuterKm { get; set; }
+        public double RadBeltDose { get; set; }
     }
 
     /// <summary>The celestial-body catalog. Loaded from Content/bodies.json at startup, falling back to
@@ -61,7 +74,7 @@ namespace Solar.Physics
                     AtmoR = ar, AtmoG = ag, AtmoB = ab,
                 };
 
-            return new List<BodyDef>
+            var bodies = new List<BodyDef>
             {
                 Body("Sun", null, 0, 0, 1.32712440018e20, 696340, 255, 220, 120),
                 Body("Mercury", "Sun", 57_909e3, 0.2056, 2.2032e13, 2439.7, 150, 140, 130),
@@ -79,6 +92,31 @@ namespace Solar.Physics
                 Body("Uranus", "Sun", 2_872_460e3, 0.0457, 5.793939e15, 25362, 150, 210, 220),
                 Body("Neptune", "Sun", 4_495_060e3, 0.0113, 6.836529e15, 24622, 70, 100, 220),
             };
+
+            // Surface ore richness: airless rock is the best mining ground, the home world is poor (no
+            // reason to ISRU at Earth), gas giants have no surface (0). Tunable per body.
+            var richness = new Dictionary<string, double>
+            {
+                ["Mercury"] = 0.75, ["Venus"] = 0.30, ["Earth"] = 0.10, ["Moon"] = 0.80,
+                ["Mars"] = 0.70, ["Io"] = 0.65, ["Europa"] = 0.45, ["Ganymede"] = 0.55,
+                ["Callisto"] = 0.55, ["Titan"] = 0.40,
+            };
+            foreach (var b in bodies)
+                if (richness.TryGetValue(b.Name, out double r)) b.OreRichness = r;
+
+            // Radiation belts: trapped-particle bands a few thousand km up (altitude above the surface,
+            // km) with a dose rate (units/s) crew accumulate inside. Earth has a Van-Allen-analog band;
+            // the giant magnetospheres of Jupiter and Saturn carry fierce belts. Tunable per body.
+            var belts = new Dictionary<string, (double inner, double outer, double dose)>
+            {
+                ["Earth"]   = (1500, 40000, 0.3),
+                ["Jupiter"] = (100000, 3000000, 3.0),
+                ["Saturn"]  = (60000, 1000000, 1.2),
+            };
+            foreach (var b in bodies)
+                if (belts.TryGetValue(b.Name, out var z))
+                { b.RadBeltInnerKm = z.inner; b.RadBeltOuterKm = z.outer; b.RadBeltDose = z.dose; }
+            return bodies;
         }
 
         private static readonly JsonSerializerOptions JsonOpts = new()
@@ -100,6 +138,8 @@ namespace Solar.Physics
                     var defs = JsonSerializer.Deserialize<List<BodyDef>>(File.ReadAllText(FilePath), JsonOpts);
                     if (defs != null && defs.Count > 0)
                     {
+                        BackfillOreRichness(defs);
+                        BackfillRadBelts(defs);
                         All = defs;
                         return;
                     }
@@ -109,6 +149,37 @@ namespace Solar.Physics
 
             All = BuiltIn();
             Save();
+        }
+
+        /// <summary>Migrate a bodies.json saved before ore richness existed: any body left at 0 inherits
+        /// the built-in value for its name, so existing saves get sensible mining grounds without the
+        /// player having to delete the file. (Bodies that are barren in the built-in list stay barren.)</summary>
+        private static void BackfillOreRichness(List<BodyDef> defs)
+        {
+            bool anyRichness = defs.Exists(d => d.OreRichness > 0);
+            if (anyRichness) return;   // file already carries richness data; leave it as authored
+            var builtin = BuiltIn();
+            foreach (var d in defs)
+            {
+                var b = builtin.Find(x => x.Name == d.Name);
+                if (b != null) d.OreRichness = b.OreRichness;
+            }
+        }
+
+        /// <summary>Migrate a bodies.json saved before radiation belts existed: any body with no belt
+        /// inherits the built-in values for its name, so existing saves gain belts without the player
+        /// deleting the file. (Bodies with no built-in belt stay belt-free.)</summary>
+        private static void BackfillRadBelts(List<BodyDef> defs)
+        {
+            bool anyBelt = defs.Exists(d => d.RadBeltDose > 0);
+            if (anyBelt) return;   // file already carries belt data; leave it as authored
+            var builtin = BuiltIn();
+            foreach (var d in defs)
+            {
+                var b = builtin.Find(x => x.Name == d.Name);
+                if (b != null && b.RadBeltDose > 0)
+                { d.RadBeltInnerKm = b.RadBeltInnerKm; d.RadBeltOuterKm = b.RadBeltOuterKm; d.RadBeltDose = b.RadBeltDose; }
+            }
         }
 
         private static void Save()

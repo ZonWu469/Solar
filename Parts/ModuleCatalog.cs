@@ -79,9 +79,15 @@ namespace Solar.Parts
         public double Torque { get; set; }
         public double RcsThrust { get; set; }
         public double RcsIsp { get; set; }
+        public double Reliability { get; set; }
+        public double ShieldFactor { get; set; }
+        public double CureRate { get; set; }
         public double FuelProduce { get; set; }
         public double FuelDraw { get; set; }
         public double FuelCapacity { get; set; }
+        public double OreProduce { get; set; }
+        public double OreDraw { get; set; }
+        public double OreCapacity { get; set; }
         public int TintR { get; set; }
         public int TintG { get; set; }
         public int TintB { get; set; }
@@ -95,8 +101,10 @@ namespace Solar.Parts
             WaterRegen = m.WaterRegen, OxygenRegen = m.OxygenRegen, FoodRegen = m.FoodRegen,
             CrewCapacity = m.CrewCapacity, Range = m.Range, Relay = m.Relay,
             ScienceValue = m.ScienceValue, Torque = m.Torque, RcsThrust = m.RcsThrust, RcsIsp = m.RcsIsp,
+            Reliability = m.Reliability, ShieldFactor = m.ShieldFactor, CureRate = m.CureRate,
             FuelProduce = m.FuelProduce, FuelDraw = m.FuelDraw,
             FuelCapacity = m.FuelCapacity,
+            OreProduce = m.OreProduce, OreDraw = m.OreDraw, OreCapacity = m.OreCapacity,
             TintR = m.Tint.R, TintG = m.Tint.G, TintB = m.Tint.B,
         };
 
@@ -114,9 +122,26 @@ namespace Solar.Parts
             Torque = Torque > 0 ? Torque : (Kind == ModuleKind.ReactionWheel ? 45000 : Kind == ModuleKind.RCS ? 8000 : 0),
             RcsThrust = RcsThrust > 0 ? RcsThrust : (Kind == ModuleKind.RCS ? 1000 : 0),
             RcsIsp = RcsIsp > 0 ? RcsIsp : (Kind == ModuleKind.RCS ? 240 : 0),
+            Reliability = Reliability > 0 ? Reliability : DefaultReliability(Kind),
+            ShieldFactor = ShieldFactor,   // 0 unless authored (only meaningful for RadShield)
+            CureRate = CureRate > 0 ? CureRate : (Kind == ModuleKind.Medbay ? 0.02 : 0),
             FuelProduce = FuelProduce, FuelDraw = FuelDraw,
             FuelCapacity = FuelCapacity,
+            // migration-safe fallback: a drill authored before ore existed inherits its old FuelProduce
+            // as ore extraction, so it now mines ore (the ISRU converter refines it back into fuel).
+            OreProduce = OreProduce > 0 ? OreProduce : (Kind == ModuleKind.Harvester ? FuelProduce : 0),
+            OreDraw = OreDraw, OreCapacity = OreCapacity,
             Tint = new Color(TintR, TintG, TintB),
+        };
+
+        /// <summary>Per-kind failure-resistance fallback for modules that don't author <see cref="Reliability"/>.
+        /// Hard-working converters / generators wear and fail sooner; passive structure rarely does.</summary>
+        private static double DefaultReliability(ModuleKind k) => k switch
+        {
+            ModuleKind.Harvester or ModuleKind.IsruConverter or ModuleKind.FuelCell => 0.7,
+            ModuleKind.SolarPanel or ModuleKind.ReactionWheel or ModuleKind.RCS => 0.85,
+            ModuleKind.Battery or ModuleKind.Tank or ModuleKind.Storage or ModuleKind.LandingLeg => 4.0,
+            _ => 1.0,
         };
     }
 }

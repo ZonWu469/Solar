@@ -225,6 +225,8 @@ namespace Solar.Rendering
                                 break;
                             }
                             case ModuleKind.Harvester:
+                            case ModuleKind.IsruConverter:
+                            case ModuleKind.OreScanner:
                                 if (mtex != null) IconBox(mtex, 0, y + h * 0.5f, w * 0.5f, h * 0.5f);
                                 else pb.FillCircle(P(0, y + h * 0.5f), w * 0.16f * pxPerM, new Color(255, 180, 80));
                                 break;

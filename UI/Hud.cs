@@ -118,6 +118,19 @@ namespace Solar.UI
                     string amount = v.MonopropCapacity > 0 ? $"{v.Monoprop:0}/{v.MonopropCapacity:0}  " : "";
                     Row("RCS", $"{amount}{status}", rcsCol);
                 }
+                // mining: ore stock and the body's surveyed ore richness (shown when mining/scanning gear is fitted)
+                if (v.OreCapacity > 0 || v.ScannerOperational)
+                {
+                    if (v.OreCapacity > 0)
+                        Row("Ore", $"{v.Ore:0}/{v.OreCapacity:0}", v.Ore > 0 ? Color.White : UiDraw.TextDim);
+                    bool surveyed = ctx.State != null && ctx.State.SurveyedBodies.Contains(v.Body.Name);
+                    string richTxt = v.Body.Parent == null ? "no surface"
+                                   : surveyed ? $"{v.Body.OreRichness * 100:0}% ore" : "unsurveyed";
+                    Color richCol = v.Body.Parent == null ? new Color(255, 140, 90)
+                                  : !surveyed ? UiDraw.TextDim
+                                  : v.Body.OreRichness > 0 ? new Color(150, 220, 150) : new Color(255, 140, 90);
+                    Row("Surface ore", richTxt, richCol);
+                }
                 if (v.CrewCount > 0 || v.LsCapacity > 0)
                 {
                     int crew = v.CrewCount;
@@ -126,6 +139,15 @@ namespace Solar.UI
                     LsRow("Oxygen", v.Oxygen, v.OxygenCapacity, crew * Vessel.OxygenPerCrew);
                     LsRow("Water", v.Water, v.WaterCapacity, crew * Vessel.WaterPerCrew);
                     LsRow("Food", v.Food, v.FoodCapacity, crew * Vessel.FoodPerCrew);
+                    // overall endurance: which resource runs out first, or whether the base sustains itself
+                    if (crew > 0)
+                    {
+                        double end = v.LifeSupportEndurance();
+                        string supTxt = v.SelfSustaining ? "self-sustaining" : UiDraw.Time(end);
+                        Color supCol = v.SelfSustaining ? new Color(150, 220, 150)
+                                     : end < 6 * 3600 ? new Color(255, 190, 90) : Color.White;
+                        Row("Supply", supTxt, supCol);
+                    }
                 }
             }
             else
@@ -205,6 +227,39 @@ namespace Solar.UI
                     string rated = $"rated {v.SafeLandingSpeed:0} m/s";
                     var rsz = f.MeasureString(rated);
                     sb.DrawString(f, rated, new Vector2(dp.Right - rsz.X - 10, dp.Bottom - 20), UiDraw.TextDim);
+                }
+            }
+
+            // ---- crew hazard readout (top left): radiation belt exposure + worst crew dose/illness.
+            // Shown only while there is something to warn about, so it stays out of the way otherwise. ----
+            if (!v.Destroyed && v.HasCrew)
+            {
+                double beltDose = v.Body?.RadiationAt(v.Altitude) ?? 0;
+                double worstDose = 0, worstIll = 0;
+                foreach (var c in v.AllCrew())
+                { if (c.RadDose > worstDose) worstDose = c.RadDose; if (c.Illness > worstIll) worstIll = c.Illness; }
+                if (beltDose > 0 || worstDose > 0 || worstIll > 0)
+                {
+                    var hp = new Rectangle(10, 64, 196, 78);
+                    UiDraw.Panel(pb, hp);
+                    sb.DrawString(f, "HAZARDS", new Vector2(hp.X + 10, hp.Y + 6), UiDraw.Accent);
+                    if (beltDose > 0)
+                    {
+                        var bsz = f.MeasureString("RADIATION BELT");
+                        sb.DrawString(f, "RADIATION BELT", new Vector2(hp.Right - bsz.X - 10, hp.Y + 6), new Color(255, 120, 90));
+                    }
+                    void HRow(int i, string label, double frac, Color hot)
+                    {
+                        float ry = hp.Y + 26 + i * 24;
+                        sb.DrawString(f, label, new Vector2(hp.X + 10, ry), UiDraw.TextDim);
+                        var bar = new Rectangle(hp.X + 78, (int)ry + 2, 100, 10);
+                        pb.FillRect(bar, new Color(30, 38, 52));
+                        frac = Math.Clamp(frac, 0, 1);
+                        var col = frac > 0.66 ? new Color(255, 90, 70) : frac > 0.33 ? new Color(255, 190, 90) : hot;
+                        if (frac > 0) pb.FillRect(new Rectangle(bar.X, bar.Y, (int)(bar.Width * frac), bar.Height), col);
+                    }
+                    HRow(0, "Radiation", worstDose / Threats.RadDeathDose, new Color(150, 220, 150));
+                    HRow(1, "Illness", worstIll, new Color(150, 220, 150));
                 }
             }
 
@@ -488,7 +543,10 @@ namespace Solar.UI
                             bool func = v.ModuleFunctioning(m, ctx.Clock.UT, ctx.Universe);
                             pb.FillRect(tr, new Color(18, 26, 40, 230));
                             UiDraw.Icon(pb, ctx.Textures?.Module(m.Def.Id), new Rectangle(tr.X + 2, tr.Y + 2, tile - 4, tile - 4), m.Def.Tint, !func);
-                            pb.RectOutline(tr, 2, func ? UiDraw.StatusOn : UiDraw.StatusOff);
+                            // a broken (malfunctioned) module gets a distinct amber-red border; otherwise green/red on/off
+                            var border = m.Broken ? new Color(255, 90, 60) : func ? UiDraw.StatusOn : UiDraw.StatusOff;
+                            pb.RectOutline(tr, 2, border);
+                            if (m.Broken) pb.Line(new Vector2(tr.X + 4, tr.Y + 4), new Vector2(tr.Right - 4, tr.Bottom - 4), 2, border);
                             bool hover = tr.Contains((int)ctx.Input.MousePos.X, (int)ctx.Input.MousePos.Y);
                             if (hover) tip = m;
                             if (hover && clickable && ctx.Input.LeftClick) m.Active = !m.Active;

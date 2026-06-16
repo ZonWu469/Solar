@@ -24,6 +24,7 @@ namespace Solar.Vessels
         public bool Landed;
         public bool Destroyed;
         public bool IsColony;        // a landed base the player has established (see Colony); enables offline production
+        public double ColonyGrowthTimer;  // accumulated self-sustaining time toward the next colonist (see Colony.TryGrowCrew)
         public bool EnginesIgnited;  // first stage has been fired
         public int CurrentStage;     // next stage index to fire (0 = first); advanced by Staging.FireNext
         public bool IsDebris;
@@ -36,12 +37,17 @@ namespace Solar.Vessels
         // resources (ship-wide pools fed by slot modules)
         public double ElectricCharge;
         public double Monoprop;             // monopropellant for RCS translation
+        public double Ore;                  // raw ore mined by drills, refined into fuel by an ISRU converter
         public double PendingScience;       // queued experiment data still being transmitted (transient)
         public double Water, Oxygen, Food;  // life-support resources (consumed per crew member)
         public bool LifeSupportOk = true;   // false once crew run out of any life-support resource
         private double _lsDeprivedFor;      // seconds any LS resource has been empty while crewed
         /// <summary>Names of crew that died this tick; the flight scene drains these to raise toasts.</summary>
         public readonly List<string> RecentDeaths = new();
+        /// <summary>Modules that broke (malfunctioned) this tick; the flight scene drains these to toast.</summary>
+        public readonly List<string> RecentFailures = new();
+        /// <summary>Modules an engineer repaired this tick; the flight scene drains these to toast.</summary>
+        public readonly List<string> RecentRepairs = new();
 
         // per-crew life-support consumption (units/s) and how long crew survive total deprivation
         // TODO(balance.json): the four life-support constants below are global tunables.
@@ -190,6 +196,7 @@ namespace Solar.Vessels
             get
             {
                 double podMin = PodControlAccel * MomentOfInertia;                        // size-independent minimum
+                if (HasPilot) podMin *= 1 + PilotControlGain;                              // a hands-on pilot wrings out more authority
                 double wheels = ElectricCharge > 0 ? ReactionWheelTorque : 0;             // gyros (per-module torque), only with power
                 double rcs = (RcsEnabled && Monoprop > 0 && ElectricCharge > 0) ? RcsTorque : 0;
                 double fins = HasFins ? 30000.0 * Math.Clamp(DynamicPressure / 4000.0, 0, 1) : 0;   // TODO(balance.json): fin torque scale
@@ -199,14 +206,26 @@ namespace Solar.Vessels
 
         /// <summary>Rotation-rate ceiling (rad/s). Reaction wheels let the craft spin up faster and reach
         /// a higher cap, but it stays bounded so fine attitude control is preserved.</summary>
-        // TODO(balance.json): turn-rate base / per-wheel gain / ceiling are global tunables.
-        public double MaxTurnRate => Math.Min(0.35 + 0.22 * (ElectricCharge > 0 ? ReactionWheels : 0), 1.6);
+        // TODO(balance.json): turn-rate base / per-wheel gain / pilot bonus / ceiling are global tunables.
+        public double MaxTurnRate => Math.Min(0.35 + 0.22 * (ElectricCharge > 0 ? ReactionWheels : 0) + (HasPilot ? PilotTurnRateBonus : 0), 1.6);
+
+        // ----- pilot bonuses (a living Pilot improves attitude control) -----
+        // TODO(balance.json): pilot control gain and turn-rate bonus.
+        public const double PilotControlGain = 0.5;     // +50% command-pod attitude authority with a pilot aboard
+        public const double PilotTurnRateBonus = 0.3;   // rad/s added to the turn-rate ceiling with a pilot aboard
+
+        /// <summary>Whether a living pilot is aboard (grants hands-on attitude control / SAS).</summary>
+        public bool HasPilot
+        {
+            get { foreach (var c in AllCrew()) if (c.Role == CrewRole.Pilot) return true; return false; }
+        }
 
         /// <summary>Whether the craft can run attitude hold (SAS) at all: a fitted SAS-capable command
-        /// part (<see cref="PartDef.Sas"/>) or any reaction wheel. Power is checked by <see cref="SasAvailable"/>.</summary>
+        /// part (<see cref="PartDef.Sas"/>), any reaction wheel, or a pilot aboard. Power is checked by
+        /// <see cref="SasAvailable"/>.</summary>
         public bool HasSas
         {
-            get { foreach (var p in AllParts()) if (p.Def.Sas) return true; return ReactionWheels > 0; }
+            get { if (HasPilot) return true; foreach (var p in AllParts()) if (p.Def.Sas) return true; return ReactionWheels > 0; }
         }
 
         /// <summary>SAS can be engaged right now: it needs a SAS-capable part and electric charge,
@@ -470,6 +489,25 @@ namespace Solar.Vessels
             get { double c = 0; foreach (var p in AllParts()) foreach (var m in p.Modules) if (m.Def.Kind == ModuleKind.Tank) c += m.Def.FuelCapacity; return c; }
         }
 
+        /// <summary>Ore storage (ore tanks plus any buffer built into drills/ISRU modules).</summary>
+        public double OreCapacity
+        {
+            get { double c = 0; foreach (var p in AllParts()) foreach (var m in p.Modules) c += m.Def.OreCapacity; return c; }
+        }
+
+        /// <summary>True when a powered, active ore scanner is aboard, so the vessel can survey its body.</summary>
+        public bool ScannerOperational
+        {
+            get
+            {
+                if (ElectricCharge <= 0) return false;
+                foreach (var p in AllParts())
+                    foreach (var m in p.Modules)
+                        if (m.Def.Kind == ModuleKind.OreScanner && m.Active) return true;
+                return false;
+            }
+        }
+
         public double WaterCapacity
         {
             get { double c = 0; foreach (var p in AllParts()) foreach (var m in p.Modules) c += m.Def.WaterCapacity; return c; }
@@ -488,6 +526,43 @@ namespace Solar.Vessels
         /// <summary>Any life-support storage at all (drives whether the HUD shows the LS panel).</summary>
         public double LsCapacity => WaterCapacity + OxygenCapacity + FoodCapacity;
 
+        /// <summary>Net per-second recycler regen of each life-support resource from active, powered
+        /// recyclers (same gate <see cref="UpdateResources"/> applies). Used for endurance + growth checks.</summary>
+        public void LifeSupportRegen(out double water, out double oxygen, out double food)
+        {
+            water = oxygen = food = 0;
+            foreach (var p in AllParts())
+                foreach (var m in p.Modules)
+                    if (m.Def.Kind == ModuleKind.LifeSupport && (!m.Def.Activatable || m.Active))
+                    { water += m.Def.WaterRegen; oxygen += m.Def.OxygenRegen; food += m.Def.FoodRegen; }
+        }
+
+        /// <summary>Worst-case life-support endurance (seconds): the soonest oxygen, water or food runs out
+        /// at the current crew + recycler balance. PositiveInfinity when uncrewed or fully self-sustaining.</summary>
+        public double LifeSupportEndurance()
+        {
+            int crew = CrewCount;
+            if (crew == 0) return double.PositiveInfinity;
+            LifeSupportRegen(out double wR, out double oR, out double fR);
+            double TimeTo(double amount, double drain) => drain <= 1e-9 ? double.PositiveInfinity : amount / drain;
+            return Math.Min(TimeTo(Oxygen, crew * OxygenPerCrew - oR),
+                   Math.Min(TimeTo(Water, crew * WaterPerCrew - wR),
+                            TimeTo(Food, crew * FoodPerCrew - fR)));
+        }
+
+        /// <summary>Whether recyclers fully cover the crew's life-support draw on all three resources — the
+        /// mark of a base that can sustain (and grow) its crew indefinitely. Vacuously false when uncrewed.</summary>
+        public bool SelfSustaining
+        {
+            get
+            {
+                int crew = CrewCount;
+                if (crew == 0) return false;
+                LifeSupportRegen(out double wR, out double oR, out double fR);
+                return oR >= crew * OxygenPerCrew && wR >= crew * WaterPerCrew && fR >= crew * FoodPerCrew;
+            }
+        }
+
         /// <summary>Total seats across the vessel (pods + crew cabins).</summary>
         public int SeatCount { get { int n = 0; foreach (var p in AllParts()) n += p.SeatCount; return n; } }
 
@@ -497,6 +572,35 @@ namespace Solar.Vessels
         public IEnumerable<CrewMember> AllCrew()
         {
             foreach (var p in AllParts()) foreach (var c in p.Crew) yield return c;
+        }
+
+        // ----- crew-role bonuses -----
+        // TODO(balance.json): per-specialist gains and the diminishing-returns caps.
+        public const double EngineerGainPerCrew = 0.25;   // +25% ISRU/drill throughput per engineer aboard
+        public const int EngineerGainCap = 3;
+        public const double ScientistGainPerCrew = 0.20;  // +20% science yield per scientist aboard
+        public const int ScientistGainCap = 3;
+
+        /// <summary>Living crew of a given specialty aboard.</summary>
+        public int CrewCountOfRole(CrewRole role)
+        {
+            int n = 0; foreach (var c in AllCrew()) if (c.Role == role) n++; return n;
+        }
+
+        /// <summary>A specialty's productivity multiplier (>= 1): 1 with none aboard, rising per specialist
+        /// up to a cap. Engineers speed ISRU/drilling (<see cref="TickConverters"/>); scientists boost
+        /// science yield. Other roles return 1.</summary>
+        public double CrewSkill(CrewRole role)
+        {
+            double per = role == CrewRole.Engineer ? EngineerGainPerCrew
+                       : role == CrewRole.Scientist ? ScientistGainPerCrew : 0;
+            if (per <= 0) return 1;
+            int cap = role == CrewRole.Engineer ? EngineerGainCap : ScientistGainCap;
+            // a sick specialist contributes less: weight each by health (1 - illness)
+            double effective = 0;
+            foreach (var c in AllCrew())
+                if (c.Role == role) effective += Math.Clamp(1 - c.Illness, 0, 1);
+            return 1 + per * Math.Min(effective, cap);
         }
 
         /// <summary>Total liquid (non-solid) fuel aboard, across axial and radial tanks.</summary>
@@ -540,6 +644,8 @@ namespace Solar.Vessels
             {
                 if (p.Def.Kind == PartKind.Pod) draw += PodEcDraw;   // avionics
                 foreach (var m in p.Modules)
+                {
+                    if (m.Broken) continue;   // a broken module neither produces nor draws power
                     switch (m.Def.Kind)
                     {
                         case ModuleKind.Rtg: prod += m.Def.EcProduce; break;
@@ -547,11 +653,14 @@ namespace Solar.Vessels
                         case ModuleKind.FuelCell: if (m.Active && hasFuel) prod += m.Def.EcProduce; break;
                         case ModuleKind.LifeSupport: if (!m.Def.Activatable || m.Active) draw += m.Def.EcDraw; break;
                         case ModuleKind.Harvester: if (m.Active && Landed) draw += m.Def.EcDraw; break;
+                        case ModuleKind.IsruConverter: if (m.Active && Ore > 0) draw += m.Def.EcDraw; break;
+                        case ModuleKind.OreScanner: if (m.Active) draw += m.Def.EcDraw; break;
                         case ModuleKind.ReactionWheel: draw += m.Def.EcDraw; break;
                         case ModuleKind.Science: if (m.Active) draw += m.Def.EcDraw; break;
                         case ModuleKind.Antenna: if (m.Active) draw += m.Def.EcDraw; break;
                         case ModuleKind.Light: if (m.Active) draw += m.Def.EcDraw; break;
                     }
+                }
             }
         }
 
@@ -561,19 +670,24 @@ namespace Solar.Vessels
         /// concept (batteries, tanks, storage, landing legs) report true ("installed/ready").</summary>
         public bool ModuleFunctioning(ModuleInstance m, double ut, Universe u)
         {
+            if (m.Broken) return false;   // a malfunctioning module does nothing until repaired
             bool ec = ElectricCharge > 0;
             switch (m.Def.Kind)
             {
                 case ModuleKind.Rtg: return true;                                  // passive generator, always on
                 case ModuleKind.SolarPanel: return m.Active && SolarFactor(ut, u) > 0;
                 case ModuleKind.FuelCell: return m.Active && TotalLiquidFuel > 0;
-                case ModuleKind.Harvester: return m.Active && Landed && ec;
+                case ModuleKind.Harvester: return m.Active && Landed && ec && (Body?.OreRichness ?? 0) > 0;
+                case ModuleKind.IsruConverter: return m.Active && ec && Ore > 0;
+                case ModuleKind.OreScanner: return m.Active && ec;
                 case ModuleKind.ReactionWheel: return ec;
                 case ModuleKind.Science: return m.Active && ec;
                 case ModuleKind.Antenna: return m.Active && ec;
                 case ModuleKind.Light: return m.Active && ec;
                 case ModuleKind.LifeSupport: return (!m.Def.Activatable || m.Active) && (m.Def.EcDraw <= 0 || ec);
                 case ModuleKind.RCS: return RcsEnabled && Monoprop > 0 && ec;
+                case ModuleKind.Medbay: return (!m.Def.Activatable || m.Active) && (m.Def.EcDraw <= 0 || ec);
+                case ModuleKind.RadShield: return true;                            // passive shielding, always on
                 default: return true;                                              // Battery / Tank / Storage / LandingLeg
             }
         }
@@ -595,13 +709,6 @@ namespace Solar.Vessels
                 foreach (var m in p.Modules)
                     if (m.Def.Kind == ModuleKind.LifeSupport && (!m.Def.Activatable || m.Active))
                     { waterRegen += m.Def.WaterRegen; oxygenRegen += m.Def.OxygenRegen; foodRegen += m.Def.FoodRegen; }
-
-            // fuel cells: burn a liquid-fuel trickle while active and fuel remains (EC already counted in EcRates)
-            double fcDraw = 0;
-            foreach (var p in AllParts())
-                foreach (var m in p.Modules)
-                    if (m.Def.Kind == ModuleKind.FuelCell && m.Active) fcDraw += m.Def.FuelDraw;
-            if (fcDraw > 0 && TotalLiquidFuel > 0) DrainAnyFuel(fcDraw * dt);
 
             ElectricCharge = Math.Clamp(ElectricCharge + (prod - draw) * dt, 0, Math.Max(ecCap, 0));
             bool ecOk = ElectricCharge > 0 || prod >= draw;
@@ -626,17 +733,84 @@ namespace Solar.Vessels
             }
             else _lsDeprivedFor = 0;
 
-            // harvesting: drills refill fuel while landed + powered. A standalone craft fills its own
-            // stage segment; a connected surface base (compound vessel) distributes fuel across the whole
-            // assembly, so a colony's miners can refuel a docked lander from base stock.
-            if (Landed && ElectricCharge > 0)
-                for (int i = 0; i < Parts.Count; i++)
-                    foreach (var m in Parts[i].Modules)
-                        if (m.Def.Kind == ModuleKind.Harvester && m.Active && m.Def.FuelProduce > 0)
-                        {
-                            if (DockLinks.Count > 0) AddFuelAnywhere(m.Def.FuelProduce * dt);
-                            else AddFuelToSegment(i, m.Def.FuelProduce * dt);
-                        }
+            TickConverters(dt);
+        }
+
+        /// <summary>Mass-resource conversions for dt seconds — one home for the fuel/ore flows that used
+        /// to be three separate loops. Fuel cells burn a fuel trickle (their EC output is in
+        /// <see cref="EcRates"/>); drills mine ore while landed over an ore-bearing body; ISRU converters
+        /// refine stored ore back into liquid fuel (anywhere). A connected surface base (compound vessel)
+        /// pools fuel across the whole assembly, so its miners/ISRU can refuel a docked lander from stock.</summary>
+        private void TickConverters(double dt)
+        {
+            if (dt <= 0) return;
+            bool compound = DockLinks.Count > 0;
+
+            // fuel cells: consume a liquid-fuel trickle while active and fuel remains
+            double fcDraw = 0;
+            foreach (var p in AllParts())
+                foreach (var m in p.Modules)
+                    if (m.Def.Kind == ModuleKind.FuelCell && m.Active) fcDraw += m.Def.FuelDraw;
+            if (fcDraw > 0 && TotalLiquidFuel > 0) DrainAnyFuel(fcDraw * dt);
+
+            if (ElectricCharge <= 0) return;   // mining and refining both need power
+
+            // drills: mine ore (ship-wide pool) while landed over an ore-bearing body, scaled by richness
+            // and engineer skill, capped at storage capacity.
+            double richness = Body?.OreRichness ?? 0;
+            if (Landed && richness > 0)
+            {
+                double oreRoom = OreCapacity - Ore;
+                if (oreRoom > 0)
+                {
+                    double rate = 0;
+                    foreach (var p in AllParts())
+                        foreach (var m in p.Modules)
+                            if (m.Def.Kind == ModuleKind.Harvester && m.Active && m.Def.OreProduce > 0)
+                                rate += m.Def.OreProduce;
+                    if (rate > 0) Ore = Math.Min(OreCapacity, Ore + rate * richness * CrewSkill(CrewRole.Engineer) * dt);
+                }
+            }
+
+            // ISRU: refine stored ore into fuel, bottlenecked by ore on hand and by free fuel capacity
+            // (so full tanks never waste ore). Iterates the axial stack for the segment a converter feeds.
+            double skill = CrewSkill(CrewRole.Engineer);
+            for (int i = 0; i < Parts.Count && Ore > 0; i++)
+                foreach (var m in Parts[i].Modules)
+                {
+                    if (m.Def.Kind != ModuleKind.IsruConverter || !m.Active || m.Def.OreDraw <= 0 || m.Def.FuelProduce <= 0) continue;
+                    if (Ore <= 0) break;
+                    double ratio = m.Def.FuelProduce / m.Def.OreDraw;     // fuel produced per kg of ore
+                    double oreUsed = Math.Min(Ore, m.Def.OreDraw * skill * dt);
+                    double fuelOut = oreUsed * ratio;
+                    double fuelRoom = compound ? FuelRoomAnywhere() : FuelRoomInSegment(i);
+                    if (fuelRoom <= 0) continue;
+                    if (fuelOut > fuelRoom) { fuelOut = fuelRoom; oreUsed = fuelOut / ratio; }
+                    Ore -= oreUsed;
+                    if (compound) AddFuelAnywhere(fuelOut); else AddFuelToSegment(i, fuelOut);
+                }
+        }
+
+        /// <summary>Free liquid-fuel capacity (kg) across every tank on the vessel.</summary>
+        private double FuelRoomAnywhere()
+        {
+            double r = 0;
+            foreach (var p in AllParts())
+                if (p.Def.Kind != PartKind.SolidBooster) r += Math.Max(0, p.Def.FuelCapacity - p.Fuel);
+            return r;
+        }
+
+        /// <summary>Free liquid-fuel capacity (kg) in the stage segment containing the given part index.</summary>
+        private double FuelRoomInSegment(int partIndex)
+        {
+            foreach (var seg in Segments())
+            {
+                if (partIndex < seg.start || partIndex > seg.end) continue;
+                double r = 0;
+                for (int i = seg.start; i <= seg.end; i++) r += Math.Max(0, Parts[i].Def.FuelCapacity - Parts[i].Fuel);
+                return r;
+            }
+            return 0;
         }
 
         /// <summary>Comm signal strength in [0,1]: full within the strongest active antenna's range,
@@ -734,6 +908,21 @@ namespace Solar.Vessels
                 RecentDeaths.Add(c.Name);
                 return;
             }
+        }
+
+        /// <summary>Kill a specific crew member (e.g. from radiation or illness): remove them from
+        /// whichever part holds them, mark them KIA on the shared roster instance, and record the name
+        /// for the scene to toast. No-op if they aren't aboard.</summary>
+        public void KillCrewMember(CrewMember c)
+        {
+            if (c == null) return;
+            foreach (var p in AllParts())
+                if (p.Crew.Remove(c))
+                {
+                    c.Status = CrewStatus.KIA;
+                    RecentDeaths.Add(c.Name);
+                    return;
+                }
         }
 
         /// <summary>Move a crew member to another part on this vessel that has a free seat. Returns false
@@ -907,6 +1096,7 @@ namespace Solar.Vessels
             // pool shared resources (capacities recompute from the merged parts automatically)
             ElectricCharge += other.ElectricCharge;
             Monoprop += other.Monoprop;
+            Ore += other.Ore;
             Oxygen += other.Oxygen; Water += other.Water; Food += other.Food;
             return true;
         }
@@ -946,6 +1136,7 @@ namespace Solar.Vessels
             // split pooled resources by the two halves' capacities
             SplitPool(ref ElectricCharge, detached, (v) => v.EcCapacity, x => detached.ElectricCharge = x);
             SplitPool(ref Monoprop, detached, (v) => v.MonopropCapacity, x => detached.Monoprop = x);
+            SplitPool(ref Ore, detached, (v) => v.OreCapacity, x => detached.Ore = x);
             SplitPool(ref Oxygen, detached, (v) => v.OxygenCapacity, x => detached.Oxygen = x);
             SplitPool(ref Water, detached, (v) => v.WaterCapacity, x => detached.Water = x);
             SplitPool(ref Food, detached, (v) => v.FoodCapacity, x => detached.Food = x);

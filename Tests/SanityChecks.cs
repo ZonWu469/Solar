@@ -184,13 +184,14 @@ namespace Solar.Tests
                 v.UpdateResources(100, 0, null);          // (RTG 1.5 - pod avionics 0.05) EC/s * 100 s = 145
                 bool ecOk = Math.Abs(v.ElectricCharge - 145) < 1e-6;
 
-                var v2 = new Vessels.Vessel { Landed = true, ElectricCharge = 100 };
+                var rock = new CelestialBody { Name = "Rock", OreRichness = 1.0, Radius = 1e6 };
+                var v2 = new Vessels.Vessel { Body = rock, Landed = true, ElectricCharge = 100 };
                 var tank = new Parts.Part(Parts.PartCatalog.Get("Tank T200")) { Fuel = 0 };
                 tank.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Battery")));
                 tank.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Drill")) { Active = true });
                 v2.Parts.Add(tank);
-                v2.UpdateResources(10, 0, null);          // drill: +3 fuel/s, -4 EC/s for 10 s
-                bool mined = Math.Abs(tank.Fuel - 30) < 1e-6 && Math.Abs(v2.ElectricCharge - 60) < 1e-6;
+                v2.UpdateResources(10, 0, null);          // drill: +3 ore/s (x richness 1), -4 EC/s for 10 s
+                bool mined = Math.Abs(v2.Ore - 30) < 1e-6 && Math.Abs(v2.ElectricCharge - 60) < 1e-6 && tank.Fuel == 0;
                 Check("resources", ecOk && mined);
             }
 
@@ -804,19 +805,20 @@ namespace Solar.Tests
                 Check("station persist", restored && splitOk);
             }
 
-            // 29. colony: a connected surface base pools mined fuel across the whole assembly, so a
-            //     drill on the base refuels a docked lander; the colony milestone needs a crewed,
+            // 29. colony: a connected surface base pools refined fuel across the whole assembly, so an
+            //     ISRU converter on the base refuels a docked lander; the colony milestone needs a crewed,
             //     food-regenerating base off Earth.
             {
                 var u = SolarSystemData.Create();
                 var moon = u["Moon"];
 
-                // base (drill on a full tank) + lander (empty tank), connected via docking ports
-                var baseV = new Vessels.Vessel { Body = moon, Landed = true, ElectricCharge = 100 };
+                // base (drill + ISRU on a full tank, big battery) + lander (empty tank), connected via docking ports
+                var baseV = new Vessels.Vessel { Body = moon, Landed = true, ElectricCharge = 50000, Ore = 200 };
                 var baseTank = new Parts.Part(Parts.PartCatalog.Get("Tank T400"));
                 baseTank.Fuel = baseTank.Def.FuelCapacity;     // base tank already full: overflow goes to the lander
-                baseTank.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Battery")));  // EC storage to run the drill
+                baseTank.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Battery Z-10k")));  // EC to run the rig
                 baseTank.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Drill")) { Active = true });
+                baseTank.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("ISRU Converter")) { Active = true });
                 baseV.Parts.Add(baseTank);
                 baseV.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Docking Port Jr")));
 
@@ -827,7 +829,7 @@ namespace Solar.Tests
 
                 baseV.DockWith(lander, baseV.FirstFreeDockingPort(), lander.FirstFreeDockingPort(), 0, Vec2d.Zero);
                 double f0 = baseV.TotalLiquidFuel;
-                baseV.UpdateResources(10, 0, u);               // drill +3 fuel/s for 10 s, pooled base-wide
+                baseV.UpdateResources(10, 0, u);               // ISRU +8 fuel/s for 10 s, pooled base-wide
                 bool refuelled = baseV.TotalLiquidFuel > f0 + 29 && landerTank.Fuel > 0;  // reached the lander
 
                 // colony milestone condition: crewed + active hydroponics on a non-Earth body
@@ -866,20 +868,106 @@ namespace Solar.Tests
                     return b;
                 }
                 var colony = MakeBase(); colony.IsColony = true;
-                double cap = colony.Parts[0].Def.FuelCapacity;
-                Vessels.Colony.AdvanceProduction(colony, 100, 110, u);           // 10 s of drilling -> fuel mined
-                bool produced = colony.TotalLiquidFuel > 0;
+                double cap = colony.OreCapacity;
+                Vessels.Colony.AdvanceProduction(colony, 100, 110, u);           // 10 s of drilling -> ore mined
+                bool produced = colony.Ore > 0;
                 var capped = MakeBase(); capped.IsColony = true;
                 Vessels.Colony.AdvanceProduction(capped, 0, 1e9, u);             // huge span must clamp, never overflow
-                bool clamped = capped.TotalLiquidFuel > 0 && capped.TotalLiquidFuel <= cap + 1e-6;
+                bool clamped = capped.Ore > 0 && capped.Ore <= cap + 1e-6;
 
                 var notColony = MakeBase();                                       // IsColony false
                 Vessels.Colony.AdvanceProduction(notColony, 0, 1000, u);
                 var noTime = MakeBase(); noTime.IsColony = true;
                 Vessels.Colony.AdvanceProduction(noTime, 100, 100, u);            // zero span
-                bool noops = notColony.TotalLiquidFuel == 0 && noTime.TotalLiquidFuel == 0;
+                bool noops = notColony.Ore == 0 && noTime.Ore == 0;
 
-                Check("colony production", produced && clamped && noops);
+                // offline parity: one big catch-up step equals many small live ticks (kept under capacity)
+                var oneStep = MakeBase(); oneStep.IsColony = true;
+                Vessels.Colony.AdvanceProduction(oneStep, 0, 100, u);
+                var manySteps = MakeBase(); manySteps.IsColony = true;
+                for (int k = 0; k < 100; k++) Vessels.Colony.AdvanceProduction(manySteps, k, k + 1, u);
+                bool parity = Math.Abs(oneStep.Ore - manySteps.Ore) < 1e-6 && oneStep.Ore > 0;
+
+                Check("colony production", produced && clamped && noops && parity);
+            }
+
+            // 29c. ISRU conversion: refines stored ore into fuel at the configured ratio, bottlenecked by
+            //      ore on hand and by free fuel capacity (no overflow, no negative ore). Two reactors keep
+            //      EC positive so a single huge catch-up step still runs.
+            {
+                var isru = Parts.ModuleCatalog.Get("ISRU Converter");
+                double ratio = isru.FuelProduce / isru.OreDraw;
+                Vessels.Vessel MakeIsru(double ore)
+                {
+                    var v = new Vessels.Vessel { ElectricCharge = 50000, Ore = ore };
+                    var tank = new Parts.Part(Parts.PartCatalog.Get("Tank T400")) { Fuel = 0 };
+                    tank.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Battery Z-10k")));
+                    tank.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Nuclear Reactor")));
+                    tank.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Nuclear Reactor")));
+                    tank.Modules.Add(new Parts.ModuleInstance(isru) { Active = true });
+                    v.Parts.Add(tank);
+                    return v;
+                }
+                var a = MakeIsru(100);
+                a.UpdateResources(1.0, 0, null);                         // 1 s: OreDraw ore -> OreDraw*ratio fuel
+                bool converts = Math.Abs((100 - a.Ore) - isru.OreDraw) < 1e-6
+                                && Math.Abs(a.TotalLiquidFuel - isru.OreDraw * ratio) < 1e-6;
+                a.UpdateResources(1e6, 0, null);                         // drain the rest, never below zero
+                bool oreFloor = a.Ore >= -1e-9 && a.Ore < 1e-6;
+
+                var b = MakeIsru(1e6);
+                double cap = b.Parts[0].Def.FuelCapacity;
+                b.UpdateResources(1e9, 0, null);                         // tank fills; surplus ore is kept, not wasted
+                bool noOverflow = b.TotalLiquidFuel <= cap + 1e-6 && b.Ore > 1e6 - cap / ratio - 1.0;
+                Check("isru conversion", converts && oreFloor && noOverflow);
+            }
+
+            // 29d. ore round-trips through save/load (ShipState <-> Vessel).
+            {
+                var u = SolarSystemData.Create();
+                var v = new Vessels.Vessel { Body = u["Moon"], Landed = true, Ore = 1234 };
+                var tank = new Parts.Part(Parts.PartCatalog.Get("Tank T400"));
+                tank.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Drill")));   // adds ore capacity
+                v.Parts.Add(tank);
+                var v2 = ShipState.From(v, "Miner", null, null, 0).ToVessel(u);
+                Check("ore round-trip", Math.Abs(v2.Ore - 1234) < 1e-9);
+            }
+
+            // 29e. crew roles: engineers speed drilling/ISRU (capped), scientists boost science (capped),
+            //      a pilot improves attitude authority.
+            {
+                Vessels.Vessel Drilling(int engineers)
+                {
+                    var rock = new CelestialBody { Name = "Rock", OreRichness = 1.0, Radius = 1e6 };
+                    var v = new Vessels.Vessel { Body = rock, Landed = true, ElectricCharge = 100000 };
+                    var tank = new Parts.Part(Parts.PartCatalog.Get("Tank T400")) { Fuel = 0 };
+                    tank.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Battery Z-10k")));
+                    tank.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Drill")) { Active = true });
+                    for (int k = 0; k < engineers; k++)
+                        tank.Crew.Add(new Vessels.CrewMember("E" + k, Vessels.CrewRole.Engineer));
+                    v.Parts.Add(tank);
+                    return v;
+                }
+                var none = Drilling(0); none.UpdateResources(10, 0, null);
+                var two = Drilling(2);  two.UpdateResources(10, 0, null);
+                bool engBoost = none.Ore > 0 && Math.Abs(two.Ore / none.Ore - 1.5) < 1e-6;      // +25%/engineer
+                bool engCap = Math.Abs(Drilling(9).CrewSkill(Vessels.CrewRole.Engineer) - 1.75) < 1e-9;  // capped at 3
+
+                var sci = new Vessels.Vessel();
+                var pod = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
+                pod.Crew.Add(new Vessels.CrewMember("S1", Vessels.CrewRole.Scientist));
+                pod.Crew.Add(new Vessels.CrewMember("S2", Vessels.CrewRole.Scientist));
+                sci.Parts.Add(pod);
+                bool sciMult = Math.Abs(sci.CrewSkill(Vessels.CrewRole.Scientist) - 1.4) < 1e-9;  // 1 + 0.20*2
+
+                var unmanned = new Vessels.Vessel(); unmanned.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                var piloted = new Vessels.Vessel();
+                var pp = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
+                pp.Crew.Add(new Vessels.CrewMember("P", Vessels.CrewRole.Pilot));
+                piloted.Parts.Add(pp);
+                bool pilot = piloted.ControlTorque > unmanned.ControlTorque;
+
+                Check("crew roles", engBoost && engCap && sciMult && pilot);
             }
 
             // 30. per-radial staging choice (explicit stages): all radials ignite with their host at stage 0;
@@ -1392,6 +1480,114 @@ namespace Solar.Tests
                 a.GoOffRails(ut); b.GoOffRails(ut);                       // reload: evaluate at the same epoch
                 double sep1 = (a.Position - b.Position).Length;
                 Check("close-formation rails round-trip", Math.Abs(sep1 - sep0) < 1.0);
+            }
+
+            // 34. threats / broken-module gate: a broken module reports not-functioning and contributes
+            //     nothing to EcRates; clearing the break restores both, matching the malfunction model.
+            {
+                var v = new Vessels.Vessel();
+                var pod = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
+                var rtg = new Parts.ModuleInstance(Parts.ModuleCatalog.Get("RTG"));
+                pod.Modules.Add(rtg);
+                v.Parts.Add(pod);
+                v.EcRates(0, null, out double prod0, out _);
+                rtg.Broken = true;
+                bool brokenOff = !v.ModuleFunctioning(rtg, 0, null);
+                v.EcRates(0, null, out double prodBroken, out _);
+                rtg.Broken = false;
+                v.EcRates(0, null, out double prod1, out _);
+                Check("broken module gate", prod0 > 0 && brokenOff && prodBroken < prod0 && Math.Abs(prod1 - prod0) < 1e-9);
+            }
+
+            // 35. radiation: crew accumulate dose inside a belt at intensity*(1-shield) per second; the
+            //     accumulator is warp-safe (one big step == many small ones), a shield cuts the rate,
+            //     leaving a belt lets the dose decay, and a lethal dose kills crew.
+            {
+                var rng = new Random(1);
+                var belt = new CelestialBody { Radius = 1e6, RadBeltInner = 0, RadBeltOuter = 1e9, RadBeltDose = 1.0 };
+                var clear = new CelestialBody { Radius = 1e6 };
+                Vessels.Vessel Crewed(CelestialBody body, string shield)
+                {
+                    var vv = new Vessels.Vessel { Body = body, Position = new Vec2d(body.Radius + 1e5, 0) };
+                    var pod = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
+                    pod.Crew.Add(new Vessels.CrewMember("R", Vessels.CrewRole.Pilot));
+                    if (shield != null) pod.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get(shield)));
+                    vv.Parts.Add(pod);
+                    return vv;
+                }
+                double Dose(Vessels.Vessel vv) { foreach (var c in vv.AllCrew()) return c.RadDose; return -1; }
+
+                var unshielded = Crewed(belt, null);
+                Vessels.Threats.Tick(unshielded, 100, 0, null, rng);
+                bool accrued = Math.Abs(Dose(unshielded) - 100) < 1e-6;            // 1 dose/s * 100 s
+
+                var big = Crewed(belt, null); Vessels.Threats.Tick(big, 500, 0, null, rng);
+                var small = Crewed(belt, null); for (int k = 0; k < 500; k++) Vessels.Threats.Tick(small, 1, 0, null, rng);
+                bool warpSafe = Math.Abs(Dose(big) - Dose(small)) < 1e-6 && Dose(big) > 499;   // sub-lethal: crew survive
+
+                var shielded = Crewed(belt, "Radiation Shield");
+                Vessels.Threats.Tick(shielded, 100, 0, null, rng);
+                bool shieldCuts = Math.Abs(Dose(shielded) - 20) < 1e-6;            // (1 - 0.8) * 100
+
+                var decaying = Crewed(clear, null);
+                foreach (var c in decaying.AllCrew()) c.RadDose = 100;
+                Vessels.Threats.Tick(decaying, 100, 0, null, rng);
+                bool decays = Dose(decaying) < 100 && Dose(decaying) > 0;          // clears, but slowly
+
+                var lethal = Crewed(belt, null);
+                Vessels.Threats.Tick(lethal, 2000, 0, null, rng);                  // 2000 dose >= death threshold
+                bool kills = lethal.CrewCount == 0;
+
+                Check("radiation belt dose", accrued && warpSafe && shieldCuts && decays && kills);
+            }
+
+            // 36. malfunction + repair: a functioning module worn hard enough eventually breaks; a landed
+            //     craft with an engineer and power then repairs it. A huge dt drives the failure/repair
+            //     probability to ~1, so the outcome is deterministic without stubbing the RNG.
+            {
+                var rng = new Random(7);
+                var v = new Vessels.Vessel { ElectricCharge = 100 };
+                var pod = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
+                var wheel = new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Reaction Wheel"));
+                pod.Modules.Add(wheel);
+                v.Parts.Add(pod);
+                Vessels.Threats.Tick(v, 1e12, 0, null, rng);                       // not landed: breaks, no repair
+                bool broke = wheel.Broken;
+
+                v.Landed = true;
+                pod.Crew.Add(new Vessels.CrewMember("E", Vessels.CrewRole.Engineer));
+                v.ElectricCharge = 100;
+                Vessels.Threats.Tick(v, 1e12, 0, null, rng);                       // landed + engineer + EC: repairs
+                bool repaired = !wheel.Broken && wheel.Wear <= 1e-9;
+                Check("malfunction repair", broke && repaired);
+            }
+
+            // 37. illness + persistence: a fully ill engineer contributes no skill bonus; RadiationAt reads
+            //     the belt dose only inside its band; broken/wear state round-trips through the savegame.
+            {
+                var v = new Vessels.Vessel();
+                var pod = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
+                var eng = new Vessels.CrewMember("E", Vessels.CrewRole.Engineer);
+                pod.Crew.Add(eng);
+                v.Parts.Add(pod);
+                double healthy = v.CrewSkill(Vessels.CrewRole.Engineer);
+                eng.Illness = 1.0;
+                double sick = v.CrewSkill(Vessels.CrewRole.Engineer);
+                bool illnessDrags = healthy > 1.0 && Math.Abs(sick - 1.0) < 1e-9;
+
+                var b = new CelestialBody { Radius = 1e6, RadBeltInner = 1000, RadBeltOuter = 5000, RadBeltDose = 2 };
+                bool band = b.RadiationAt(3000) == 2 && b.RadiationAt(500) == 0 && b.RadiationAt(6000) == 0;
+
+                var u = SolarSystemData.Create();
+                var vp = new Vessels.Vessel { Body = u["Earth"], Position = new Vec2d(u["Earth"].Radius + 1000, 0) };
+                var podP = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
+                podP.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Reaction Wheel")) { Broken = true, Wear = 0.42 });
+                vp.Parts.Add(podP);
+                var vp2 = ShipState.From(vp, "T").ToVessel(u);
+                var m2 = vp2.Parts[0].Modules[0];
+                bool persisted = m2.Broken && Math.Abs(m2.Wear - 0.42) < 1e-9;
+
+                Check("illness + threat persistence", illnessDrags && band && persisted);
             }
 
             string res = $"Physics self-test: {pass}/{total} PASS";

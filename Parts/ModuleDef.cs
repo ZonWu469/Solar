@@ -2,7 +2,7 @@ using Microsoft.Xna.Framework;
 
 namespace Solar.Parts
 {
-    public enum ModuleKind { SolarPanel, Rtg, Battery, LifeSupport, Harvester, ReactionWheel, Science, Antenna, FuelCell, LandingLeg, Light, RCS, Tank, Storage }
+    public enum ModuleKind { SolarPanel, Rtg, Battery, LifeSupport, Harvester, ReactionWheel, Science, Antenna, FuelCell, LandingLeg, Light, RCS, Tank, Storage, IsruConverter, OreScanner, RadShield, Medbay }
 
     /// <summary>Immutable definition of a slot module attached to a part (power, life support, mining).</summary>
     public sealed class ModuleDef
@@ -25,15 +25,21 @@ namespace Solar.Parts
         public double OxygenRegen;     // oxygen / s regenerated when active (recycler), gated on EC
         public double FoodRegen;       // food / s regenerated when active (recycler), gated on EC
         public int CrewCapacity;       // crew seats this module adds to its host part
-        public double FuelProduce; // fuel kg/s produced when landed + active (harvester)
+        public double FuelProduce; // fuel kg/s produced when landed + active (harvester); fuel OUTPUT for an ISRU converter
         public double FuelDraw;    // fuel kg/s consumed when functioning (fuel cell)
         public double FuelCapacity;// extra fuel storage (monopropellant tank module)
+        public double OreProduce;  // ore kg/s mined when landed + active, before body richness (drill)
+        public double OreDraw;     // ore kg/s consumed when active (ISRU converter input)
+        public double OreCapacity; // ore storage added (ore tank, or a drill/ISRU's own buffer)
         public double Range;       // antenna full-strength reach in metres (0 = not an antenna)
         public bool Relay;         // antenna rebroadcasts: it can relay signal to other vessels
         public double ScienceValue;// base data worth for a Science-kind instrument (0 = use kind fallback)
         public double Torque;      // rotational authority N*m contributed when powered (reaction wheel / RCS block)
         public double RcsThrust;   // translation thrust N per RCS block (0 = use default)
         public double RcsIsp;      // monopropellant specific impulse s for an RCS block (0 = use default)
+        public double Reliability; // failure-resistance multiplier (higher = breaks less often; 0 = kind default)
+        public double ShieldFactor;// RadShield: fraction of incoming radiation blocked, 0..1
+        public double CureRate;    // Medbay: crew illness cured per second when active + powered
         public Color Tint;
 
         private string RangeText => Range >= 1e9 ? $"{Range / 1e9:0.#} Gm"
@@ -47,7 +53,11 @@ namespace Solar.Parts
             ModuleKind.LifeSupport => CrewCapacity > 0 ? $"life support  +{CrewCapacity} crew  {DryMass:0} kg"
                                       : (OxygenRegen > 0 || FoodRegen > 0 || WaterRegen > 0) ? $"life-support recycler  {DryMass:0} kg"
                                       : $"life support  {DryMass:0} kg",
-            ModuleKind.Harvester => $"+{FuelProduce:0.#} fuel/s — mining drill, {DryMass:0} kg",
+            ModuleKind.Harvester => $"+{OreProduce:0.#} ore/s — mining drill, {DryMass:0} kg",
+            ModuleKind.IsruConverter => $"{OreDraw:0.#} ore/s -> {FuelProduce:0.#} fuel/s — ISRU converter, {DryMass:0} kg",
+            ModuleKind.OreScanner => $"orbital ore survey, {DryMass:0} kg",
+            ModuleKind.RadShield => $"-{ShieldFactor * 100:0}% radiation dose — shielding, {DryMass:0} kg",
+            ModuleKind.Medbay => $"treats crew illness, {DryMass:0} kg",
             ModuleKind.ReactionWheel => $"attitude control, {DryMass:0} kg",
             ModuleKind.Science => $"science instrument, {DryMass:0} kg",
             ModuleKind.Antenna => $"antenna, {RangeText}{(Relay ? " relay" : "")}, {DryMass:0} kg",
@@ -58,6 +68,7 @@ namespace Solar.Parts
             ModuleKind.Tank => $"extra fuel tank, {FuelCapacity:0} kg",
             ModuleKind.Storage => EcCapacity > 0 ? $"EC storage pod, +{EcCapacity:0} EC, {DryMass:0} kg"
                                   : FuelCapacity > 0 ? $"fuel storage pod, +{FuelCapacity:0} kg fuel, {DryMass:0} kg"
+                                  : OreCapacity > 0 ? $"ore storage pod, +{OreCapacity:0} kg ore, {DryMass:0} kg"
                                   : $"storage pod, {DryMass:0} kg",
             _ => $"{DryMass:0} kg",
         };

@@ -15,14 +15,22 @@ namespace Solar.Physics
         public CelestialBody Parent;
         public OrbitalElements Orbit;  // valid when Parent != null
         public double SoiRadius = double.PositiveInfinity;
+        public double OreRichness;  // 0..1 surface ore concentration; scales drill yield (0 = barren, e.g. a star/gas giant)
         public Atmosphere Atmo;
         public Terrain Terrain;     // null = perfectly smooth (the star); otherwise organic surface relief
         public Color BodyColor;
         public Color AtmoColor;
+        public double RadBeltInner, RadBeltOuter;  // radiation belt altitude band above the surface (m); 0..0 = none
+        public double RadBeltDose;                  // dose rate (units/s) crew accumulate inside the belt
         public readonly List<CelestialBody> Children = new();
 
         /// <summary>Surface radius (m) at a body-local angle, including terrain relief.</summary>
         public double SurfaceRadiusAt(double angle) => Terrain == null ? Radius : Radius + Terrain.HeightAt(angle);
+
+        /// <summary>Radiation dose rate (units/s) at the given altitude above this body's surface: the belt
+        /// dose inside its altitude band, zero outside it (and zero for bodies with no belt).</summary>
+        public double RadiationAt(double altitude)
+            => RadBeltDose > 0 && altitude >= RadBeltInner && altitude <= RadBeltOuter ? RadBeltDose : 0;
 
         /// <summary>Highest the surface ever reaches (m), for culling and view-extent math.</summary>
         public double MaxRadius => Radius + (Terrain?.MaxAmplitude ?? 0);

@@ -36,10 +36,14 @@ namespace Solar.Physics
                     TextureId = d.Id,
                     Mu = d.MuReal * GM,
                     Radius = d.RadiusKm * 1e3 * L,
+                    OreRichness = d.OreRichness,
                     Parent = parent,
                     Atmo = d.HasAtmosphere ? new Atmosphere(d.AtmoSeaLevelDensity, d.AtmoScaleHeight, d.AtmoTop) : null,
                     BodyColor = new Color(d.R, d.G, d.B),
                     AtmoColor = d.HasAtmosphere ? new Color(d.AtmoR, d.AtmoG, d.AtmoB) : default,
+                    RadBeltInner = d.RadBeltInnerKm * 1e3 * L,
+                    RadBeltOuter = d.RadBeltOuterKm * 1e3 * L,
+                    RadBeltDose = d.RadBeltDose,
                 };
 
                 // Terrain: the root star is smooth; every orbiting body gets relief (default amplitude

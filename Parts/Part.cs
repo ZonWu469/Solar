@@ -9,6 +9,8 @@ namespace Solar.Parts
     {
         public readonly ModuleDef Def;
         public bool Active;
+        public bool Broken;     // failed (malfunction); stops functioning until repaired
+        public double Wear;     // 0..1 accumulated stress; raises failure odds, worn off by repair
         public ModuleInstance(ModuleDef def) { Def = def; }
     }
 

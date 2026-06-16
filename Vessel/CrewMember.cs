@@ -14,6 +14,8 @@ namespace Solar.Vessels
         public string Name;
         public CrewRole Role;
         public CrewStatus Status = CrewStatus.Active;
+        public double RadDose;   // accumulated radiation dose (0 = clean); decays when clear/shielded
+        public double Illness;   // 0..1 sickness; lowers effective skill and can be fatal (0 = healthy)
 
         public CrewMember() { }
         public CrewMember(string name, CrewRole role) { Name = name; Role = role; }

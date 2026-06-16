@@ -20,6 +20,7 @@ namespace Solar.Core
         public List<string> UnlockedTech = new();         // unlocked tech-node ids
         public List<string> CompletedMilestones = new();  // award-once guard
         public List<string> ScienceCollected = new();     // experiment-situation keys already transmitted
+        public List<string> SurveyedBodies = new();        // bodies an ore scanner has surveyed (richness revealed)
 
         // ----- crew -----
         public List<CrewMember> Roster = new();           // all crew (Active + KIA), shared by reference
@@ -186,6 +187,8 @@ namespace Solar.Core
     {
         public string Name;
         public bool Active;
+        public bool Broken;     // malfunctioned module (see ModuleInstance.Broken)
+        public double Wear;     // accumulated wear 0..1 (see ModuleInstance.Wear)
     }
 
     public sealed class PartState
@@ -209,7 +212,7 @@ namespace Solar.Core
             if (p.Modules.Count > 0)
             {
                 ps.Modules = new List<ModuleStateEntry>();
-                foreach (var m in p.Modules) ps.Modules.Add(new ModuleStateEntry { Name = m.Def.Name, Active = m.Active });
+                foreach (var m in p.Modules) ps.Modules.Add(new ModuleStateEntry { Name = m.Def.Name, Active = m.Active, Broken = m.Broken, Wear = m.Wear });
             }
             if (p.Crew.Count > 0)
             {
@@ -234,7 +237,7 @@ namespace Solar.Core
                 foreach (var ms in Modules)
                 {
                     var md = ModuleCatalog.Get(ms.Name);
-                    if (md != null) part.Modules.Add(new ModuleInstance(md) { Active = ms.Active });
+                    if (md != null) part.Modules.Add(new ModuleInstance(md) { Active = ms.Active, Broken = ms.Broken, Wear = ms.Wear });
                 }
             if (Crew != null && roster != null)
                 foreach (var name in Crew)
@@ -304,11 +307,13 @@ namespace Solar.Core
         public bool Landed;
         public bool Destroyed;
         public bool IsColony;        // an established surface base (offline production runs while unattended)
+        public double ColonyGrowthTimer;  // accumulated self-sustaining time toward the next colonist
         public double LastUT;        // UT this ship was last simulated, so a colony can catch up production on load
         public bool EnginesIgnited;
         public int CurrentStage;     // next stage to fire, so a resumed ship stages correctly
         public double ElectricCharge;
         public double Monoprop;      // monopropellant for RCS translation
+        public double Ore;           // raw ore awaiting ISRU refining
         public double LifeSupport;   // legacy single life-support pool (still read for old-save migration)
         public double Water, Oxygen, Food;   // current life-support resources
         public string TargetName;    // remembered rendezvous target (body or ship name), resolved on resume
@@ -332,11 +337,13 @@ namespace Solar.Core
                 Landed = v.Landed,
                 Destroyed = v.Destroyed,
                 IsColony = v.IsColony,
+                ColonyGrowthTimer = v.ColonyGrowthTimer,
                 LastUT = ut,
                 EnginesIgnited = v.EnginesIgnited,
                 CurrentStage = v.CurrentStage,
                 ElectricCharge = v.ElectricCharge,
                 Monoprop = v.Monoprop,
+                Ore = v.Ore,
                 Water = v.Water,
                 Oxygen = v.Oxygen,
                 Food = v.Food,
@@ -379,10 +386,12 @@ namespace Solar.Core
                 Landed = Landed,
                 Destroyed = Destroyed,
                 IsColony = IsColony,
+                ColonyGrowthTimer = ColonyGrowthTimer,
                 EnginesIgnited = EnginesIgnited,
                 CurrentStage = CurrentStage,
                 ElectricCharge = ElectricCharge,
                 Monoprop = Monoprop,
+                Ore = Ore,
                 Water = Water,
                 Oxygen = Oxygen,
                 Food = Food,

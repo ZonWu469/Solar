@@ -104,6 +104,7 @@ namespace Solar.Scenes
         private string _endMessage;
         private string _toast;               // transient milestone notification
         private double _toastT;              // seconds remaining on the toast
+        private readonly System.Random _rng = new();   // drives probabilistic threats (malfunctions/illness)
         private double _anim;
         private Vec2d _lastCamRel;           // camera position relative to body (kept after a crash)
         private CelestialBody _lastBody;
@@ -132,6 +133,7 @@ namespace Solar.Scenes
                 _vessel.Body = b;
                 // a colony kept producing while we were away: catch its tanks up to now
                 Colony.AdvanceProduction(_vessel, _resume.LastUT, Ctx.Clock.UT, Ctx.Universe);
+                Colony.TryGrowCrew(_vessel, Ctx.State, Ctx.Clock.UT - _resume.LastUT);
                 Dbg(DbgShip("LOAD ", _shipName, Ctx.Clock.UT, _vessel));
                 // Only re-derive position from the conic when the world has advanced past the save; otherwise
                 // the saved Position is authoritative -- re-deriving it reverts the ship if Position/Orbit
@@ -191,6 +193,7 @@ namespace Solar.Scenes
                 var v = s.ToVessel(Ctx.Universe, Ctx.State.Roster);
                 if (v.Body == null) continue;
                 Colony.AdvanceProduction(v, s.LastUT, Ctx.Clock.UT, Ctx.Universe);
+                Colony.TryGrowCrew(v, Ctx.State, Ctx.Clock.UT - s.LastUT);
                 // skip a ship sitting on the *same spot* as the active vessel (e.g. another ship saved landed
                 // on the launch pad): it would render right on top of ours and read as stray parts. Kept tight
                 // (true co-location) so a craft built a few metres beside a base still shows and can connect.
@@ -605,6 +608,9 @@ namespace Solar.Scenes
                 }
 
                 _vessel.UpdateResources(sdt, clock.UT, Ctx.Universe);
+                Threats.Tick(_vessel, sdt, clock.UT, Ctx.Universe, _rng);
+                if (_vessel.IsColony && _vessel.Landed && Colony.TryGrowCrew(_vessel, Ctx.State, sdt) > 0)
+                { _toast = "A colonist was born at the base"; _toastT = 5; }
                 _lastBody = _vessel.Body;
                 _lastCamRel = _vessel.Position;
             }
@@ -646,7 +652,21 @@ namespace Solar.Scenes
             var hit = Solar.Progression.Milestones.Evaluate(_vessel, clock.UT, Ctx.State);
             if (hit != null) { _toast = $"+{hit.Reward:0} science  -  {hit.Title}"; _toastT = 5; }
             else CollectScience(clock.UT, realDt * clock.Warp);
-            // crew that ran out of life support this tick (overrides other toasts: it's important)
+            TrySurveyBody(clock.UT);
+            // threat events this tick: repairs (low priority), then malfunctions, then deaths (highest).
+            if (_vessel != null && _vessel.RecentRepairs.Count > 0)
+            {
+                _toast = $"Repaired: {string.Join(", ", _vessel.RecentRepairs)}";
+                _toastT = 5;
+                _vessel.RecentRepairs.Clear();
+            }
+            if (_vessel != null && _vessel.RecentFailures.Count > 0)
+            {
+                _toast = $"Malfunction: {string.Join(", ", _vessel.RecentFailures)}";
+                _toastT = 6;
+                _vessel.RecentFailures.Clear();
+            }
+            // crew that died this tick (life support, radiation or illness) overrides other toasts.
             if (_vessel != null && _vessel.RecentDeaths.Count > 0)
             {
                 _toast = $"Crew lost: {string.Join(", ", _vessel.RecentDeaths)}";
@@ -695,7 +715,7 @@ namespace Solar.Scenes
                 if (v.Landed)
                 {
                     // a parked ship stays put; a colony's miners/recyclers keep running while we fly nearby
-                    if (v.IsColony && sdt > 0) v.UpdateResources(sdt, ut, Ctx.Universe);
+                    if (v.IsColony && sdt > 0) { v.UpdateResources(sdt, ut, Ctx.Universe); Colony.TryGrowCrew(v, Ctx.State, sdt); }
                     continue;
                 }
 
@@ -1551,6 +1571,25 @@ namespace Solar.Scenes
         /// <summary>Record new experiments into the vessel's transmit buffer (needs an active instrument +
         /// antenna), then drain that buffer into the science total at a rate scaled by signal strength —
         /// so transmission speed degrades with distance from the nearest antenna / home station.</summary>
+        /// <summary>Base science awarded the first time an ore scanner surveys a body (scaled by scientists).</summary>
+        private const double OreSurveyScience = 10;
+
+        /// <summary>A powered, active ore scanner reveals the current body's ore richness the first time the
+        /// vessel reaches it, awarding a one-time survey bonus (scaled by scientists aboard). Until a body
+        /// is surveyed the HUD shows its richness as unknown — so scanning is a real scouting step before
+        /// committing a mining base.</summary>
+        private void TrySurveyBody(double ut)
+        {
+            var v = _vessel; var gs = Ctx.State;
+            if (v == null || v.Destroyed || v.Body == null || v.Body.Parent == null) return;  // skip the star
+            if (!v.ScannerOperational || gs.SurveyedBodies.Contains(v.Body.Name)) return;
+            gs.SurveyedBodies.Add(v.Body.Name);
+            double reward = OreSurveyScience * v.CrewSkill(CrewRole.Scientist);
+            gs.Science += reward;
+            _toast = $"+{reward:0} science  -  Surveyed {v.Body.Name}: {v.Body.OreRichness * 100:0}% ore";
+            _toastT = 5;
+        }
+
         private void CollectScience(double ut, double dt)
         {
             var v = _vessel;
@@ -1578,7 +1617,7 @@ namespace Solar.Scenes
                         string key = $"{v.Body.Name}|{sit}|{m.Def.Name}";
                         if (gs.ScienceCollected.Contains(key)) continue;
                         gs.ScienceCollected.Add(key);
-                        v.PendingScience += SciPoints(m.Def, sit, v.Body.Name);
+                        v.PendingScience += SciPoints(m.Def, sit, v.Body.Name) * v.CrewSkill(CrewRole.Scientist);
                         _toast = $"recorded {m.Def.Name}: {v.Body.Name} {sit}";
                         _toastT = 5;
                         queued = true;

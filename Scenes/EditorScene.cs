@@ -70,7 +70,7 @@ namespace Solar.Scenes
             ("Life Support",  new[] { ModuleKind.LifeSupport }),
             ("Science",       new[] { ModuleKind.Science }),
             ("Comms",         new[] { ModuleKind.Antenna }),
-            ("Resource",      new[] { ModuleKind.Harvester, ModuleKind.Tank }),
+            ("Resource",      new[] { ModuleKind.Harvester, ModuleKind.IsruConverter, ModuleKind.OreScanner, ModuleKind.Tank }),
             ("Control",       new[] { ModuleKind.ReactionWheel, ModuleKind.RCS }),
             ("Storage",       new[] { ModuleKind.Storage }),
             ("Utility",       new[] { ModuleKind.LandingLeg, ModuleKind.Light }),
@@ -654,6 +654,8 @@ namespace Solar.Scenes
                         break;
                     }
                     case ModuleKind.Harvester:
+                    case ModuleKind.IsruConverter:
+                    case ModuleKind.OreScanner:
                     {
                         float s = Math.Min(pw, ph) * 0.5f;
                         pb.TexturedQuad(t, new Vector2(cx - s / 2, my - s / 2), new Vector2(cx + s / 2, my - s / 2),
