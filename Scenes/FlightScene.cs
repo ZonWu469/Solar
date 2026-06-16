@@ -57,6 +57,13 @@ namespace Solar.Scenes
         private Vessel _menuVessel;
         private string _menuName;
         private bool _menuControllable;
+
+        // flight-view part popup (click a part -> info panel; a decoupler can be fired from here).
+        // _partHits is rebuilt each frame by VesselRenderer.Draw; the click test reads last frame's quads.
+        private readonly List<(Part part, Vector2[] quad)> _partHits = new();
+        private Part _popupPart;
+        private Vector2 _popupPos;
+        private Rectangle _popupCloseRect, _popupDecoupleRect;
         private Vector2 _menuPos;
         private double _flightZoom = 0.35;   // m per pixel
         private double _mapZoom;
@@ -379,7 +386,7 @@ namespace Solar.Scenes
                 Ctx.Scenes.SwitchTo(new EditorScene(Ctx));
                 return;
             }
-            if (inp.Pressed(Keys.Escape)) _showExitDialog = !_showExitDialog;
+            if (inp.Pressed(Keys.Escape)) { if (_popupPart != null) _popupPart = null; else _showExitDialog = !_showExitDialog; }
             if (_showExitDialog) return;
             if (inp.Pressed(Keys.M)) _map = !_map;
             if (inp.Pressed(Keys.N)) _slopeView = !_slopeView;   // toggle the slope (landing-spot) overlay
@@ -387,7 +394,7 @@ namespace Solar.Scenes
             if (inp.Pressed(Keys.T)) _showTargetWindow = !_showTargetWindow;
             if (inp.Pressed(Keys.V)) TakeControlOfTarget();
             if (inp.Pressed(Keys.U)) Undock();
-            if (inp.Pressed(Keys.K)) ConfirmDock(clock.UT);      // confirm an orbital dock or surface connection
+            if (inp.Pressed(Keys.P)) ConfirmDock(clock.UT);      // confirm an orbital dock or surface connection (P = Port; K is RCS)
             if (inp.Pressed(Keys.C)) _showCrew = !_showCrew;
             // colony / base management, available while landed
             if (inp.Pressed(Keys.B) && _vessel != null && _vessel.Landed && !_vessel.Destroyed)
@@ -396,8 +403,10 @@ namespace Solar.Scenes
             if (_buildAtColony) { _buildAtColony = false; BuildAtColony(); return; }
             if (_map && inp.Pressed(Keys.F)) _focus = (_focus + 1) % (Ctx.Universe.Bodies.Count + 1);
 
-            // map-view ship popup is handled first so its clicks don't fall through to node editing
+            // map-view ship popup is handled first so its clicks don't fall through to node editing;
+            // the flight-view part popup is the analogous click-handler for the non-map view
             bool menuConsumed = UpdateShipMenu(clock.UT);
+            UpdatePartPopup(clock.UT);
             bool maneuverWheel = false;
             UpdateManeuverInput(clock.UT, menuConsumed, out maneuverWheel);
 
@@ -739,7 +748,7 @@ namespace Solar.Scenes
         private TrackedShip _surfaceConnect;
 
         /// <summary>An orbital-dock candidate found this frame: a tracked ship whose nearest free port is
-        /// within capture distance of ours and is closing slowly. The player confirms it with [K].</summary>
+        /// within capture distance of ours and is closing slowly. The player confirms it with [P].</summary>
         private struct DockCandidate { public TrackedShip Ship; public Part Mine; public Part Theirs; }
         private DockCandidate? _dockCandidate;
 
@@ -758,7 +767,7 @@ namespace Solar.Scenes
 
                 if (_vessel.Landed && o.Landed)
                 {
-                    // surface connection: don't merge automatically — record it for a confirmed [K] connect
+                    // surface connection: don't merge automatically — record it for a confirmed [P] connect
                     if ((o.Position - _vessel.Position).Length < ConnectDist) { _surfaceConnect = ts; return; }
                     continue;
                 }
@@ -772,7 +781,7 @@ namespace Solar.Scenes
         }
 
         /// <summary>Confirm a pending dock — orbital (two ports within range) or surface (two landed craft).
-        /// The [K] action.</summary>
+        /// The [P] action.</summary>
         private void ConfirmDock(double ut)
         {
             if (_dockCandidate is DockCandidate dc)
@@ -1215,6 +1224,144 @@ namespace Solar.Scenes
             }
         }
 
+        /// <summary>Flight-view part inspector: click a part on the active vessel to open a static, closable
+        /// info panel; a decoupler can be fired straight from it. Mirrors the map-view ship menu. The panel's
+        /// button rects are laid out by <see cref="DrawPartPopup"/> and consumed here a frame later (the same
+        /// immediate-mode pattern the ship menu uses). Returns true when it consumed this frame's click.</summary>
+        private bool UpdatePartPopup(double ut)
+        {
+            var inp = Ctx.Input;
+            if (_map || _vessel == null || _vessel.Destroyed) { _popupPart = null; return false; }
+
+            // close if the inspected part left the vessel (decoupled, staged away, undocked)
+            if (_popupPart != null && !PartPresent(_popupPart)) _popupPart = null;
+
+            if (_popupPart != null)
+            {
+                if (!inp.LeftClick) return false;
+                var m = inp.MousePos;
+                if (_popupCloseRect.Contains((int)m.X, (int)m.Y)) { _popupPart = null; return true; }
+                if (_popupPart.Def.Kind == PartKind.Decoupler && _popupDecoupleRect.Contains((int)m.X, (int)m.Y))
+                { DecoupleSelected(ut); return true; }
+                // a click landing on another part re-targets the popup; clicks elsewhere leave it open (static)
+                if (PickPartAt(m, out var other)) { _popupPart = other; _popupPos = m; }
+                return true;
+            }
+
+            if (inp.LeftClick && PickPartAt(inp.MousePos, out var hit))
+            { _popupPart = hit; _popupPos = inp.MousePos; return true; }
+            return false;
+        }
+
+        /// <summary>Whether <paramref name="part"/> is still attached to the active vessel.</summary>
+        private bool PartPresent(Part part)
+        {
+            foreach (var p in _vessel.AllParts()) if (p == part) return true;
+            return false;
+        }
+
+        /// <summary>Topmost vessel part under <paramref name="screen"/>, using last frame's drawn footprints.</summary>
+        private bool PickPartAt(Vector2 screen, out Part part)
+        {
+            for (int i = _partHits.Count - 1; i >= 0; i--)   // last drawn = topmost
+                if (PointInQuad(screen, _partHits[i].quad)) { part = _partHits[i].part; return true; }
+            part = null; return false;
+        }
+
+        /// <summary>Point-in-convex-quad test (consistent edge-cross sign around the four corners).</summary>
+        private static bool PointInQuad(Vector2 p, Vector2[] q)
+        {
+            int sign = 0;
+            for (int i = 0; i < 4; i++)
+            {
+                Vector2 a = q[i], b = q[(i + 1) & 3];
+                float cross = (b.X - a.X) * (p.Y - a.Y) - (b.Y - a.Y) * (p.X - a.X);
+                int s = cross > 0 ? 1 : cross < 0 ? -1 : 0;
+                if (s == 0) continue;
+                if (sign == 0) sign = s; else if (s != sign) return false;
+            }
+            return true;
+        }
+
+        /// <summary>Fire the decoupler shown in the popup: drop it (and everything below it) as debris,
+        /// like <see cref="FireNextStage"/> but targeting one specific decoupler.</summary>
+        private void DecoupleSelected(double ut)
+        {
+            var part = _popupPart;
+            _popupPart = null;
+            if (part == null || _vessel == null || _vessel.Destroyed) return;
+            bool wasOnRails = _vessel.OnRails;
+            if (wasOnRails) _vessel.GoOffRails(ut);
+            var debris = Staging.DecoupleAt(_vessel, part);
+            if (debris != null)
+            {
+                _debris.Add(debris);
+                if (_debris.Count > MaxDebris) _debris.RemoveAt(0);
+            }
+            if (wasOnRails) { _vessel.GoOnRails(ut); RefreshPrediction(ut); }
+        }
+
+        /// <summary>Draw the static part-info popup (info lines + close glyph, plus a Decouple button for a
+        /// decoupler). Lays out the close/decouple rects for next frame's click handling in
+        /// <see cref="UpdatePartPopup"/>. Live fuel/mass are read from the part itself.</summary>
+        private void DrawPartPopup(PrimitiveBatch pb, Microsoft.Xna.Framework.Graphics.SpriteBatch sb)
+        {
+            if (_popupPart == null || _map) return;
+            var f = Ctx.Font; var inp = Ctx.Input;
+            var p = _popupPart; var d = p.Def;
+            const float small = 0.8f;
+
+            var detail = new List<string> { d.Kind.ToString() };
+            double dry = p.Mass - p.Fuel;
+            detail.Add(d.FuelCapacity > 0 ? $"Mass: {p.Mass / 1000:0.00} t  (dry {dry / 1000:0.00} t)"
+                                          : $"Mass: {dry / 1000:0.00} t");
+            if (d.Kind == PartKind.Engine || d.Kind == PartKind.SolidBooster)
+                detail.Add($"Thrust: {d.Thrust / 1000:0} kN   Isp: {d.Isp:0} s");
+            if (d.FuelCapacity > 0) detail.Add($"Fuel: {p.Fuel:0} / {d.FuelCapacity:0} kg");
+            detail.Add($"Size: {d.Width:0.0} x {d.Height:0.0} m");
+            if (p.Modules.Count > 0)
+            {
+                var names = new List<string>();
+                foreach (var mod in p.Modules) names.Add(mod.Def.Name);
+                detail.Add("Modules: " + string.Join(", ", names));
+            }
+
+            bool decoupler = d.Kind == PartKind.Decoupler;
+            float lhTitle = f.MeasureString("X").Y + 2;
+            float lhSmall = f.MeasureString("X").Y * small + 2;
+            float tw = f.MeasureString(d.Name).X + 22;   // leave room for the close glyph
+            foreach (var ln in detail) tw = Math.Max(tw, f.MeasureString(ln).X * small);
+            const int btnH = 26;
+            int bw = (int)tw + 18;
+            int bh = (int)(lhTitle + detail.Count * lhSmall) + 12 + (decoupler ? btnH + 6 : 0);
+            int bx = (int)Math.Clamp(_popupPos.X, 4, Math.Max(4, Ctx.W - bw - 4));
+            int by = (int)Math.Clamp(_popupPos.Y, 4, Math.Max(4, Ctx.H - bh - 4));
+
+            UiDraw.Panel(pb, new Rectangle(bx, by, bw, bh));
+
+            _popupCloseRect = new Rectangle(bx + bw - 18, by + 4, 14, 14);
+            bool hov = _popupCloseRect.Contains((int)inp.MousePos.X, (int)inp.MousePos.Y);
+            pb.FillRect(_popupCloseRect, hov ? new Color(160, 70, 70, 235) : new Color(60, 45, 45, 215));
+            pb.RectOutline(_popupCloseRect, 1, UiDraw.PanelBorder);
+            sb.DrawString(f, "x", new Vector2(_popupCloseRect.X + 3, _popupCloseRect.Y - 4), Color.White);
+
+            float ty = by + 6;
+            sb.DrawString(f, d.Name, new Vector2(bx + 9, ty), Color.White);
+            ty += lhTitle;
+            for (int i = 0; i < detail.Count; i++)
+            {
+                UiDraw.SmallText(sb, f, detail[i], new Vector2(bx + 9, ty), i == 0 ? UiDraw.Accent : UiDraw.TextDim, small);
+                ty += lhSmall;
+            }
+
+            if (decoupler)
+            {
+                _popupDecoupleRect = new Rectangle(bx + 9, by + bh - btnH - 6, bw - 18, btnH);
+                UiDraw.Button(pb, sb, f, _popupDecoupleRect, "Decouple", inp);   // click handled in UpdatePartPopup
+            }
+            else _popupDecoupleRect = Rectangle.Empty;
+        }
+
         /// <summary>Advance the target through none -> each item -> none.</summary>
         private void CycleTarget(int dir)
         {
@@ -1632,7 +1779,7 @@ namespace Solar.Scenes
             // scroll-wheel fine-tune when hovering a handle (takes priority over zoom)
             if (_hoverHandle >= 0 && _hoverNode >= 0 && inp.WheelDelta != 0)
             {
-                double step = (inp.Down(Keys.LeftShift) || inp.Down(Keys.RightShift)) ? 0.5 : 5.0;
+                double step = (inp.Down(Keys.LeftShift) || inp.Down(Keys.RightShift)) ? 0.1 : 1.0;
                 AdjustComponent(_nodes[_hoverNode], _hoverHandle, Math.Sign(inp.WheelDelta) * step);
                 wheelConsumed = true;
             }
@@ -1706,7 +1853,7 @@ namespace Solar.Scenes
                 {
                     Vector2 axis = _dragHandle < 2 ? pd : rd;
                     double proj = Vector2.Dot(mouse - ns, axis);
-                    double sens = Math.Max(1.0, Kepler.StateAtTime(src, node.UT).vel.Length * 0.01);
+                    double sens = Math.Max(0.4, Kepler.StateAtTime(src, node.UT).vel.Length * 0.004);
                     double val = _dragStartValue + (proj - _dragStartProj) * sens;
                     if (_dragHandle < 2) node.Prograde = val; else node.Radial = val;
                 }
@@ -1761,6 +1908,7 @@ namespace Solar.Scenes
             DrawColonyPanel(pb, sb, ut);
             DrawCancelMission(pb, sb);
             if (_map) DrawShipMenu(pb, sb);
+            else DrawPartPopup(pb, sb);
 
             if (_toastT > 0 && _toast != null)
             {
@@ -1772,10 +1920,10 @@ namespace Solar.Scenes
                 sb.DrawString(f, _toast, pos, new Color(150, 230, 150) * alpha);
             }
 
-            // rendezvous prompt: a craft is in range to dock/connect — confirm the merge with [K]
+            // rendezvous prompt: a craft is in range to dock/connect — confirm the merge with [P]
             string dockMsg = null;
-            if (_dockCandidate is DockCandidate dcp) dockMsg = $"[K] dock with {dcp.Ship.Name}";
-            else if (_surfaceConnect != null && _vessel != null && _vessel.Landed) dockMsg = $"[K] connect to {_surfaceConnect.Name}";
+            if (_dockCandidate is DockCandidate dcp) dockMsg = $"[P] dock with {dcp.Ship.Name}";
+            else if (_surfaceConnect != null && _vessel != null && _vessel.Landed) dockMsg = $"[P] connect to {_surfaceConnect.Name}";
             if (dockMsg != null && _vessel != null && !_vessel.Destroyed && !_showExitDialog)
             {
                 var f = Ctx.FontBig;
@@ -2071,7 +2219,7 @@ namespace Solar.Scenes
                 if (_vessel.Landed && _targetVessel.Landed)
                 {
                     bool ready = (_targetVessel.Position - _vessel.Position).Length < ConnectDist;
-                    Row("Connect", ready ? "[K] to connect" : $"approach < {ConnectDist:0} m", ready ? green : blue);
+                    Row("Connect", ready ? "[P] to connect" : $"approach < {ConnectDist:0} m", ready ? green : blue);
                 }
                 else if (!_vessel.Landed && !_targetVessel.Landed)
                 {
@@ -2079,7 +2227,7 @@ namespace Solar.Scenes
                     var (_, _, pd) = Vessel.ClosestFreePortPair(_vessel, _targetVessel, ut);
                     double rs = (_targetVessel.Velocity - _vessel.Velocity).Length;
                     bool ready = pd <= PortDockDist && rs < SoftDockSpeed;
-                    string txt = ready ? "[K] to dock"
+                    string txt = ready ? "[P] to dock"
                                : pd > PortDockDist ? $"ports to {PortDockDist:0.0} m ({UiDraw.Dist(pd)})"
                                : $"slow below {SoftDockSpeed:0.0} m/s";
                     Row("Dock", txt, ready ? green : blue);
@@ -2151,7 +2299,10 @@ namespace Solar.Scenes
                 VesselRenderer.Draw(pb, _cam, ts.V, ut, _anim, tex: Ctx.Textures);
 
             if (_vessel != null && !_vessel.Destroyed)
-                VesselRenderer.Draw(pb, _cam, _vessel, ut, _anim, tex: Ctx.Textures);
+            {
+                _partHits.Clear();
+                VesselRenderer.Draw(pb, _cam, _vessel, ut, _anim, tex: Ctx.Textures, pickHits: _partHits);
+            }
 
             if (HasTarget && _vessel != null && !_vessel.Destroyed)
                 DrawTargetIndicator(pb, ut);

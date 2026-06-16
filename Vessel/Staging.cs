@@ -170,6 +170,34 @@ namespace Solar.Vessels
             return debris;
         }
 
+        /// <summary>Fire one specific decoupler regardless of the current stage pointer (the in-flight part
+        /// popup's "Decouple" action). Drops that decoupler and everything below it in the stack as debris,
+        /// pushing the kept stack up by the jettisoned height — the same separation the decoupler branch of
+        /// <see cref="FireNext"/> performs. Returns the debris vessel, or null if <paramref name="decoupler"/>
+        /// isn't an attached axial decoupler. The live stage list is derived by <see cref="ComputeStages"/>
+        /// from the remaining parts, so the dropped stage disappears on its own.</summary>
+        public static Vessel DecoupleAt(Vessel v, Part decoupler)
+        {
+            if (decoupler == null || decoupler.Def.Kind != PartKind.Decoupler) return null;
+            int idx = v.Parts.IndexOf(decoupler);
+            if (idx < 0) return null;
+
+            var decGroup = v.Parts.GetRange(idx, v.Parts.Count - idx);
+            v.Parts.RemoveRange(idx, v.Parts.Count - idx);
+            double jh = 0;
+            foreach (var p in decGroup) jh += p.Def.Height;
+
+            var debris = new Vessel
+            {
+                Body = v.Body, IsDebris = true, Heading = v.Heading, EnginesIgnited = true,
+                Position = v.Position, OnRails = false,
+            };
+            debris.Parts.AddRange(decGroup);           // axial parts keep their own radials
+            v.Position += v.Up * jh;                    // remaining stack's base moves up
+            debris.Velocity = v.Velocity - v.Up * 2.0; // gentle separation push
+            return debris;
+        }
+
         /// <summary>Estimated time (s) to burn <paramref name="dv"/> m/s, walking stages in fire order;
         /// -1 if the vessel lacks the delta-v. Shared by the HUD readout and the warp-to-node logic.</summary>
         public static double BurnTime(Vessel v, double dv)

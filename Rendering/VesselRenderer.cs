@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Solar.Core;
 using Solar.Parts;
@@ -9,7 +10,11 @@ namespace Solar.Rendering
     /// <summary>Draws a vessel's part stack as procedural shapes, or a triangle icon when tiny/in map view.</summary>
     public static class VesselRenderer
     {
-        public static void Draw(PrimitiveBatch pb, Camera2D cam, Vessel v, double ut, double anim, bool forceIcon = false, TextureStore tex = null)
+        /// <summary>Draw the vessel. When <paramref name="pickHits"/> is supplied, each part's screen-space
+        /// footprint (four corners, in draw winding) is appended to it for click hit-testing — kept in sync
+        /// with rendering by construction. No footprints are recorded in the tiny/icon path.</summary>
+        public static void Draw(PrimitiveBatch pb, Camera2D cam, Vessel v, double ut, double anim, bool forceIcon = false, TextureStore tex = null,
+                                List<(Part part, Vector2[] quad)> pickHits = null)
         {
             Vec2d basePos = v.AbsolutePosition(ut);
             Vec2d sD = cam.WorldToScreenD(basePos);
@@ -60,6 +65,8 @@ namespace Solar.Rendering
                 float w = (float)d.Width, h = (float)d.Height;
                 Color dark = PlanetRenderer.Darken(d.Tint, 0.40f);
                 Color light = PlanetRenderer.Lighten(d.Tint, 0.12f);
+
+                pickHits?.Add((p, new[] { P(-w / 2, y + h), P(w / 2, y + h), P(w / 2, y), P(-w / 2, y) }));
 
                 var pt = tex?.Part(d.Id);
                 if (pt != null)
@@ -277,6 +284,8 @@ namespace Solar.Rendering
                         yb = rd.Kind == PartKind.LandingGear ? y + h * 0.33f - rh : y + (h - rh) * 0.5f;
                     }
                     Color rdark = PlanetRenderer.Darken(rd.Tint, 0.40f), rlight = PlanetRenderer.Lighten(rd.Tint, 0.12f);
+
+                    pickHits?.Add((r, new[] { P(xc - rw / 2, yb + rh), P(xc + rw / 2, yb + rh), P(xc + rw / 2, yb), P(xc - rw / 2, yb) }));
 
                     var rt = tex?.Part(rd.Id);
                     if (rt != null)
