@@ -228,6 +228,14 @@ namespace Solar.UI
             return frac;
         }
 
+        /// <summary>Draw text faux-bold: the bundled SpriteFont has no bold face, so over-draw it once
+        /// shifted 1px on X to thicken the strokes.</summary>
+        public static void BoldText(SpriteBatch sb, SpriteFont f, string text, Vector2 pos, Color c)
+        {
+            sb.DrawString(f, text, pos, c);
+            sb.DrawString(f, text, pos + new Vector2(1, 0), c);
+        }
+
         /// <summary>Draw text at a reduced scale (the bundled SpriteFont has a single baked size, so
         /// smaller UI text is done by scaling). Returns the rendered width so callers can lay out beside it.</summary>
         public static float SmallText(SpriteBatch sb, SpriteFont f, string text, Vector2 pos, Color c, float scale = 0.8f)

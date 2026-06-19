@@ -15,6 +15,7 @@ namespace Solar.UI
         public double? WarpToUT;   // set when the "Warp to maneuver" button was clicked
         public bool FireStage;     // set when the player clicked the stage list to fire the next stage
         public int? RequestedSas;  // set to a SasMode index when an SAS icon was clicked
+        public int RightColumnBottom; // screen-Y below the last right-column panel (for overlay panels)
     }
 
     /// <summary>One SAS-mode icon's render state, computed by the flight scene.</summary>
@@ -115,9 +116,10 @@ namespace Solar.UI
                 bool limited = ctx.Clock.WarpIndex > ctx.Clock.EffectiveIndex;
                 var twp = new Rectangle(rColX, (int)rColY, rColW, 64);
                 UiDraw.TexPanel(pb, ctx, "gameplay_warp_panel", twp);
-                sb.DrawString(f, "T+ " + UiDraw.Time(ctx.Clock.UT), new Vector2(twp.X + 14, twp.Y + 10), Color.White);
+                string timeText = "T+ " + UiDraw.Time(ctx.Clock.UT);
+                sb.DrawString(f, timeText, new Vector2(twp.X + twp.Width / 2 - f.MeasureString(timeText).X / 2, twp.Y + 10), Color.White);
                 string warpText = $"WARP {warp:N0}x" + (limited ? " (limited)" : "");
-                sb.DrawString(f, warpText, new Vector2(twp.X + 14, twp.Y + 34), warp > 1 ? UiDraw.Accent : UiDraw.TextDim);
+                sb.DrawString(f, warpText, new Vector2(twp.X + twp.Width / 2 - f.MeasureString(warpText).X / 2, twp.Y + 34), warp > 1 ? UiDraw.Accent : UiDraw.TextDim);
                 rColY = twp.Bottom + 8;
             }
             if (mapMode)
@@ -364,24 +366,29 @@ namespace Solar.UI
                 UiDraw.TexPanel(pb, ctx, "gameplay_thrust_panel", tp, 18);
                 UiDraw.TexPanel(pb, ctx, "gameplay_accel_panel", ap, 18);
 
-                sb.DrawString(f, "THRUST", new Vector2(tp.X + 12, tp.Y + 8), UiDraw.TextDim);
-                sb.DrawString(f, UiDraw.Force(thrust), new Vector2(tp.X + 12, tp.Y + 26), thrust > 0 ? Color.White : UiDraw.TextDim);
+                void CenterText(string s, int cx, int y, Color c) =>
+                    sb.DrawString(f, s, new Vector2(cx - f.MeasureString(s).X / 2, y), c);
+                void CenterBold(string s, int cx, int y, Color c) =>
+                    UiDraw.BoldText(sb, f, s, new Vector2(cx - f.MeasureString(s).X / 2, y), c);
+
+                CenterText("THRUST", tp.Center.X, tp.Y + 8, UiDraw.TextDim);
+                CenterBold(UiDraw.Force(thrust), tp.Center.X, tp.Y + 26, thrust > 0 ? Color.White : UiDraw.TextDim);
                 string twrTxt = twr > 0 ? $"TWR {twr:0.00}" : "TWR -";
                 sb.DrawString(f, twrTxt, new Vector2(tp.Right - f.MeasureString(twrTxt).X - 12, tp.Y + 8),
                     twr >= 1 ? new Color(150, 220, 150) : twr > 0 ? new Color(255, 170, 90) : UiDraw.TextDim);
 
-                sb.DrawString(f, "ACCEL", new Vector2(ap.X + 12, ap.Y + 8), UiDraw.TextDim);
-                sb.DrawString(f, thrust > 0 ? UiDraw.Accel(accel) : "-", new Vector2(ap.X + 12, ap.Y + 26), Color.White);
+                CenterText("ACCEL", ap.Center.X, ap.Y + 8, UiDraw.TextDim);
+                CenterBold(thrust > 0 ? UiDraw.Accel(accel) : "-", ap.Center.X, ap.Y + 26, Color.White);
             }
 
             // ---- stage list (bottom left) ----
             if (!v.Destroyed && v.Parts.Count > 0)
             {
                 int rows = Math.Min(stages.Count, 6);
-                var sp = new Rectangle(10, h - 30 - rows * 38 - 28, 300, rows * 38 + 36);
+                var sp = new Rectangle(10, h - 30 - rows * 38 - 28 - 30, 300, rows * 38 + 36 + 30);
                 UiDraw.TexPanel(pb, ctx, "gameplay_vessel_panel", sp);
                 sb.DrawString(f, $"STAGES  dV {totalDV:0} m/s  [Space]/click fire", new Vector2(sp.X + 8, sp.Y + 6), UiDraw.TextDim);
-                float sy = sp.Y + 28;
+                float sy = sp.Y + 58;
                 for (int i = 0; i < rows; i++)
                 {
                     var st = stages[i];
@@ -474,15 +481,38 @@ namespace Solar.UI
                 var green = new Color(150, 220, 150); var amber = new Color(255, 190, 90);
                 var warn = new Color(255, 140, 90); var red = new Color(255, 100, 90);
                 Color LsCol(double a, double cap) => a <= 0 ? red : a < cap * 0.15 ? amber : Color.White;
+                int crew = v.CrewCount;
+                bool hasLs = v.CrewCount > 0 || v.LsCapacity > 0;
 
+                // order: Crew, EC rate, Power, Oxygen, Water, Food, then Supply / RCS / Ore / pressure
+                if (hasLs)
+                    SRow("Crew", $"{crew}/{v.SeatCount}", !v.LifeSupportOk ? red : Color.White);
                 if (v.EcCapacity > 0)
                 {
-                    Color barCol = v.ElectricCharge <= 0 ? warn : green;
-                    SBar("Power", $"{v.ElectricCharge:0}/{v.EcCapacity:0}", v.ElectricCharge <= 0 ? warn : Color.White,
-                         v.ElectricCharge / v.EcCapacity, barCol);
                     v.EcRates(ctx.Clock.UT, ctx.Universe, out double ecProd, out double ecDraw);
                     double ecNet = ecProd - ecDraw;
                     SRow("EC rate", ecNet >= 0 ? $"+{ecNet:0.#}/s" : $"{ecNet:0.#}/s", ecNet < 0 ? warn : green);
+                    Color barCol = v.ElectricCharge <= 0 ? warn : green;
+                    SBar("Power", $"{v.ElectricCharge:0}/{v.EcCapacity:0}", v.ElectricCharge <= 0 ? warn : Color.White,
+                         v.ElectricCharge / v.EcCapacity, barCol);
+                }
+                if (hasLs)
+                {
+                    void Ls(string label, double a, double cap, double rate)
+                    {
+                        if (cap <= 0) { SRow(label, "none", red); return; }
+                        string val = rate > 0 ? UiDraw.Time(a / rate) : $"{a / cap * 100:0}%";
+                        SBar(label, val, LsCol(a, cap), a / cap, a <= 0 ? red : a < cap * 0.15 ? amber : green);
+                    }
+                    Ls("Oxygen", v.Oxygen, v.OxygenCapacity, crew * Vessel.OxygenPerCrew);
+                    Ls("Water", v.Water, v.WaterCapacity, crew * Vessel.WaterPerCrew);
+                    Ls("Food", v.Food, v.FoodCapacity, crew * Vessel.FoodPerCrew);
+                    if (crew > 0)
+                    {
+                        double end = v.LifeSupportEndurance();
+                        SRow("Supply", v.SelfSustaining ? "self-sustaining" : UiDraw.Time(end),
+                             v.SelfSustaining ? green : end < 6 * 3600 ? amber : Color.White);
+                    }
                 }
                 if (v.RcsBlocks > 0 || v.MonopropCapacity > 0)
                 {
@@ -509,26 +539,6 @@ namespace Solar.UI
                                   : v.Body.OreRichness > 0 ? green : warn;
                     SRow("Surface ore", richTxt, richCol);
                 }
-                if (v.CrewCount > 0 || v.LsCapacity > 0)
-                {
-                    int crew = v.CrewCount;
-                    SRow("Crew", $"{crew}/{v.SeatCount}", !v.LifeSupportOk ? red : Color.White);
-                    void Ls(string label, double a, double cap, double rate)
-                    {
-                        if (cap <= 0) { SRow(label, "none", red); return; }
-                        string val = rate > 0 ? UiDraw.Time(a / rate) : $"{a / cap * 100:0}%";
-                        SBar(label, val, LsCol(a, cap), a / cap, a <= 0 ? red : a < cap * 0.15 ? amber : green);
-                    }
-                    Ls("Oxygen", v.Oxygen, v.OxygenCapacity, crew * Vessel.OxygenPerCrew);
-                    Ls("Water", v.Water, v.WaterCapacity, crew * Vessel.WaterPerCrew);
-                    Ls("Food", v.Food, v.FoodCapacity, crew * Vessel.FoodPerCrew);
-                    if (crew > 0)
-                    {
-                        double end = v.LifeSupportEndurance();
-                        SRow("Supply", v.SelfSustaining ? "self-sustaining" : UiDraw.Time(end),
-                             v.SelfSustaining ? green : end < 6 * 3600 ? amber : Color.White);
-                    }
-                }
                 double atmoTop = v.Body.Atmo?.Top ?? 0;
                 if (v.Body.Atmo != null && v.Altitude < atmoTop)
                 {
@@ -540,7 +550,7 @@ namespace Solar.UI
                 {
                     int hh = 24;
                     foreach (var e in sysRows) hh += e.bar ? 28 : 19;
-                    hh += 8;
+                    hh += 30;
                     var rp = new Rectangle(rColX, (int)rColY, rColW, hh);
                     UiDraw.TexPanel(pb, ctx, "gameplay_modules_panel", rp);
                     sb.DrawString(f, "SYSTEMS", new Vector2(rp.X + 12, rp.Y + 6), UiDraw.Accent);
@@ -579,7 +589,7 @@ namespace Solar.UI
                 void Panel(string title, List<ModuleInstance> mods)
                 {
                     if (mods.Count == 0) return;
-                    int bodyH = 6 + labelH + Rows(mods.Count) * (tile + gap) + 6;
+                    int bodyH = 6 + labelH + Rows(mods.Count) * (tile + gap) + 30;
                     var rp = new Rectangle(rColX, (int)rColY, rColW, bodyH);
                     UiDraw.TexPanel(pb, ctx, "gameplay_modules_panel", rp);
                     sb.DrawString(f, title, new Vector2(rp.X + pad, rp.Y + 6), UiDraw.Accent);
@@ -597,7 +607,12 @@ namespace Solar.UI
                         if (m.Broken) pb.Line(new Vector2(tr.X + 4, tr.Y + 4), new Vector2(tr.Right - 4, tr.Bottom - 4), 2, border);
                         bool hover = tr.Contains((int)ctx.Input.MousePos.X, (int)ctx.Input.MousePos.Y);
                         if (hover) tip = m;
-                        if (hover && m.Def.Activatable && ctx.Input.LeftClick) m.Active = !m.Active;
+                        if (hover && ctx.Input.LeftClick)
+                        {
+                            // RCS modules are Activatable:false; their on/off is the vessel flag (also [R])
+                            if (m.Def.Kind == ModuleKind.RCS) v.RcsEnabled = !v.RcsEnabled;
+                            else if (m.Def.Activatable) m.Active = !m.Active;
+                        }
                     }
                     rColY = rp.Bottom + 8;
                 }
@@ -614,6 +629,7 @@ namespace Solar.UI
             var hsz = f.MeasureString(hint);
             sb.DrawString(f, hint, new Vector2(w - hsz.X - 12, h - 24), new Color(120, 132, 150));
 
+            result.RightColumnBottom = (int)rColY;
             return result;
         }
 

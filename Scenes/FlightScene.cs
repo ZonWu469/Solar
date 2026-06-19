@@ -75,6 +75,7 @@ namespace Solar.Scenes
         private string _targetName;
         private bool _showTargetWindow;
         private bool _showCrew;              // in-flight crew roster / transfer panel
+        private int _rightColBottom;         // screen-Y below the HUD's right-column stack (set each Draw)
         private bool _showColony;            // colony / surface-base management panel (landed only)
         private bool _showAddModule;         // colony "add module" sub-list
         private bool _buildAtColony;         // deferred: open the editor to build a vessel at this base
@@ -1520,7 +1521,7 @@ namespace Solar.Scenes
             double signal = v.SignalStrength(ut, Ctx.Universe, OtherVessels());
             // right side, bottom-anchored, so the bottom-left stage list stays unobstructed
             var r = new Rectangle(Ctx.W - 256 - 10, Ctx.H - 168, 256, 68);
-            UiDraw.Panel(pb, r);
+            UiDraw.TexPanel(pb, Ctx, "gameplay_modules_panel", r);
             // running total is always shown (milestones pay out even with no instruments)
             sb.DrawString(f, $"SCIENCE: {Ctx.State.Science:0}", new Vector2(r.X + 10, r.Y + 8), new Color(150, 230, 150));
             // signal strength governs transmission speed
@@ -1952,6 +1953,7 @@ namespace Solar.Scenes
             else DrawWorld(pb, ut);
 
             var hud = Hud.Draw(Ctx, _vessel, _pred, _map, FocusName(), NextNode(ut), BurnDirAngle(ut), _burnSpent, _nodes.Count, BuildNavMarkers(ut));
+            _rightColBottom = hud.RightColumnBottom;
             if (hud.WarpToUT.HasValue) _warpTo = hud.WarpToUT;
             if (hud.FireStage) FireNextStage();
             if (hud.RequestedSas.HasValue) SetSas((SasMode)hud.RequestedSas.Value);
@@ -2064,10 +2066,11 @@ namespace Solar.Scenes
             if (v != null && !v.Destroyed) foreach (var p in v.Parts) if (p.SeatCount > 0) seated.Add(p);
 
             int crew = v?.CrewCount ?? 0;
-            int wWin = 280, rows = 0;
+            int wWin = 230, rows = 0;   // match the HUD right-column width (rColW)
             foreach (var p in seated) rows += 1 + p.Crew.Count;
-            var r = new Rectangle(Ctx.W - wWin - 10, 120, wWin, 78 + Math.Max(1, rows) * 20);
-            UiDraw.Panel(pb, r);
+            // sit below the right-column stack (systems/modules/science) so it no longer overlaps them
+            var r = new Rectangle(Ctx.W - wWin - 10, _rightColBottom, wWin, 78 + Math.Max(1, rows) * 20);
+            UiDraw.TexPanel(pb, Ctx, "gameplay_modules_panel", r);
             float y = r.Y + 8;
             sb.DrawString(f, "CREW  [C] close", new Vector2(r.X + 10, y), UiDraw.Accent); y += 22;
 
