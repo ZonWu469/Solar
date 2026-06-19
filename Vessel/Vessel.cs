@@ -232,9 +232,17 @@ namespace Solar.Vessels
         /// mirroring how reaction wheels in <see cref="ControlTorque"/> are gated on power.</summary>
         public bool SasAvailable => HasSas && ElectricCharge > 0;
 
+        // Cached Segments() result. Boundaries depend only on the part layout (which kinds sit where),
+        // never on fuel, so the many per-frame thrust/flow/burn-fuel readers can share one build. Parts
+        // are only ever added or removed in flight (staging, docking, undocking) -- never swapped in place
+        // -- so Parts.Count is an exact invalidation key.
+        List<(int start, int end)> _segCache;
+        int _segCacheCount = -1;
+
         /// <summary>Inclusive index ranges between decouplers (decouplers belong to no segment).</summary>
         public List<(int start, int end)> Segments()
         {
+            if (_segCache != null && _segCacheCount == Parts.Count) return _segCache;
             var res = new List<(int, int)>();
             int s = 0;
             for (int i = 0; i < Parts.Count; i++)
@@ -253,6 +261,8 @@ namespace Solar.Vessels
                 }
             }
             if (s < Parts.Count) res.Add((s, Parts.Count - 1));
+            _segCache = res;
+            _segCacheCount = Parts.Count;
             return res;
         }
 

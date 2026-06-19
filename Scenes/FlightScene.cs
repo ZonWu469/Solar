@@ -273,12 +273,22 @@ namespace Solar.Scenes
             return best;
         }
 
-        /// <summary>Nodes sorted by time (a fresh list; safe to iterate while mutating _nodes is avoided).</summary>
+        // Reused by Sorted()/BuildProjection so the per-frame node walk doesn't allocate. Both are only
+        // ever read sequentially within one frame (no re-entrant Sorted/BuildProjection call iterates one
+        // while another rebuilds it), so a shared scratch buffer is safe. Re-sorting a handful of nodes is
+        // cheaper than the old per-call List copy, and stays correct when a node's UT is dragged in place.
+        private readonly List<Maneuver> _sortedScratch = new List<Maneuver>();
+        private readonly List<Maneuver> _futureScratch = new List<Maneuver>();
+        private static readonly Comparison<Maneuver> ByUT = (a, b) => a.UT.CompareTo(b.UT);
+
+        /// <summary>Nodes sorted by time. Returns a shared scratch list — iterate it immediately; do not
+        /// retain it across another Sorted()/BuildProjection call.</summary>
         private List<Maneuver> Sorted(double ut)
         {
-            var list = new List<Maneuver>(_nodes);
-            list.Sort((a, b) => a.UT.CompareTo(b.UT));
-            return list;
+            _sortedScratch.Clear();
+            _sortedScratch.AddRange(_nodes);
+            _sortedScratch.Sort(ByUT);
+            return _sortedScratch;
         }
 
         /// <summary>One drawn/clickable conic of the planned trajectory, in its own primary's frame.</summary>
@@ -305,7 +315,8 @@ namespace Solar.Scenes
             var segs = new List<ProjSegment>();
             if (!LiveOrbit(ut, out var live, out var liveBody, out _)) return segs;
 
-            var future = new List<Maneuver>();
+            var future = _futureScratch;
+            future.Clear();
             foreach (var n in Sorted(ut)) if (n.UT >= ut) future.Add(n);
 
             OrbitalElements src = live;
@@ -1639,13 +1650,17 @@ namespace Solar.Scenes
             }
         }
 
+        // Reused each frame: the HUD reads SasIcons immediately in the same Draw, so the buffer never
+        // needs to outlive the call -- no reason to allocate a fresh SAS-icon array every frame.
+        private readonly SasIconInfo[] _sasIconBuf = new SasIconInfo[SasModeCount];
+
         /// <summary>Build the target navball cues (markers + readout) for the HUD.</summary>
         private NavMarkers BuildNavMarkers(double ut)
         {
             var nav = new NavMarkers { SasMode = (int)_sas, SasLabel = SasLabel(), Target = double.NaN, RelPro = double.NaN };
             bool sasOn = _vessel != null && !_vessel.Destroyed && _vessel.SasAvailable;
             nav.SasEnabled = sasOn;
-            var icons = new SasIconInfo[SasModeCount];
+            var icons = _sasIconBuf;
             for (int i = 0; i < SasModeCount; i++)
                 icons[i] = new SasIconInfo { Icon = i, Available = sasOn && SasModeAvailable((SasMode)i, ut), Active = (int)_sas == i };
             nav.SasIcons = icons;

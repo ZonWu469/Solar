@@ -49,6 +49,14 @@ namespace Solar.UI
             var pb = ctx.Pb; var sb = ctx.Sb; var f = ctx.Font;
             int w = ctx.W, h = ctx.H;
 
+            // The stage list and the "dV REM" readouts all derive from ComputeStages, which deep-clones
+            // the whole part tree. It used to be called ~4x per HUD frame with identical input; compute
+            // it once here and reuse. Null when there's nothing to stage (matches the old empty-list path).
+            List<StageStat> stages = (v != null && !v.Destroyed && v.Parts.Count > 0)
+                ? Staging.ComputeStages(v.Parts) : null;
+            double totalDV = 0;
+            if (stages != null) for (int i = 0; i < stages.Count; i++) totalDV += stages[i].DeltaV;
+
             // ---- left readout panel ----
             var panel = new Rectangle(10, 10, 256, 366);
             UiDraw.Panel(pb, panel);
@@ -413,17 +421,16 @@ namespace Solar.UI
                 Cell(0, "THRUST", UiDraw.Force(thrust), thrust > 0 ? Color.White : UiDraw.TextDim);
                 Cell(1, "TWR", twr > 0 ? $"{twr:0.00}" : "-", twr >= 1 ? new Color(150, 220, 150) : twr > 0 ? new Color(255, 170, 90) : UiDraw.TextDim);
                 Cell(2, "ACCEL", thrust > 0 ? UiDraw.Accel(accel) : "-", Color.White);
-                Cell(3, "dV REM", $"{TotalDeltaV(v):0} m/s", UiDraw.Accent);
+                Cell(3, "dV REM", $"{totalDV:0} m/s", UiDraw.Accent);
             }
 
             // ---- stage list (bottom left) ----
             if (!v.Destroyed && v.Parts.Count > 0)
             {
-                var stages = Staging.ComputeStages(v.Parts);
                 int rows = Math.Min(stages.Count, 6);
                 var sp = new Rectangle(10, h - 30 - rows * 38 - 28, 300, rows * 38 + 36);
                 UiDraw.Panel(pb, sp);
-                sb.DrawString(f, $"STAGES  dV {TotalDeltaV(v):0} m/s  [Space]/click fire", new Vector2(sp.X + 8, sp.Y + 6), UiDraw.TextDim);
+                sb.DrawString(f, $"STAGES  dV {totalDV:0} m/s  [Space]/click fire", new Vector2(sp.X + 8, sp.Y + 6), UiDraw.TextDim);
                 float sy = sp.Y + 28;
                 for (int i = 0; i < rows; i++)
                 {
@@ -464,7 +471,7 @@ namespace Solar.UI
             if (node != null && !v.Destroyed)
             {
                 double now = ctx.Clock.UT;
-                double avail = TotalDeltaV(v);
+                double avail = totalDV;
                 bool enough = node.DeltaV <= avail + 1e-6;
                 double bt = Staging.BurnTime(v, node.DeltaV);
                 bool burning = burnSpent > 0;
@@ -578,14 +585,6 @@ namespace Solar.UI
             double t = Kepler.TimeAtTrueAnomaly(el, nu, ut) - ut;
             if (t <= 0 || double.IsNaN(t) || double.IsInfinity(t)) return "";
             return $"  ({UiDraw.Time(t)})";
-        }
-
-        /// <summary>Sum of remaining delta-v across all stages from the current fuel state.</summary>
-        private static double TotalDeltaV(Vessel v)
-        {
-            double sum = 0;
-            foreach (var st in Staging.ComputeStages(v.Parts)) sum += st.DeltaV;
-            return sum;
         }
 
         private static double StageFuelFrac(StageStat st)
