@@ -24,6 +24,13 @@ namespace Solar.Parts
         public double ImpactTolerance;  // m/s added to the safe landing speed (landing gear)
         public Color Tint;
 
+        // Engine/booster exhaust appearance. All optional in parts.json; entries that omit them
+        // fall back (in PartDefDto.ToPart) to the legacy orange plume so untagged engines are unchanged.
+        public Color ExhaustColor;       // outer flame color
+        public Color ExhaustCoreColor;   // inner (hot core) flame color
+        public float ExhaustLengthScale; // multiplies flame length (1 = legacy)
+        public float ExhaustWidthScale;  // multiplies flame width  (1 = legacy)
+
         /// <summary>Module ids this part ships with pre-installed in its slots (an "advanced" part,
         /// e.g. a service pod that already carries a solar panel + battery). Seeded into a fresh
         /// <see cref="Vessel.StackEntry"/> when the part is placed in the editor; the player can still

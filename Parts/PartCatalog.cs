@@ -90,6 +90,15 @@ namespace Solar.Parts
         public int TintR { get; set; }
         public int TintG { get; set; }
         public int TintB { get; set; }
+        // optional exhaust appearance (all zero = omitted -> legacy orange fallback in ToPart)
+        public int ExhaustR { get; set; }
+        public int ExhaustG { get; set; }
+        public int ExhaustB { get; set; }
+        public int ExhaustCoreR { get; set; }
+        public int ExhaustCoreG { get; set; }
+        public int ExhaustCoreB { get; set; }
+        public float ExhaustLengthScale { get; set; }
+        public float ExhaustWidthScale { get; set; }
         public List<string> DefaultModules { get; set; }   // module ids pre-fitted in this part's slots (optional)
 
         public static PartDefDto FromPart(PartDef p) => new()
@@ -99,6 +108,9 @@ namespace Solar.Parts
             DeployedCdA = p.DeployedCdA, ControlAuthority = p.ControlAuthority, Sas = p.Sas, ImpactTolerance = p.ImpactTolerance,
             Slots = p.Slots,
             TintR = p.Tint.R, TintG = p.Tint.G, TintB = p.Tint.B,
+            ExhaustR = p.ExhaustColor.R, ExhaustG = p.ExhaustColor.G, ExhaustB = p.ExhaustColor.B,
+            ExhaustCoreR = p.ExhaustCoreColor.R, ExhaustCoreG = p.ExhaustCoreColor.G, ExhaustCoreB = p.ExhaustCoreColor.B,
+            ExhaustLengthScale = p.ExhaustLengthScale, ExhaustWidthScale = p.ExhaustWidthScale,
             DefaultModules = p.DefaultModules.Count > 0 ? new List<string>(p.DefaultModules) : null,
         };
 
@@ -114,6 +126,11 @@ namespace Solar.Parts
             ImpactTolerance = ImpactTolerance > 0 ? ImpactTolerance : (Kind == PartKind.LandingGear ? DefaultGearTolerance(DryMass) : 0),
             Slots = Slots > 0 ? Slots : PartDef.DefaultSlots(Kind),
             Tint = new Color(TintR, TintG, TintB),
+            // exhaust appearance: fall back to the legacy orange plume when JSON omits the fields (all zero)
+            ExhaustColor = (ExhaustR | ExhaustG | ExhaustB) != 0 ? new Color(ExhaustR, ExhaustG, ExhaustB, 200) : new Color(255, 140, 40, 200),
+            ExhaustCoreColor = (ExhaustCoreR | ExhaustCoreG | ExhaustCoreB) != 0 ? new Color(ExhaustCoreR, ExhaustCoreG, ExhaustCoreB, 230) : new Color(255, 230, 120, 230),
+            ExhaustLengthScale = ExhaustLengthScale > 0 ? ExhaustLengthScale : 1f,
+            ExhaustWidthScale = ExhaustWidthScale > 0 ? ExhaustWidthScale : 1f,
             DefaultModules = DefaultModules ?? new List<string>(),
         };
 

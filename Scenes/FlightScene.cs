@@ -33,6 +33,11 @@ namespace Solar.Scenes
         private sealed class TrackedShip { public string Name; public Vessel V; }
         private readonly Camera2D _cam = new();
         private readonly DustField _dust = new();
+        private readonly ExhaustTrail _exhaust = new();
+        private double _shake;                 // B4: decaying camera-shake amplitude (screen pixels)
+        private readonly Random _shakeRnd = new(23);
+        private double _stagePuffUt = double.NegativeInfinity;  // B4: one-shot decoupler smoke puff
+        private Vec2d _stagePuffPos;
 
         private bool _map;
         private bool _slopeView;             // terrain colored by slope (landing-spot finder) instead of elevation
@@ -1110,6 +1115,13 @@ namespace Solar.Scenes
             {
                 _cam.Center = vesselPos;
                 _cam.MetersPerPixel = _flightZoom;
+                if (_shake > 1e-3)
+                {
+                    double mag = _shake * _flightZoom;   // shake scaled in screen pixels regardless of zoom
+                    _cam.Center += new Vec2d((_shakeRnd.NextDouble() * 2 - 1) * mag, (_shakeRnd.NextDouble() * 2 - 1) * mag);
+                    _shake *= 0.82;
+                    if (_shake < 1e-3) _shake = 0;
+                }
             }
         }
 
@@ -1491,11 +1503,16 @@ namespace Solar.Scenes
             double ut = Ctx.Clock.UT;
             bool wasOnRails = _vessel.OnRails;
             if (wasOnRails) _vessel.GoOffRails(ut);
+            double thrustAtFire = _vessel.CurrentThrust;
             var debris = Staging.FireNext(_vessel);
             if (debris != null)
             {
                 _debris.Add(debris);
                 if (_debris.Count > MaxDebris) _debris.RemoveAt(0);
+                // B4: staging punch — a brief camera shake and a smoke puff at the jettison point.
+                _shake = Math.Clamp(thrustAtFire / 1e5, 1.0, 8.0);
+                _stagePuffUt = ut;
+                _stagePuffPos = _vessel.AbsolutePosition(ut) - new Vec2d(Math.Cos(_vessel.Heading), Math.Sin(_vessel.Heading)) * (_vessel.TotalHeight * 0.5);
             }
             if (wasOnRails) { _vessel.GoOnRails(ut); RefreshPrediction(ut); }
         }
@@ -2350,6 +2367,32 @@ namespace Solar.Scenes
             if (_vessel != null && !_vessel.Destroyed && !_vessel.Landed)
                 _dust.Draw(pb, _cam, _vessel.Velocity);
 
+            // B1: engine exhaust trail. Gas ejects opposite the vessel's up (thrust) axis from the tail;
+            // tinted by the active engine's data-driven exhaust color, thicker/longer-lived in atmosphere.
+            if (_vessel != null && !_vessel.Destroyed && _vessel.CurrentThrust > 0)
+            {
+                var up = new Vec2d(Math.Cos(_vessel.Heading), Math.Sin(_vessel.Heading));
+                Vec2d tail = _vessel.AbsolutePosition(ut) - up * (_vessel.TotalHeight * 0.45);
+                Color exCol = new Color(255, 140, 40);
+                foreach (var p in _vessel.Parts)
+                    if (p.Ignited && (p.Def.Kind == PartKind.Engine || p.Def.Kind == PartKind.SolidBooster))
+                    { exCol = p.Def.ExhaustColor; break; }
+                double density = Math.Clamp((_vessel.Body?.Atmo?.DensityAt(_vessel.Altitude) ?? 0) / 1.225, 0, 1);
+                double thr = Math.Max(_vessel.Throttle, 0.5); // solids report throttle 0 yet still fire
+                _exhaust.Draw(pb, _cam, ut, tail, up * -1.0, _vessel.Velocity, thr, exCol, density);
+            }
+
+            // B4: expanding/fading smoke ring at the last decoupler jettison (~0.6s).
+            double puffAge = ut - _stagePuffUt;
+            if (puffAge >= 0 && puffAge < 0.6)
+            {
+                float life = (float)(puffAge / 0.6);
+                var ps = _cam.WorldToScreen(_stagePuffPos);
+                float rPx = (float)((4 + 14 * life) / _cam.MetersPerPixel * 0.35); // modest world-scaled puff
+                var pc = new Color(220, 215, 205) * (1f - life);
+                pb.FillCircle(ps, Math.Max(3f, rPx), pc, pc * 0.1f);
+            }
+
             foreach (var d in _debris)
                 VesselRenderer.Draw(pb, _cam, d, ut, _anim, tex: Ctx.Textures);
 
@@ -2451,7 +2494,10 @@ namespace Solar.Scenes
             {
                 var el = _pred.Orbit;
                 Vec2d primaryAbs = _pred.Body.AbsolutePositionAt(ut);
-                var trajColor = new Color(110, 220, 255);
+                // C1: tint the trajectory by its current SOI's body color (blended toward cyan so it stays
+                // legible as "your path"), making patched-conic legs readable at a glance.
+                var cyan = new Color(110, 220, 255);
+                var trajColor = Color.Lerp(_pred.Body.BodyColor, cyan, 0.55f);
 
                 if (_pred.Type == TransitionType.None)
                 {
@@ -2462,10 +2508,20 @@ namespace Solar.Scenes
                 else
                 {
                     OrbitRenderer.DrawTrajectory(pb, _cam, el, primaryAbs, ut, _pred.TransitionUT, trajColor, 1.6f);
-                    // transition marker
+                    // transition marker (C3): colored by the body it hands off to, labeled with a verb.
                     Vec2d mPos = primaryAbs + Kepler.StateAtTime(el, _pred.TransitionUT).pos;
                     var ms = _cam.WorldToScreen(mPos);
-                    pb.CircleOutline(ms, 6, 1.5f, new Color(255, 200, 110));
+                    Color mkCol = _pred.NextBody != null ? _pred.NextBody.BodyColor : new Color(255, 200, 110);
+                    pb.CircleOutline(ms, 6, 1.5f, mkCol);
+                    string mkLabel = _pred.Type switch
+                    {
+                        TransitionType.Encounter => _pred.NextBody != null ? "enc " + _pred.NextBody.Name : "encounter",
+                        TransitionType.Escape => _pred.NextBody != null ? "exit to " + _pred.NextBody.Name : "escape",
+                        TransitionType.AtmoEntry => "entry",
+                        _ => null,
+                    };
+                    if (mkLabel != null)
+                        sb.DrawString(Ctx.Font, mkLabel, new Vector2(ms.X + 9, ms.Y - 7), mkCol);
                     if (!el.Hyperbolic && _pred.TransitionUT - ut > el.Period * 0.4)
                         DrawApPeMarkers(pb, sb, el, primaryAbs, _pred.Body.Radius, PeColor, ApColor);
 
@@ -2473,7 +2529,8 @@ namespace Solar.Scenes
                     if (_pred.NextBody != null)
                     {
                         Vec2d nbAbs = _pred.NextBody.AbsolutePositionAt(_pred.TransitionUT);
-                        var c2 = new Color(255, 170, 90);
+                        // C1: ghost of the post-encounter conic tinted by the body it falls into.
+                        var c2 = Color.Lerp(_pred.NextBody.BodyColor, new Color(255, 200, 120), 0.5f);
                         OrbitRenderer.DrawConic(pb, _cam, _pred.NextOrbit, nbAbs, c2, 1.4f, _pred.NextBody.SoiRadius);
                         if (_pred.Type == TransitionType.Encounter)
                         {
@@ -2597,24 +2654,39 @@ namespace Solar.Scenes
                                      in OrbitalElements el, Vec2d primaryAbs, double bodyRadius, Color peCol, Color apCol)
         {
             var peW = OrbitRenderer.PeriapsisPoint(el, primaryAbs);
+            var apW = OrbitRenderer.ApoapsisPoint(el, primaryAbs);
+            var priS = _cam.WorldToScreen(primaryAbs);
+
+            // C4: apse line (major axis) through both apsides, faint so it reads as a reference.
+            if (!el.Hyperbolic)
+                pb.Line(_cam.WorldToScreen(peW), _cam.WorldToScreen(apW), 1f, apCol * 0.30f);
+
             var peS = _cam.WorldToScreenD(peW);
             if (_cam.OnScreen(peS, 50))
-            {
-                var p = new Vector2((float)peS.X, (float)peS.Y);
-                pb.FillCircle(p, 4, peCol);
-                sb.DrawString(Ctx.Font, $"Pe {UiDraw.Dist(el.Periapsis - bodyRadius)}", p + new Vector2(8, -8), peCol);
-            }
+                DrawApsisMarker(pb, sb, new Vector2((float)peS.X, (float)peS.Y), priS,
+                                $"Pe {UiDraw.Dist(el.Periapsis - bodyRadius)}", peCol);
             if (!el.Hyperbolic)
             {
-                var apW = OrbitRenderer.ApoapsisPoint(el, primaryAbs);
                 var apS = _cam.WorldToScreenD(apW);
                 if (_cam.OnScreen(apS, 50))
-                {
-                    var p = new Vector2((float)apS.X, (float)apS.Y);
-                    pb.FillCircle(p, 4, apCol);
-                    sb.DrawString(Ctx.Font, $"Ap {UiDraw.Dist(el.Apoapsis - bodyRadius)}", p + new Vector2(8, -8), apCol);
-                }
+                    DrawApsisMarker(pb, sb, new Vector2((float)apS.X, (float)apS.Y), priS,
+                                    $"Ap {UiDraw.Dist(el.Apoapsis - bodyRadius)}", apCol);
             }
+        }
+
+        /// <summary>C2: an apsis marker drawn as a chevron pointing radially outward (away from the primary)
+        /// with the label offset along that direction by a short leader, so it clears the orbit line.</summary>
+        private void DrawApsisMarker(PrimitiveBatch pb, Microsoft.Xna.Framework.Graphics.SpriteBatch sb,
+                                     Vector2 p, Vector2 primaryScreen, string label, Color col)
+        {
+            Vector2 ro = p - primaryScreen;
+            ro = ro.LengthSquared() > 1e-3f ? Vector2.Normalize(ro) : new Vector2(0, -1);
+            Vector2 perp = new Vector2(-ro.Y, ro.X);
+            Vector2 tip = p + ro * 8;
+            pb.Line(p - perp * 5, tip, 1.8f, col);
+            pb.Line(p + perp * 5, tip, 1.8f, col);
+            pb.FillCircle(p, 2.5f, col);
+            sb.DrawString(Ctx.Font, label, p + ro * 12 + new Vector2(3, -6), col);
         }
 
         private static readonly Color PeColor = new Color(120, 220, 255);
@@ -2636,14 +2708,16 @@ namespace Solar.Scenes
             {
                 var sg = segs[i];
                 if (!sg.Planned) continue;
+                // C1: tint each planned leg by its SOI body, blended toward orange so the route reads.
+                var legCol = Color.Lerp(sg.Body.BodyColor, orange, 0.6f);
                 if (i == lastPlanned)
                 {
-                    OrbitRenderer.DrawConicGlow(pb, _cam, sg.El, sg.PrimaryAbs, orange, sg.Body.SoiRadius);
-                    DrawApPeMarkers(pb, sb, sg.El, sg.PrimaryAbs, sg.Body.Radius, orange, new Color(255, 210, 140));
+                    OrbitRenderer.DrawConicGlow(pb, _cam, sg.El, sg.PrimaryAbs, legCol, sg.Body.SoiRadius);
+                    DrawApPeMarkers(pb, sb, sg.El, sg.PrimaryAbs, sg.Body.Radius, legCol, new Color(255, 210, 140));
                 }
                 else
                 {
-                    OrbitRenderer.DrawConic(pb, _cam, sg.El, sg.PrimaryAbs, orange * 0.8f, 1.3f, sg.Body.SoiRadius);
+                    OrbitRenderer.DrawConic(pb, _cam, sg.El, sg.PrimaryAbs, legCol * 0.8f, 1.3f, sg.Body.SoiRadius);
                 }
                 // transition marker where this patch hands off to a different SOI
                 if (i + 1 < segs.Count && segs[i + 1].Body != sg.Body && !double.IsInfinity(sg.EndUT))
@@ -2677,8 +2751,15 @@ namespace Solar.Scenes
                 for (int k = 0; k < 4; k++)
                 {
                     pb.Line(nodeScreen, hp[k], 1f, hc[k] * 0.5f);
-                    float r = (_dragNode == ni && _dragHandle == k) || (_hoverNode == ni && _hoverHandle == k) ? 7f : 5f;
-                    pb.FillCircle(hp[k], r, hc[k]);
+                    bool active = (_dragNode == ni && _dragHandle == k) || (_hoverNode == ni && _hoverHandle == k);
+                    pb.FillCircle(hp[k], active ? 7f : 5f, hc[k]);
+                    // D4: dV tooltip on the hovered/dragged handle (k: 0/1 = prograde +/-, 2/3 = radial out/in).
+                    if (active)
+                    {
+                        double comp = k < 2 ? node.Prograde : node.Radial;
+                        string axis = k < 2 ? "pro" : "rad";
+                        sb.DrawString(Ctx.Font, $"{axis} {comp:+0;-0} m/s", hp[k] + new Vector2(9, -6), hc[k]);
+                    }
                 }
 
                 // node marker

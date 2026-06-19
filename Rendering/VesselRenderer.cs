@@ -57,6 +57,36 @@ namespace Solar.Rendering
                 mx += (float)off.X; my += (float)off.Y;
                 return baseS + rightS * (mx * pxPerM) + upS * (my * pxPerM);
             }
+            // Engine/booster exhaust plume, driven by the part's data-driven exhaust appearance.
+            // cx = local x of the nozzle axis, baseY = nozzle exit y, halfWRef = legacy outer half-width
+            // (w*0.30), len = legacy flame length (already includes throttle+flicker). Reproduces the old
+            // orange plume when the part uses fallback exhaust values (scales = 1).
+            void DrawPlume(float cx, float baseY, float halfWRef, float len, float throttle, PartDef d, float flick)
+            {
+                float ws = d.ExhaustWidthScale;
+                float outerHalf = halfWRef * ws;
+                float innerHalf = halfWRef * 0.533f * ws;
+                float L = len * d.ExhaustLengthScale;
+                // A5: throttle-reactive core hue — toward white at full throttle.
+                Color core = Color.Lerp(d.ExhaustCoreColor, Color.White, 0.35f * MathHelper.Clamp(throttle, 0f, 1f));
+                pb.Tri(P(cx - outerHalf, baseY + 0.05f), P(cx + outerHalf, baseY + 0.05f), P(cx, baseY - L), d.ExhaustColor);
+                pb.Tri(P(cx - innerHalf, baseY + 0.05f), P(cx + innerHalf, baseY + 0.05f), P(cx, baseY - L * 0.55f), core);
+                // A4: Mach diamonds on high-thrust engines — small bright lozenges along the axis, pulsed.
+                if (d.Thrust >= 200000)
+                {
+                    float pulse = MathHelper.Clamp(0.6f + 0.4f * (flick - 1f) / 0.12f, 0.3f, 1f);
+                    var dia = new Color(255, 245, 220) * pulse;
+                    for (int m = 0; m < 3; m++)
+                    {
+                        float f = 0.22f + m * 0.18f;
+                        float dy = baseY - L * f;
+                        float dw = innerHalf * (0.5f - 0.12f * m);
+                        float dh = L * 0.05f;
+                        pb.Tri(P(cx - dw, dy), P(cx, dy - dh), P(cx, dy + dh), dia);
+                        pb.Tri(P(cx + dw, dy), P(cx, dy - dh), P(cx, dy + dh), dia);
+                    }
+                }
+            }
             float y = 0;
             for (int i = to - 1; i >= from; i--)
             {
@@ -140,8 +170,7 @@ namespace Solar.Rendering
                 {
                     float flick = 1f + 0.12f * (float)Math.Sin(anim * 37 + i * 2.1);
                     float flameLen = h * (0.9f + 2.0f * (float)v.Throttle) * flick;
-                    pb.Tri(P(-w * 0.30f, y + 0.05f), P(w * 0.30f, y + 0.05f), P(0, y - flameLen), new Color(255, 140, 40, 200));
-                    pb.Tri(P(-w * 0.16f, y + 0.05f), P(w * 0.16f, y + 0.05f), P(0, y - flameLen * 0.55f), new Color(255, 230, 120, 230));
+                    DrawPlume(0, y, w * 0.30f, flameLen, (float)v.Throttle, d, flick);
                 }
                 if (d.Kind == PartKind.Parachute && p.Deployed)
                 {
@@ -318,9 +347,9 @@ namespace Solar.Rendering
                     if (rFlame)
                     {
                         float flick = 1f + 0.12f * (float)Math.Sin(anim * 37 + (i + k) * 2.1);
-                        float flen = rh * (0.9f + 2.0f * (rd.Kind == PartKind.SolidBooster ? 1f : (float)v.Throttle)) * flick;
-                        pb.Tri(P(xc - rw * 0.30f, yb + 0.05f), P(xc + rw * 0.30f, yb + 0.05f), P(xc, yb - flen), new Color(255, 140, 40, 200));
-                        pb.Tri(P(xc - rw * 0.16f, yb + 0.05f), P(xc + rw * 0.16f, yb + 0.05f), P(xc, yb - flen * 0.55f), new Color(255, 230, 120, 230));
+                        float rThr = rd.Kind == PartKind.SolidBooster ? 1f : (float)v.Throttle;
+                        float flen = rh * (0.9f + 2.0f * rThr) * flick;
+                        DrawPlume(xc, yb, rw * 0.30f, flen, rThr, rd, flick);
                     }
 
                     // deployed radial parachute: canopy above the radial part (mirrors the axial chute)

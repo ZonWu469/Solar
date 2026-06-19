@@ -38,8 +38,14 @@ namespace Solar.Rendering
                 }
                 if (b.Atmo != null)
                 {
+                    // Multi-stop limb glow: a faint full-disc haze plus a brighter band hugging the surface
+                    // that fades to space, so the atmosphere reads as a lit rim rather than a flat tint.
+                    float surfPx = (float)rPx;
                     float atmoPx = (float)((b.Radius + b.Atmo.Top) / cam.MetersPerPixel);
-                    pb.FillCircle(s, atmoPx, b.AtmoColor * 0.45f, Color.Transparent);
+                    float midPx = surfPx + (atmoPx - surfPx) * 0.45f;
+                    pb.FillCircle(s, atmoPx, b.AtmoColor * 0.18f, Color.Transparent);
+                    pb.Ring(s, surfPx, midPx, b.AtmoColor * 0.70f, b.AtmoColor * 0.40f);
+                    pb.Ring(s, midPx, atmoPx, b.AtmoColor * 0.40f, Color.Transparent);
                 }
                 // A body texture (round PNG with transparent corners) replaces the procedural disc when one
                 // is loaded; otherwise draw an organic terrain disc, or a flat-shaded circle if too small.
@@ -93,10 +99,16 @@ namespace Solar.Rendering
             double half = Math.Min(Math.PI, 2.5 * diagWorld / b.Radius + 0.01);
             int segs = 200;
 
-            // atmosphere band (surface -> top, fading out)
+            // atmosphere band (surface -> top): two radial stops so the rim glows brightest just above the
+            // surface and fades to space, plus a per-segment sun lift so the day-side limb is brighter.
             if (b.Atmo != null)
-                ArcBand(pb, cam, pos, b.Radius, b.Radius + b.Atmo.Top, thetaC, half, segs,
-                        b.AtmoColor * 0.5f, Color.Transparent);
+            {
+                double mid = b.Radius + b.Atmo.Top * 0.45;
+                ArcBandLit(pb, cam, pos, b.Radius, mid, thetaC, half, segs,
+                           b.AtmoColor * 0.62f, b.AtmoColor * 0.38f, sunDir);
+                ArcBandLit(pb, cam, pos, mid, b.Radius + b.Atmo.Top, thetaC, half, segs,
+                           b.AtmoColor * 0.38f, Color.Transparent, sunDir);
+            }
 
             // ground band: outer edge follows the terrain height field, colored per-segment.
             double depth = Math.Min(b.Radius, diagWorld * 2.5);
@@ -160,6 +172,26 @@ namespace Solar.Rendering
                 Vector2 po1 = cam.WorldToScreen(center + dir * rOut);
                 if (s > 0) pb.Quad(pi0, po0, po1, pi1, colIn, colOut, colOut, colIn);
                 pi0 = pi1; po0 = po1;
+            }
+        }
+
+        /// <summary>Like <see cref="ArcBand"/> but lifts the inner color toward white on the segments
+        /// facing the sun, so the day-side limb glows. The outer color is used as-is (typically the
+        /// transparent fade target, where a sun lift would be invisible anyway).</summary>
+        private static void ArcBandLit(PrimitiveBatch pb, Camera2D cam, Vec2d center, double rIn, double rOut,
+                                       double thetaC, double half, int segs, Color colIn, Color colOut, Vec2d sunDir)
+        {
+            Vector2 pi0 = default, po0 = default; Color ci0 = default;
+            for (int s = 0; s <= segs; s++)
+            {
+                double a = thetaC - half + 2 * half * s / segs;
+                Vec2d dir = Vec2d.FromAngle(a);
+                float day = (float)Math.Max(0, dir.Dot(sunDir));
+                Color ci = Lighten(colIn, 0.40f * day);
+                Vector2 pi1 = cam.WorldToScreen(center + dir * rIn);
+                Vector2 po1 = cam.WorldToScreen(center + dir * rOut);
+                if (s > 0) pb.Quad(pi0, po0, po1, pi1, ci0, colOut, colOut, ci);
+                pi0 = pi1; po0 = po1; ci0 = ci;
             }
         }
 
