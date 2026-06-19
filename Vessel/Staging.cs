@@ -228,7 +228,7 @@ namespace Solar.Vessels
             var parts = new List<Part>();
             foreach (var e in stack)
             {
-                var p = new Part(e.Def) { Stage = e.Stage };
+                var p = new Part(e.Def) { Stage = e.Stage, Fuel = e.CurrentFuel };
                 foreach (var m in e.Modules) p.Modules.Add(new ModuleInstance(m));
                 VesselDesign.MaterializeRadials(e, p);   // symmetric-pair sub-stacks (carry mount stage)
                 parts.Add(p);

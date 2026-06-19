@@ -480,6 +480,33 @@ namespace Solar.Tests
                 Check("inline part radial-mountable", ridesCore && pair);
             }
 
+            // 19f. a partly-filled tank (StackEntry.FuelOverride) flows into ComputeStages: half the fuel
+            //      yields a strictly smaller but positive stage dV than a full tank, matching the rocket
+            //      equation on the reduced fuel + mass. Guards the editor fuel-load control.
+            {
+                var pod = new Vessels.StackEntry(Parts.PartCatalog.Get("Pod Mk1"));
+                var tankFull = new Vessels.StackEntry(Parts.PartCatalog.Get("Tank T400"));
+                var eng = new Vessels.StackEntry(Parts.PartCatalog.Get("Terrier"));
+                var full = new System.Collections.Generic.List<Vessels.StackEntry> { pod, tankFull, eng };
+                double dvFull = 0; foreach (var st in Vessels.Staging.ComputeStages(full)) dvFull += st.DeltaV;
+
+                var tankHalf = new Vessels.StackEntry(Parts.PartCatalog.Get("Tank T400"))
+                    { FuelOverride = Parts.PartCatalog.Get("Tank T400").FuelCapacity / 2 };
+                var half = new System.Collections.Generic.List<Vessels.StackEntry> { pod, tankHalf, eng };
+                var halfStages = Vessels.Staging.ComputeStages(half);
+                double dvHalf = 0; foreach (var st in halfStages) dvHalf += st.DeltaV;
+
+                // expected dV for the half load: Isp*g*ln(m0/(m0-fuel)) with fuel = cap/2
+                var tdef = Parts.PartCatalog.Get("Tank T400");
+                var edef = Parts.PartCatalog.Get("Terrier");
+                double fuel = tdef.FuelCapacity / 2;
+                double m0 = pod.Def.DryMass + tdef.DryMass + fuel + edef.DryMass;
+                double isp = edef.Thrust / edef.FuelFlowAtMax / 9.81;
+                double expect = isp * 9.81 * System.Math.Log(m0 / (m0 - fuel));
+                Check("partial tank fuel dV", dvHalf > 0 && dvHalf < dvFull
+                                              && System.Math.Abs(dvHalf - expect) < 1.0);
+            }
+
             // 20. body catalog: the solar system builds from BodyCatalog with the parent hierarchy, the
             //     1/10 length scale, texture ids, and finite SOIs intact.
             {

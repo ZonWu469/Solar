@@ -138,6 +138,29 @@ namespace Solar.UI
             return scroll;
         }
 
+        /// <summary>A reusable horizontal slider. Draws a groove with the [0..1] <paramref name="frac"/>
+        /// filled and a handle, and returns the (possibly drag-adjusted) fraction. The caller owns a
+        /// persistent <paramref name="dragging"/> flag so a grab keeps tracking when the cursor drifts off
+        /// the track vertically. A click anywhere on the track jumps the handle there.</summary>
+        public static double HSlider(PrimitiveBatch pb, Rectangle track, double frac, InputState inp, ref bool dragging)
+        {
+            frac = Math.Clamp(frac, 0, 1);
+            if (inp.LeftClick && track.Contains((int)inp.MousePos.X, (int)inp.MousePos.Y)) dragging = true;
+            if (!inp.LeftDown) dragging = false;
+            if (dragging && track.Width > 0)
+                frac = Math.Clamp((inp.MousePos.X - track.X) / (double)track.Width, 0, 1);
+
+            pb.FillRect(track, new Color(16, 22, 34, 220));                 // groove
+            int fillW = (int)(track.Width * frac);
+            if (fillW > 0) pb.FillRect(new Rectangle(track.X, track.Y, fillW, track.Height), new Color(60, 110, 150, 230));
+            pb.RectOutline(track, 1, PanelBorder);
+            int hx = track.X + Math.Clamp(fillW, 2, track.Width - 2);
+            var handle = new Rectangle(hx - 3, track.Y - 2, 6, track.Height + 4);
+            pb.FillRect(handle, dragging ? new Color(110, 160, 210, 240) : new Color(120, 210, 255, 230));
+            pb.RectOutline(handle, 1, PanelBorder);
+            return frac;
+        }
+
         /// <summary>Draw text at a reduced scale (the bundled SpriteFont has a single baked size, so
         /// smaller UI text is done by scaling). Returns the rendered width so callers can lay out beside it.</summary>
         public static float SmallText(SpriteBatch sb, SpriteFont f, string text, Vector2 pos, Color c, float scale = 0.8f)

@@ -37,6 +37,7 @@ namespace Solar.Scenes
         // right ROCKET STATS panel scroll (whole body, below the fixed name field)
         private float _statsScroll;
         private bool _statsDrag;
+        private bool _fuelDrag;          // dragging the selected tank's fuel-load slider
         private float _statsContentH;    // last frame's measured body height, used to clamp
         // build-area view: zoom multiplies the auto-fit scale, panY shifts the centered stack
         private float _zoom = 1f;
@@ -753,7 +754,7 @@ namespace Solar.Scenes
             double mass = 0, height = 0;
             foreach (var e in Stack)
             {
-                mass += e.Def.DryMass + e.Def.FuelCapacity;
+                mass += e.Def.DryMass + e.CurrentFuel;
                 foreach (var m in e.Modules) mass += m.DryMass;
                 foreach (var mount in e.Mounts) foreach (var rd in mount.Parts) mass += 2 * (rd.DryMass + rd.FuelCapacity); // symmetric pair
                 height += e.Def.Height;
@@ -857,8 +858,31 @@ namespace Solar.Scenes
             if (stages.Count > 0 && stages[0].DeltaV > 0 && stages[0].Twr < 1.0)
             { Str("First stage TWR < 1: won't lift off!", x, y, new Color(255, 150, 90)); y += 24; }
 
-            // ---- slot modules for the selected part ----
+            // ---- fuel load for the selected tank/booster ----
             y += 6;
+            if (_selected >= 0 && _selected < Stack.Count && Stack[_selected].Def.FuelCapacity > 0)
+            {
+                var entry = Stack[_selected];
+                double cap = entry.Def.FuelCapacity;
+                double cur = entry.CurrentFuel;
+                Str($"FUEL  {entry.Def.Name}", x, y, UiDraw.Accent); y += 22;
+                Str($"{cur:0} / {cap:0} kg  ({cur / cap * 100:0}%)", x, y, Color.White); y += 22;
+                var track = new Rectangle((int)x, (int)y + 4, StatsW - 44, 12);
+                if (Vis(track.Y, track.Height))
+                {
+                    double frac = UiDraw.HSlider(pb, track, cur / cap, inp, ref _fuelDrag);
+                    if (_fuelDrag) entry.FuelOverride = frac * cap;
+                }
+                else _fuelDrag = false;
+                y += 24;
+                int halfBtn = (StatsW - 44 - 6) / 2;
+                if (Btn(new Rectangle((int)x, (int)y, halfBtn, 24), "Full")) entry.FuelOverride = null;
+                if (Btn(new Rectangle((int)x + halfBtn + 6, (int)y, halfBtn, 24), "Empty")) entry.FuelOverride = 0;
+                y += 30;
+            }
+            else _fuelDrag = false;
+
+            // ---- slot modules for the selected part ----
             if (_selected >= 0 && _selected < Stack.Count && Stack[_selected].Def.Slots > 0)
             {
                 var entry = Stack[_selected];

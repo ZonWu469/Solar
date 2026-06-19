@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Solar.Parts;
 
@@ -38,8 +39,16 @@ namespace Solar.Vessels
         /// <summary>Names of crew assigned to this part's seats in the editor (resolved against the
         /// savegame roster at launch).</summary>
         public List<string> CrewNames = new();
+        /// <summary>User-chosen propellant load for this part in the editor, in kg. null = fill to
+        /// capacity (the default, so existing designs/old saves load full). See <see cref="CurrentFuel"/>.</summary>
+        public double? FuelOverride;
         public StackEntry() { }
         public StackEntry(PartDef def) { Def = def; }
+
+        /// <summary>The propellant this entry launches with, in kg: the user's <see cref="FuelOverride"/>
+        /// clamped to the part's capacity, or full capacity when unset.</summary>
+        public double CurrentFuel => Def == null ? 0
+            : (FuelOverride.HasValue ? Math.Clamp(FuelOverride.Value, 0, Def.FuelCapacity) : Def.FuelCapacity);
 
         /// <summary>Mount a radial part as a new symmetric pair. When <paramref name="separate"/> is left
         /// unset, the staging choice defaults by part type: a booster/engine or a radial decoupler drops as
@@ -134,6 +143,7 @@ namespace Solar.Vessels
             foreach (var p in v.Parts)
             {
                 var e = new StackEntry(p.Def) { Stage = p.Stage };
+                if (p.Def.FuelCapacity > 0 && p.Fuel < p.Def.FuelCapacity) e.FuelOverride = p.Fuel;
                 foreach (var m in p.Modules) e.Modules.Add(m.Def);
 
                 // Tagged radials (post-change): group by mount id, keep one side, order by slot.
@@ -171,7 +181,7 @@ namespace Solar.Vessels
             var boarded = new HashSet<CrewMember>();
             foreach (var e in Stack)
             {
-                var p = new Part(e.Def) { Stage = e.Stage };
+                var p = new Part(e.Def) { Stage = e.Stage, Fuel = e.CurrentFuel };
                 foreach (var m in e.Modules) p.Modules.Add(new ModuleInstance(m));
                 MaterializeRadials(e, p);
                 // board assigned crew from the roster, capped at this part's seats (no double-boarding)

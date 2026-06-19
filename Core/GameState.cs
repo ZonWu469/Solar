@@ -98,6 +98,7 @@ namespace Solar.Core
     {
         public string Def;
         public int Stage = -1;   // activation stage (-1 = derive from geometry)
+        public double? Fuel;     // user-chosen propellant load in kg (null = full capacity)
         public List<string> Modules = new();
         public List<RadialMountState> Mounts;   // current format (sub-stacks)
         public List<string> Radials;            // legacy: parallel single-part list, still read for old saves
@@ -125,7 +126,7 @@ namespace Solar.Core
             var d = new DesignState { Name = vd.Name, Entries = new() };
             foreach (var e in vd.Stack)
             {
-                var pe = new PartEntryState { Def = e.Def.Name, Stage = e.Stage };
+                var pe = new PartEntryState { Def = e.Def.Name, Stage = e.Stage, Fuel = e.FuelOverride };
                 foreach (var m in e.Modules) pe.Modules.Add(m.Name);
                 if (e.Mounts.Count > 0)
                 {
@@ -153,7 +154,7 @@ namespace Solar.Core
                 {
                     var def = PartCatalog.Get(pe.Def);
                     if (def == null) continue;
-                    var entry = new StackEntry(def) { Stage = pe.Stage };
+                    var entry = new StackEntry(def) { Stage = pe.Stage, FuelOverride = pe.Fuel };
                     if (pe.Modules != null)
                         foreach (var mn in pe.Modules) { var md = ModuleCatalog.Get(mn); if (md != null) entry.Modules.Add(md); }
                     if (pe.Mounts != null)
