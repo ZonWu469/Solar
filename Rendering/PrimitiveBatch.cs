@@ -18,6 +18,7 @@ namespace Solar.Rendering
         private VertexPositionColor[] _v = new VertexPositionColor[18000];
         private readonly VertexPositionColorTexture[] _tv = new VertexPositionColorTexture[6];
         private int _n;
+        private BlendState _blend = BlendState.NonPremultiplied;   // active blend for untextured fills
 
         public PrimitiveBatch(GraphicsDevice gd)
         {
@@ -32,9 +33,11 @@ namespace Solar.Rendering
             var proj = Matrix.CreateOrthographicOffCenter(0, vp.Width, vp.Height, 0, 0, 1);
             _fx.Projection = proj; _fx.View = Matrix.Identity; _fx.World = Matrix.Identity;
             _texFx.Projection = proj; _texFx.View = Matrix.Identity; _texFx.World = Matrix.Identity;
-            _gd.BlendState = blend ?? BlendState.NonPremultiplied;
+            _blend = blend ?? BlendState.NonPremultiplied;
+            _gd.BlendState = _blend;
             _gd.RasterizerState = RasterizerState.CullNone;
             _gd.DepthStencilState = DepthStencilState.None;
+            _gd.SamplerStates[0] = SamplerState.AnisotropicClamp;   // trilinear minification: crisp downscaled UI icons
             _n = 0;
         }
 
@@ -69,8 +72,10 @@ namespace Solar.Rendering
             _tv[4] = new VertexPositionColorTexture(new Vector3(c, 0), tint, new Vector2(u1, 1));
             _tv[5] = new VertexPositionColorTexture(new Vector3(d, 0), tint, new Vector2(u0, 1));
             _texFx.Texture = tex;
+            _gd.BlendState = BlendState.AlphaBlend;   // textures are premultiplied; restore after the draw
             _texFx.CurrentTechnique.Passes[0].Apply();
             _gd.DrawUserPrimitives(PrimitiveType.TriangleList, _tv, 0, 2);
+            _gd.BlendState = _blend;
         }
 
         /// <summary>Draw a sub-region of <paramref name="tex"/> (source UVs u0,v0..u1,v1) stretched into
@@ -87,8 +92,10 @@ namespace Solar.Rendering
             _tv[4] = new VertexPositionColorTexture(new Vector3(r, b, 0), tint, new Vector2(uv.Z, uv.W));
             _tv[5] = new VertexPositionColorTexture(new Vector3(l, b, 0), tint, new Vector2(uv.X, uv.W));
             _texFx.Texture = tex;
+            _gd.BlendState = BlendState.AlphaBlend;   // textures are premultiplied; restore after the draw
             _texFx.CurrentTechnique.Passes[0].Apply();
             _gd.DrawUserPrimitives(PrimitiveType.TriangleList, _tv, 0, 2);
+            _gd.BlendState = _blend;
         }
 
         public void Tri(Vector2 a, Vector2 b, Vector2 c, Color col) => Tri(a, b, c, col, col, col);

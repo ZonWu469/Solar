@@ -352,6 +352,42 @@ namespace Solar.UI
             }
         }
 
+        /// <summary>Maps a <c>SasMode</c> index (1..9) to its UI icon id. Index 0 (Off) has no icon.</summary>
+        public static readonly string[] SasIconIds =
+        {
+            null, "icon_stability", "icon_prograde", "icon_retrograde", "icon_radialin",
+            "icon_radialout", "icon_target", "icon_antitarget", "icon_relretro", "icon_maneuver",
+        };
+
+        /// <summary>Draw a texture centered at <paramref name="center"/> at <paramref name="size"/>x<paramref name="size"/>.</summary>
+        public static void Icon(PrimitiveBatch pb, Texture2D tex, Vector2 center, int size, Color tint)
+        {
+            if (tex == null) return;
+            int s2 = size / 2;
+            pb.TexturedQuad(tex, new Rectangle((int)center.X - s2, (int)center.Y - s2, size, size),
+                new Vector4(0, 0, 1, 1), tint);
+        }
+
+        /// <summary>Textured SAS-mode button: a <c>quad_button</c> background filling <paramref name="r"/>
+        /// with the mode icon centered (30px). Tint conveys state (active = accent bg, hover = lightened,
+        /// unavailable = dimmed icon). Falls back to the procedural <see cref="SasIcon"/> look if textures
+        /// are missing.</summary>
+        public static void SasIconTex(PrimitiveBatch pb, GameContext ctx, Rectangle r, int icon, bool active, bool available, bool hover)
+        {
+            var btn = ctx.Textures?.Ui("quad_button");
+            string iconId = icon >= 0 && icon < SasIconIds.Length ? SasIconIds[icon] : null;
+            var ic = ctx.Textures?.Ui(iconId);
+            if (btn == null && ic == null) { SasIcon(pb, r, icon, active, available, hover); return; }
+
+            Color btnTint = active ? Accent : hover ? new Color(210, 220, 240) : Color.White;
+            if (btn != null) pb.TexturedQuad(btn, r, new Vector4(0, 0, 1, 1), btnTint);
+            else { pb.FillRect(r, new Color(20, 26, 38, 220)); pb.RectOutline(r, 1, active ? Accent : PanelBorder); }
+            if (active) pb.RectOutline(r, 2, Accent);   // colored frame marks the selected mode
+
+            Color iconTint = available ? Color.White : new Color(110, 120, 135, 150);
+            Icon(pb, ic, new Vector2(r.Center.X, r.Center.Y), 18, iconTint);
+        }
+
         public static void Bar(PrimitiveBatch pb, Rectangle r, float frac, Color fill)
         {
             pb.FillRect(r, new Color(20, 26, 38, 220));

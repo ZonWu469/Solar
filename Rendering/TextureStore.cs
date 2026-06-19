@@ -21,6 +21,9 @@ namespace Solar.Rendering
         {
             "gameplay_vessel_panel", "gameplay_warp_panel", "gameplay_modules_panel",
             "gameplay_thrust_panel", "gameplay_accel_panel", "gameplay_progressbar",
+            "quad_button",
+            "icon_stability", "icon_prograde", "icon_retrograde", "icon_radialin",
+            "icon_radialout", "icon_target", "icon_antitarget", "icon_relretro", "icon_maneuver",
         };
 
         public TextureStore(ContentManager content)

@@ -233,12 +233,15 @@ namespace Solar.UI
                 var d = new Vector2((float)Math.Cos(a), -(float)Math.Sin(a));
                 pb.Line(dial + d * (dr - 5), dial + d * dr, 1.5f, UiDraw.TextDim);
             }
+            // navball directional cues rendered as icon art (texture centered on the marker position)
+            const int markSz = 26;
+            void Mark(Vector2 pos, string id) => UiDraw.Icon(pb, ctx.Textures?.Ui(id), pos, markSz, Color.White);
             if (v.Velocity.Length > 1)
             {
                 double va = v.Velocity.Angle();
                 var pd = new Vector2((float)Math.Cos(va), -(float)Math.Sin(va));
-                pb.FillCircle(dial + pd * (dr - 10), 4, new Color(120, 255, 120));        // prograde
-                pb.FillCircle(dial - pd * (dr - 10), 4, new Color(255, 110, 100));        // retrograde
+                Mark(dial + pd * (dr - 10), "icon_prograde");        // prograde
+                Mark(dial - pd * (dr - 10), "icon_retrograde");      // retrograde
             }
             var hd = new Vector2((float)Math.Cos(v.Heading), -(float)Math.Sin(v.Heading));
             pb.Line(dial, dial + hd * (dr - 4), 3f, Color.White);
@@ -246,27 +249,23 @@ namespace Solar.UI
             if (node != null && !double.IsNaN(burnDirAngle))
             {
                 var md = new Vector2((float)Math.Cos(burnDirAngle), -(float)Math.Sin(burnDirAngle));
-                var mp = dial + md * (dr - 10);
-                pb.FillCircle(mp, 5, new Color(120, 210, 255));
-                pb.CircleOutline(mp, 7, 1.5f, Color.White);
+                Mark(dial + md * (dr - 10), "icon_maneuver");
             }
             // target navball cues: where the target is (and its opposite) + relative-velocity markers
             if (nav.Active)
             {
-                var tgt = new Color(235, 130, 235);
                 if (!double.IsNaN(nav.Target))
                 {
                     var td = new Vector2((float)Math.Cos(nav.Target), -(float)Math.Sin(nav.Target));
-                    pb.FillCircle(dial + td * (dr - 10), 5, tgt);                 // target
-                    pb.CircleOutline(dial + td * (dr - 10), 7, 1.5f, Color.White);
-                    pb.CircleOutline(dial - td * (dr - 10), 5, 1.5f, tgt);        // anti-target (hollow)
+                    Mark(dial + td * (dr - 10), "icon_target");          // target
+                    Mark(dial - td * (dr - 10), "icon_antitarget");      // anti-target
                 }
                 if (!double.IsNaN(nav.RelPro))
                 {
                     var rd = new Vector2((float)Math.Cos(nav.RelPro), -(float)Math.Sin(nav.RelPro));
                     var rc = new Color(255, 170, 235);                           // rel-velocity, distinct from orbital
-                    pb.FillCircle(dial + rd * (dr - 22), 3.5f, rc);              // target-relative prograde
-                    pb.CircleOutline(dial - rd * (dr - 22), 4, 1.2f, rc);        // target-relative retrograde
+                    pb.FillCircle(dial + rd * (dr - 22), 3.5f, rc);              // target-relative prograde (no icon)
+                    Mark(dial - rd * (dr - 22), "icon_relretro");               // target-relative retrograde
                 }
             }
             // target distance + closing speed on top of the compass
@@ -287,24 +286,23 @@ namespace Solar.UI
             UiDraw.TexBarV(pb, progTex, thrRect, (float)v.Throttle, new Color(255, 170, 60));
             sb.DrawString(f, $"THR {v.Throttle * 100:0}%", new Vector2(thrRect.X - 6, thrRect.Bottom + 4), UiDraw.TextDim);
 
-            // ---- SAS mode icons in 2 columns (left of the throttle bar), paired normal/anti ----
+            // ---- SAS mode buttons in 2 columns, right of the compass (clear of the accel panel) ----
             if (nav.SasIcons != null && nav.SasIcons.Length > 0)
             {
-                const int isz = 22, gap = 4, colGap = 6;
-                // rows: (left icon, right icon); -1 means "span both columns"
+                const int isz = 24, gap = 6, colGap = 6;
+                // rows: (left icon, right icon); -1 means "single, centered". Off (0) has no icon and is omitted.
                 var rows = new (int left, int right)[] {
                     (2, 3),   // Prograde / Retrograde
                     (4, 5),   // Radial In / Radial Out
                     (6, 7),   // Target / Anti-Target
                     (8, 9),   // Kill Relative / Maneuver
-                    (1, -1),  // Stability (span)
-                    (0, -1),  // Off (span)
+                    (1, -1),  // Stability (single)
                 };
                 int nRows = rows.Length;
                 int gridH = nRows * isz + (nRows - 1) * gap;
-                // two-column grid sits left of the throttle bar, bottom-aligned with it
-                int gridLeft = thrRect.X - gap - colGap - isz * 2;
-                int gridTop = thrRect.Bottom - gridH;
+                // sits just right of the compass, bottom-aligned with the dial
+                int gridLeft = (int)(dial.X + dr) + 30;
+                int gridTop = (int)(dial.Y + dr) - gridH;
 
                 SasIconInfo ByIdx(int idx)
                 {
@@ -313,39 +311,28 @@ namespace Solar.UI
                     return default;
                 }
 
+                void DrawBtn(SasIconInfo icon, Rectangle r)
+                {
+                    bool clickable = nav.SasEnabled && icon.Available;
+                    bool hover = clickable && r.Contains((int)ctx.Input.MousePos.X, (int)ctx.Input.MousePos.Y);
+                    UiDraw.SasIconTex(pb, ctx, r, icon.Icon, icon.Active, clickable, hover);
+                    if (hover && ctx.Input.LeftClick) result.RequestedSas = icon.Icon;
+                }
+
                 for (int row = 0; row < nRows; row++)
                 {
                     var spec = rows[row];
                     int iy = gridTop + row * (isz + gap);
-
-                    void DrawCell(int iconIdx, int col)
-                    {
-                        if (iconIdx < 0) return;
-                        var icon = ByIdx(iconIdx);
-                        int ix = gridLeft + col * (isz + colGap);
-                        var r = new Rectangle(ix, iy, isz, isz);
-                        bool clickable = nav.SasEnabled && icon.Available;
-                        bool hover = clickable && r.Contains((int)ctx.Input.MousePos.X, (int)ctx.Input.MousePos.Y);
-                        UiDraw.SasIcon(pb, r, icon.Icon, icon.Active, clickable, hover);
-                        if (hover && ctx.Input.LeftClick) result.RequestedSas = icon.Icon;
-                    }
-
                     if (spec.right < 0)
                     {
-                        // span both columns: draw a single centered icon
-                        var icon = ByIdx(spec.left);
-                        int spanW = isz * 2 + colGap;
-                        int ix = gridLeft;
-                        var r = new Rectangle(ix, iy, spanW, isz);
-                        bool clickable = nav.SasEnabled && icon.Available;
-                        bool hover = clickable && r.Contains((int)ctx.Input.MousePos.X, (int)ctx.Input.MousePos.Y);
-                        UiDraw.SasIcon(pb, r, icon.Icon, icon.Active, clickable, hover);
-                        if (hover && ctx.Input.LeftClick) result.RequestedSas = icon.Icon;
+                        // single button, centered across the two-column width
+                        int cx = gridLeft + (isz * 2 + colGap) / 2;
+                        DrawBtn(ByIdx(spec.left), new Rectangle(cx - isz / 2, iy, isz, isz));
                     }
                     else
                     {
-                        DrawCell(spec.left, 0);
-                        DrawCell(spec.right, 1);
+                        DrawBtn(ByIdx(spec.left), new Rectangle(gridLeft, iy, isz, isz));
+                        DrawBtn(ByIdx(spec.right), new Rectangle(gridLeft + isz + colGap, iy, isz, isz));
                     }
                 }
             }
