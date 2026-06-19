@@ -47,9 +47,16 @@ namespace Solar.Physics
             // sampled encounters with children of the primary
             double encounterT = double.PositiveInfinity;
             CelestialBody encounterBody = null;
+            double vMin = el.Periapsis;                                  // >0 even for hyperbolic (A<0, E>1)
+            double vMax = el.Hyperbolic ? double.PositiveInfinity : el.Apoapsis;
             foreach (var child in primary.Children)
             {
                 if (double.IsInfinity(child.SoiRadius)) continue;
+                // Cheap radial-band rejection: an SOI encounter needs the two distance-from-primary bands
+                // to overlap (triangle inequality), so a disjoint band rules it out without sampling.
+                double cMin = child.Orbit.Periapsis - child.SoiRadius;
+                double cMax = child.Orbit.Apoapsis + child.SoiRadius;
+                if (vMax < cMin || vMin > cMax) continue;
                 double? t = FindEncounter(el, child, utNow, horizon);
                 if (t.HasValue && t.Value < encounterT)
                 {

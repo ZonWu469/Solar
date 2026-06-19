@@ -1617,6 +1617,61 @@ namespace Solar.Tests
                 Check("illness + threat persistence", illnessDrags && band && persisted);
             }
 
+            // 30. encounter band-rejection: a vessel orbit whose radius band overlaps a child's (with SOI
+            //     margin) can still find the encounter; one whose band can't reach the child returns none.
+            //     A Hohmann-style ellipse is timed so its apoapsis coincides with a circular moon.
+            {
+                var primary = new CelestialBody { Mu = mu, Radius = 1e3 };   // SoiRadius defaults to +inf: no escape
+                const double Rc = 2e6, soi = 5e4;
+                var child = new CelestialBody { Mu = mu * 1e-6, Radius = 1e3, SoiRadius = soi, Parent = primary,
+                    Orbit = new OrbitalElements { A = Rc, E = 0, ArgPe = 0, M0 = 0, Epoch = 0, Mu = mu, Dir = 1 } };
+                primary.Children.Add(child);
+
+                // ellipse: periapsis 1e6, apoapsis Rc (apoapsis at world angle pi). Time the moon to be there.
+                double Rp = 1e6, A = (Rc + Rp) / 2;
+                var ship = new OrbitalElements { A = A, E = (Rc - Rp) / (Rc + Rp), ArgPe = 0, M0 = 0, Epoch = 0, Mu = mu, Dir = 1 };
+                double tApo = Kepler.TimeAtTrueAnomaly(ship, Math.PI, 0);
+                child.Orbit.M0 = Math.PI - Math.Sqrt(mu / (Rc * Rc * Rc)) * tApo;   // moon at angle pi at tApo
+                var hit = TrajectoryPredictor.Predict(ship, primary, 0);
+                bool found = hit.Type == TransitionType.Encounter && hit.NextBody == child;
+
+                var lowShip = new OrbitalElements { A = 1.5e6, E = 0, ArgPe = 0, M0 = 0, Epoch = 0, Mu = mu, Dir = 1 };
+                var miss = TrajectoryPredictor.Predict(lowShip, primary, 0);   // apoapsis 1.5e6 < Rc - soi: rejected
+                bool rejected = miss.Type != TransitionType.Encounter;
+                Check("encounter band-rejection", found && rejected);
+            }
+
+            // 31. arrival timing (drives the intersection markers): the ship reaches a given true anomaly at
+            //     TimeAtTrueAnomaly, and propagating to that time lands on that point of the orbit.
+            {
+                var el = new OrbitalElements { A = 8e6, E = 0.25, ArgPe = 1.1, M0 = 0.3, Epoch = 0, Mu = mu, Dir = 1 };
+                bool ok = true;
+                for (int i = 0; i < 8 && ok; i++)
+                {
+                    double nu = -2.5 + i * 0.6;
+                    double t = Kepler.TimeAtTrueAnomaly(el, nu, 0);
+                    var byTime = Kepler.StateAtTime(el, t).pos;
+                    var byNu = Kepler.StateAtTrueAnomaly(el, nu).pos;
+                    if ((byTime - byNu).Length > 1e-3 + 1e-6 * byNu.Length) ok = false;
+                }
+                Check("arrival timing", ok);
+            }
+
+            // 32. planned orbit anchored to the node's frozen source (so it holds steady during a burn):
+            //     ResultOrbit(Source) is deterministic and independent of the live orbit it would drift to.
+            {
+                var src0 = new OrbitalElements { A = 7e6, E = 0.1, ArgPe = 0.4, M0 = 0, Epoch = 0, Mu = mu, Dir = 1 };
+                double tp = Kepler.TimeAtTrueAnomaly(src0, 0, 0);
+                var node = new Maneuver { UT = tp, Prograde = 80, Radial = 0, Source = src0, HasSource = true };
+                var planned1 = node.ResultOrbit(node.Source, mu);
+                var planned2 = node.ResultOrbit(node.Source, mu);
+                var drifted = src0; drifted.A += 5e4;                 // a "live" orbit risen under thrust
+                var fromLive = node.ResultOrbit(drifted, mu);
+                bool anchored = Math.Abs(planned1.A - planned2.A) < 1e-6   // deterministic
+                                && Math.Abs(planned1.A - fromLive.A) > 1.0; // and not what feeding the live orbit gives
+                Check("planned orbit anchored to source", anchored);
+            }
+
             string res = $"Physics self-test: {pass}/{total} PASS";
             if (fails.Count > 0) res += "  FAILED: " + string.Join(", ", fails);
             return res;

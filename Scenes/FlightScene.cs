@@ -287,6 +287,12 @@ namespace Solar.Scenes
         private readonly List<Maneuver> _futureScratch = new List<Maneuver>();
         private static readonly Comparison<Maneuver> ByUT = (a, b) => a.UT.CompareTo(b.UT);
 
+        // The planned-trajectory projection is needed several times per frame (node refresh, closest
+        // approach, hit-testing, drawing). It is expensive for long-horizon orbits, so build it once per
+        // frame and reuse. Invalidated (stamp reset) whenever a node is added/dragged.
+        private List<ProjSegment> _projSegs = new List<ProjSegment>();
+        private double _projStamp = double.NaN;
+
         /// <summary>Nodes sorted by time. Returns a shared scratch list — iterate it immediately; do not
         /// retain it across another Sorted()/BuildProjection call.</summary>
         private List<Maneuver> Sorted(double ut)
@@ -343,31 +349,13 @@ namespace Solar.Scenes
                     // a burn happens before the next SOI change: the orbit shape holds until the node
                     segs.Add(new ProjSegment(src, body, body.AbsolutePositionAt(bodyRefUT), segStart, node.UT, false, planned));
                     if (refreshNodes) { node.Source = src; node.Body = body; node.HasSource = true; node.FrameUT = bodyRefUT; }
-                    // While this node is being burned, project its *remaining* delta-v so the planned
-                    // orbit holds steady as the live orbit rises to meet it, instead of drifting.
-                    OrbitalElements res;
-                    bool activeBurn = node.UT == _burnTargetUT && _burnSpent > 0 && node.DeltaV > 0
-                                      && _vessel != null && !_vessel.OnRails && _vessel.CurrentThrust > 0
-                                      && segStart == ut && body == liveBody;
-                    if (activeBurn && _vessel.CurrentMassFlow > 1e-9)
-                    {
-                        // finite-burn projection of the node's remaining delta-v from the live state
-                        double remaining = Math.Max(0, node.DeltaV - _burnSpent);
-                        double flow = _vessel.CurrentMassFlow;
-                        var captured = node;
-                        res = BurnProjector.Project(
-                            _vessel.Position, _vessel.Velocity, body.Mu, ut,
-                            _vessel.CurrentThrust, flow, _vessel.TotalMass,
-                            _vessel.ActiveBurnFuel / flow, remaining,
-                            (r, vv) => captured.BurnDelta(r, vv).Normalized(), out _);
-                    }
-                    else
-                    {
-                        var burnNode = node;
-                        if (node.UT == _burnTargetUT && _burnSpent > 0 && node.DeltaV > 0)
-                            burnNode = node.Scaled(Math.Clamp((node.DeltaV - _burnSpent) / node.DeltaV, 0, 1));
-                        res = burnNode.ResultOrbit(src, body.Mu);
-                    }
+                    // Anchor the planned orbit to the node's frozen pre-burn source so it stays exactly
+                    // where the user set it. While coasting Source is refreshed each frame (== src here);
+                    // during a burn it is held frozen, so the orange orbit no longer drifts as the live
+                    // orbit rises to meet it.
+                    OrbitalElements res = node.HasSource
+                        ? node.ResultOrbit(node.Source, body.Mu)
+                        : node.ResultOrbit(src, body.Mu);
                     ni++;
                     if (double.IsNaN(res.A)) break;
                     src = res; segStart = node.UT; planned = true;   // same body: bodyRefUT unchanged
@@ -383,9 +371,17 @@ namespace Solar.Scenes
             return segs;
         }
 
-        /// <summary>Re-chain every pending node across SOI transitions so each is planned against the
-        /// trajectory reaching it. Past nodes keep their last (frozen) source.</summary>
-        private void RefreshNodeChain(double ut) => BuildProjection(ut, refreshNodes: true);
+        /// <summary>The planned-trajectory projection for this frame, built once and reused. The first
+        /// build of the frame (from UpdateManeuverInput) passes refreshNodes:true to re-chain pending
+        /// nodes across SOI transitions and reassign each node's frozen Source; later consumers reuse
+        /// the cache. The cache is invalidated by resetting <see cref="_projStamp"/> when nodes change.</summary>
+        private List<ProjSegment> Projection(double ut, bool refreshNodes)
+        {
+            if (_projStamp == ut) return _projSegs;
+            _projSegs = BuildProjection(ut, refreshNodes);
+            _projStamp = ut;
+            return _projSegs;
+        }
 
         public override void Update(double dt)
         {
@@ -1715,12 +1711,17 @@ namespace Solar.Scenes
 
         /// <summary>Your final planned conic (after all pending nodes) and the body you orbit.</summary>
         private bool YourPlannedOrbit(double ut, out OrbitalElements el, out CelestialBody primary)
+            => YourPlannedOrbit(ut, out el, out primary, out _);
+
+        /// <summary>As above, also reporting the UT at which the final planned conic begins (the last
+        /// node/transition time) so arrival times can be anchored to when the plan takes effect.</summary>
+        private bool YourPlannedOrbit(double ut, out OrbitalElements el, out CelestialBody primary, out double startUT)
         {
-            el = default; primary = null;
-            var segs = BuildProjection(ut, refreshNodes: false);
+            el = default; primary = null; startUT = ut;
+            var segs = Projection(ut, refreshNodes: false);
             if (segs.Count == 0) return false;
             var last = segs[segs.Count - 1];
-            el = last.El; primary = last.Body;
+            el = last.El; primary = last.Body; startUT = last.StartUT;
             return !double.IsNaN(el.A);
         }
 
@@ -1823,9 +1824,13 @@ namespace Solar.Scenes
                 return;
             }
 
-            // re-chain pending nodes across SOI transitions while coasting; freeze during a burn
+            // Build this frame's planned projection once, here, before any other consumer. refreshNodes
+            // re-chains pending nodes across SOI transitions and reassigns each node's frozen Source while
+            // coasting; during a burn it is held frozen so the planned (orange) orbit stays put.
             bool thrusting = _vessel.CurrentThrust > 0;
-            if (!thrusting) RefreshNodeChain(ut);
+            _projStamp = double.NaN;
+            Projection(ut, refreshNodes: !thrusting);
+            double nodeSig0 = NodeSignature();   // invalidate the cache below if any edit changes the nodes
 
             Vector2 mouse = inp.MousePos;
 
@@ -1891,7 +1896,7 @@ namespace Solar.Scenes
                 {
                     // place a new node on whichever projected conic is clicked -- including the path
                     // inside a body encountered/escaped to (KSP patched-conic node planning)
-                    var segs = BuildProjection(ut, refreshNodes: false);
+                    var segs = Projection(ut, refreshNodes: false);
                     double bestNu = 0; float bestD = 10f; ProjSegment bestSeg = default; bool hit = false;
                     foreach (var sg in segs)
                     {
@@ -1932,6 +1937,19 @@ namespace Solar.Scenes
                 }
             }
             if (!inp.LeftDown) { _dragHandle = -1; _dragNode = -1; }
+
+            // a node was added/removed/tuned/dragged this frame: drop the cached projection so the rest of
+            // the frame (closest approach, drawing) rebuilds against the edited nodes.
+            if (NodeSignature() != nodeSig0) _projStamp = double.NaN;
+        }
+
+        /// <summary>A cheap value that changes whenever the set of nodes or any node's time/components
+        /// changes; used to detect in-frame edits that should invalidate the projection cache.</summary>
+        private double NodeSignature()
+        {
+            double s = _nodes.Count;
+            foreach (var n in _nodes) s += n.UT + n.Prograde * 7.0 + n.Radial * 13.0;
+            return s;
         }
 
         /// <summary>World angle of the next node's burn-delta vector, or NaN if there is none.</summary>
@@ -2619,6 +2637,7 @@ namespace Solar.Scenes
             // geometric orbit-curve proximities: intersections ("Meet") + up-to-2 closest points
             var meet = new Color(255, 190, 70);
             var close = new Color(140, 230, 160);
+            bool havePlan = YourPlannedOrbit(ut, out var youP, out var youPrimaryP, out var planStart);
             foreach (var p in _prox)
             {
                 var ys = _cam.WorldToScreenD(p.YouPos);
@@ -2626,10 +2645,26 @@ namespace Solar.Scenes
                 var yp = new Vector2((float)ys.X, (float)ys.Y);
                 if (p.Intersect)
                 {
+                    // The orbits cross here. More useful than the bare crossing: where the target will be
+                    // when the ship reaches it -- project the target to the ship's arrival time and link
+                    // the two, labelled with the miss distance and time-to-intersection.
+                    if (havePlan)
+                    {
+                        double tArr   = Kepler.TimeAtTrueAnomaly(youP, p.NuYou, Math.Max(ut, planStart));
+                        Vec2d shipArr = youPrimaryP.AbsolutePositionAt(tArr) + Kepler.StateAtTime(youP, tArr).pos;
+                        Vec2d tgtArr  = TargetCaPos(tArr);
+                        var sp = _cam.WorldToScreen(shipArr);
+                        var tp = _cam.WorldToScreen(tgtArr);
+                        pb.Line(sp, tp, 1f, meet * 0.7f);
+                        pb.CircleOutline(tp, 5, 1.6f, TargetColor);
+                        yp = sp;   // anchor the crossing mark/label on the recomputed arrival point
+                        sb.DrawString(Ctx.Font, UiDraw.Dist((shipArr - tgtArr).Length) + "  " + UiDraw.Time(tArr - ut),
+                                      yp + new Vector2(8, -8), meet);
+                    }
+                    else sb.DrawString(Ctx.Font, "Meet", yp + new Vector2(8, -8), meet);
                     pb.CircleOutline(yp, 6, 1.8f, meet);
                     pb.Line(yp + new Vector2(-4, -4), yp + new Vector2(4, 4), 1.4f, meet);
                     pb.Line(yp + new Vector2(-4, 4), yp + new Vector2(4, -4), 1.4f, meet);
-                    sb.DrawString(Ctx.Font, "Meet", yp + new Vector2(8, -8), meet);
                 }
                 else
                 {
@@ -2701,7 +2736,7 @@ namespace Solar.Scenes
 
             // Planned conics across every SOI patch (the orange route). Pre-burn segments belong to the
             // live/predicted path (drawn cyan elsewhere), so only Planned segments are drawn here.
-            var segs = BuildProjection(ut, refreshNodes: false);
+            var segs = Projection(ut, refreshNodes: false);
             int lastPlanned = -1;
             for (int i = 0; i < segs.Count; i++) if (segs[i].Planned) lastPlanned = i;
             for (int i = 0; i < segs.Count; i++)

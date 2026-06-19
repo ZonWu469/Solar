@@ -37,16 +37,6 @@ namespace Solar.Physics
 
         public double DeltaV => Math.Sqrt(Prograde * Prograde + Radial * Radial);
 
-        /// <summary>A copy of this node with its delta-v scaled by <paramref name="f"/> (direction kept).
-        /// Used while a burn is in progress to project the node's *remaining* delta-v, so the planned
-        /// orbit stays put as the live orbit rises to meet it (KSP-style), rather than drifting.</summary>
-        public Maneuver Scaled(double f) => new Maneuver
-        {
-            UT = UT, Prograde = Prograde * f, Radial = Radial * f,
-            Source = Source, HasSource = HasSource, Body = Body, FrameUT = FrameUT,
-            Reached = Reached, ReachedAbsPos = ReachedAbsPos,
-        };
-
         /// <summary>State (relative to the primary) just after the burn, given the source coast orbit.</summary>
         public (Vec2d r, Vec2d v) StateAfter(in OrbitalElements src)
         {
