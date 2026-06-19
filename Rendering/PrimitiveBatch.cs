@@ -73,6 +73,24 @@ namespace Solar.Rendering
             _gd.DrawUserPrimitives(PrimitiveType.TriangleList, _tv, 0, 2);
         }
 
+        /// <summary>Draw a sub-region of <paramref name="tex"/> (source UVs u0,v0..u1,v1) stretched into
+        /// the destination rectangle, tinted. Used to build 9-slice panels from a single texture.</summary>
+        public void TexturedQuad(Texture2D tex, Rectangle dest, Vector4 uv, Color tint)
+        {
+            if (tex == null || dest.Width <= 0 || dest.Height <= 0) return;
+            Flush();
+            float l = dest.Left, t = dest.Top, r = dest.Right, b = dest.Bottom;
+            _tv[0] = new VertexPositionColorTexture(new Vector3(l, t, 0), tint, new Vector2(uv.X, uv.Y));
+            _tv[1] = new VertexPositionColorTexture(new Vector3(r, t, 0), tint, new Vector2(uv.Z, uv.Y));
+            _tv[2] = new VertexPositionColorTexture(new Vector3(r, b, 0), tint, new Vector2(uv.Z, uv.W));
+            _tv[3] = new VertexPositionColorTexture(new Vector3(l, t, 0), tint, new Vector2(uv.X, uv.Y));
+            _tv[4] = new VertexPositionColorTexture(new Vector3(r, b, 0), tint, new Vector2(uv.Z, uv.W));
+            _tv[5] = new VertexPositionColorTexture(new Vector3(l, b, 0), tint, new Vector2(uv.X, uv.W));
+            _texFx.Texture = tex;
+            _texFx.CurrentTechnique.Passes[0].Apply();
+            _gd.DrawUserPrimitives(PrimitiveType.TriangleList, _tv, 0, 2);
+        }
+
         public void Tri(Vector2 a, Vector2 b, Vector2 c, Color col) => Tri(a, b, c, col, col, col);
 
         public void Tri(Vector2 a, Vector2 b, Vector2 c, Color ca, Color cb, Color cc)

@@ -70,6 +70,73 @@ namespace Solar.UI
             pb.RectOutline(r, 1, PanelBorder);
         }
 
+        /// <summary>Draw <paramref name="tex"/> into <paramref name="r"/> as a 9-slice: the four corners
+        /// keep their native <paramref name="inset"/>-pixel size, the four edges stretch along one axis,
+        /// and the centre stretches both. Keeps fixed-art borders crisp at any panel size. Falls back to
+        /// the flat <see cref="Panel"/> when no texture is compiled, so the HUD still works without art.</summary>
+        public static void NineSlice(PrimitiveBatch pb, Texture2D tex, Rectangle r, int inset, Color tint)
+        {
+            if (tex == null) { Panel(pb, r); return; }
+            // never let the corners overlap on a small panel
+            int sx = Math.Min(inset, r.Width / 2);
+            int sy = Math.Min(inset, r.Height / 2);
+            int tx = Math.Min(inset, tex.Width / 2);
+            int ty = Math.Min(inset, tex.Height / 2);
+            float ux0 = 0, ux1 = tx / (float)tex.Width, ux2 = 1 - tx / (float)tex.Width, ux3 = 1;
+            float uy0 = 0, uy1 = ty / (float)tex.Height, uy2 = 1 - ty / (float)tex.Height, uy3 = 1;
+            int x0 = r.Left, x1 = r.Left + sx, x2 = r.Right - sx, x3 = r.Right;
+            int y0 = r.Top, y1 = r.Top + sy, y2 = r.Bottom - sy, y3 = r.Bottom;
+
+            void Cell(int dx0, int dy0, int dx1, int dy1, float a, float b, float c, float d) =>
+                pb.TexturedQuad(tex, new Rectangle(dx0, dy0, dx1 - dx0, dy1 - dy0), new Vector4(a, b, c, d), tint);
+
+            Cell(x0, y0, x1, y1, ux0, uy0, ux1, uy1);   // top-left
+            Cell(x1, y0, x2, y1, ux1, uy0, ux2, uy1);   // top
+            Cell(x2, y0, x3, y1, ux2, uy0, ux3, uy1);   // top-right
+            Cell(x0, y1, x1, y2, ux0, uy1, ux1, uy2);   // left
+            Cell(x1, y1, x2, y2, ux1, uy1, ux2, uy2);   // centre
+            Cell(x2, y1, x3, y2, ux2, uy1, ux3, uy2);   // right
+            Cell(x0, y2, x1, y3, ux0, uy2, ux1, uy3);   // bottom-left
+            Cell(x1, y2, x2, y3, ux1, uy2, ux2, uy3);   // bottom
+            Cell(x2, y2, x3, y3, ux2, uy2, ux3, uy3);   // bottom-right
+        }
+
+        /// <summary>9-slice a named UI background texture into <paramref name="r"/> (flat panel fallback).</summary>
+        public static void TexPanel(PrimitiveBatch pb, GameContext ctx, string uiId, Rectangle r, int inset = 28) =>
+            NineSlice(pb, ctx.Textures?.Ui(uiId), r, inset, Color.White);
+
+        /// <summary>Horizontal progress bar on a textured background: draws <paramref name="bg"/> (9-sliced)
+        /// then a coloured fill inset by a thin scaled frame, running left→<paramref name="frac"/>.</summary>
+        public static void TexBar(PrimitiveBatch pb, Texture2D bg, Rectangle r, float frac, Color fill)
+        {
+            if (bg == null) { Bar(pb, r, frac, fill); return; }
+            NineSlice(pb, bg, r, Math.Min(8, Math.Min(r.Width, r.Height) / 2), Color.White);
+            int pad = Math.Max(2, r.Height / 6);
+            frac = Math.Clamp(frac, 0, 1);
+            int innerW = r.Width - pad * 2;
+            int w = (int)(innerW * frac);
+            if (w > 0) pb.FillRect(new Rectangle(r.X + pad, r.Y + pad, w, r.Height - pad * 2), fill);
+        }
+
+        /// <summary>Vertical progress bar on a textured background: fill grows bottom→top by <paramref name="frac"/>.</summary>
+        public static void TexBarV(PrimitiveBatch pb, Texture2D bg, Rectangle r, float frac, Color fill)
+        {
+            if (bg == null)
+            {
+                pb.FillRect(r, new Color(20, 26, 38, 220));
+                frac = Math.Clamp(frac, 0, 1);
+                if (frac > 0) pb.FillRect(r.X + 1, r.Y + 1 + (int)((r.Height - 2) * (1 - frac)), r.Width - 2, (int)((r.Height - 2) * frac), fill);
+                pb.RectOutline(r, 1, PanelBorder);
+                return;
+            }
+            NineSlice(pb, bg, r, Math.Min(8, Math.Min(r.Width, r.Height) / 2), Color.White);
+            int pad = Math.Max(2, r.Width / 6);
+            frac = Math.Clamp(frac, 0, 1);
+            int innerH = r.Height - pad * 2;
+            int h = (int)(innerH * frac);
+            if (h > 0) pb.FillRect(new Rectangle(r.X + pad, r.Bottom - pad - h, r.Width - pad * 2, h), fill);
+        }
+
         public static bool Button(PrimitiveBatch pb, SpriteBatch sb, SpriteFont f, Rectangle r,
                                   string label, InputState inp, bool enabled = true)
         {

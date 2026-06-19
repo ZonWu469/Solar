@@ -1667,6 +1667,7 @@ namespace Solar.Scenes
             if (HasTarget && _vessel != null && !_vessel.Destroyed && !_vessel.Landed)
             {
                 nav.Active = true;
+                nav.Name = _targetName;
                 Vec2d sep = TargetPos(ut) - _vessel.AbsolutePosition(ut);
                 nav.Target = sep.Angle();
                 Vec2d rel = _vessel.AbsoluteVelocity(ut) - TargetVel(ut);

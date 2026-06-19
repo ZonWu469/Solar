@@ -30,6 +30,7 @@ namespace Solar.UI
     public struct NavMarkers
     {
         public bool Active;       // a target is selected
+        public string Name;       // target display name (for the left-panel target row)
         public double Target;     // world angle from vessel to target (anti-target is +pi)
         public double RelPro;     // world angle of relative velocity (rel-retro is +pi)
         public string Readout;    // distance + closing speed line under the navball
@@ -57,126 +58,73 @@ namespace Solar.UI
             double totalDV = 0;
             if (stages != null) for (int i = 0; i < stages.Count; i++) totalDV += stages[i].DeltaV;
 
-            // ---- left readout panel ----
-            var panel = new Rectangle(10, 10, 256, 366);
-            UiDraw.Panel(pb, panel);
-            float ty = 18;
-            void Row(string label, string value, Color? c = null)
-            {
-                sb.DrawString(f, label, new Vector2(20, ty), UiDraw.TextDim);
-                sb.DrawString(f, value, new Vector2(110, ty), c ?? Color.White);
-                ty += 19;
-            }
-            // One life-support resource: time-to-empty while crewed, else a stocked percentage; storage of
-            // zero shows "none" (that resource is the death driver). Amber under 15%, red when empty.
-            void LsRow(string label, double amount, double cap, double ratePerSec)
-            {
-                if (cap <= 0) { Row(label, "none", new Color(255, 100, 90)); return; }
-                string value = ratePerSec > 0 ? UiDraw.Time(amount / ratePerSec) : $"{amount / cap * 100:0}%";
-                Color c = amount <= 0 ? new Color(255, 100, 90)
-                        : amount < cap * 0.15 ? new Color(255, 190, 90) : Color.White;
-                Row(label, value, c);
-            }
+            var progTex = ctx.Textures?.Ui("gameplay_progressbar");
 
+            // ---- left vessel panel (flight/nav readouts only; resources live in the Systems panel) ----
+            var rowsLeft = new List<(string label, string value, Color c)>();
+            void LRow(string label, string value, Color? c = null) => rowsLeft.Add((label, value, c ?? Color.White));
+
+            string vesselName = ctx.Design?.Name;
+            if (string.IsNullOrEmpty(vesselName)) vesselName = "Vessel";
             if (v != null && !v.Destroyed)
             {
-                double ut = ctx.Clock.UT;
-                var el = v.CurrentElements(ut);
+                double ut0 = ctx.Clock.UT;
+                var el = v.CurrentElements(ut0);
                 double peAlt = el.Periapsis - v.Body.Radius;
                 string apText = el.Hyperbolic ? "-" : UiDraw.Dist(el.Apoapsis - v.Body.Radius);
-                Row("Body", v.Body.Name);
-                Row("Status", Situation(v, el), UiDraw.Accent);
-                Row("Altitude", UiDraw.Dist(v.Altitude));
-                Row("Velocity", UiDraw.Speed(v.Velocity.Length));
-                double vspeed = v.Velocity.Dot(v.Position.Normalized());
-                Row("Vert. speed", UiDraw.Speed(vspeed), Math.Abs(vspeed) < 1 ? Color.White : vspeed >= 0 ? new Color(150, 220, 150) : new Color(230, 160, 110));
-                Row("Apoapsis", apText + TimeToText(el, Math.PI, ut, el.Hyperbolic));
-                Row("Periapsis", UiDraw.Dist(peAlt) + TimeToText(el, 0, ut, false),
+                LRow("Body", v.Body.Name);
+                LRow("Status", Situation(v, el), UiDraw.Accent);
+                LRow("Altitude", UiDraw.Dist(v.Altitude));
+                LRow("Velocity", UiDraw.Speed(v.Velocity.Length));
+                double vspd = v.Velocity.Dot(v.Position.Normalized());
+                LRow("Vert. speed", UiDraw.Speed(vspd), Math.Abs(vspd) < 1 ? Color.White : vspd >= 0 ? new Color(150, 220, 150) : new Color(230, 160, 110));
+                LRow("Apoapsis", apText + TimeToText(el, Math.PI, ut0, el.Hyperbolic));
+                LRow("Periapsis", UiDraw.Dist(peAlt) + TimeToText(el, 0, ut0, false),
                     peAlt < (v.Body.Atmo?.Top ?? 0) ? new Color(255, 170, 90) : Color.White);
-                if (!el.Hyperbolic) Row("Period", UiDraw.Time(el.Period));
-                Row("Mass", $"{v.TotalMass / 1000:0.0} t");
-                double atmoTop = v.Body.Atmo?.Top ?? 0;
-                if (v.Body.Atmo != null && v.Altitude < atmoTop)
-                {
-                    double rho = v.Body.Atmo.DensityAt(v.Altitude);
-                    double q = 0.5 * rho * v.Velocity.LengthSquared;
-                    Row("Dyn. pressure", UiDraw.Pressure(q), q > 30_000 ? new Color(255, 140, 90) : Color.White);
-                }
-                if (v.EcCapacity > 0)
-                {
-                    Row("Charge", $"{v.ElectricCharge:0}/{v.EcCapacity:0}",
-                        v.ElectricCharge <= 0 ? new Color(255, 140, 90) : Color.White);
-                    v.EcRates(ctx.Clock.UT, ctx.Universe, out double ecProd, out double ecDraw);
-                    double ecNet = ecProd - ecDraw;
-                    string ecRateTxt = ecNet >= 0 ? $"+{ecNet:0.#}/s" : $"{ecNet:0.#}/s";
-                    Row("EC rate", ecRateTxt, ecNet < 0 ? new Color(255, 140, 90) : new Color(150, 220, 150));
-                }
-                // RCS status: always shown when thrusters or a monoprop tank are fitted, with the
-                // reason it can't fire (so translation never silently does nothing).
-                if (v.RcsBlocks > 0 || v.MonopropCapacity > 0)
-                {
-                    var warn = new Color(255, 140, 90);
-                    string status; Color rcsCol;
-                    if (!v.RcsEnabled)                  { status = "off (press R)";    rcsCol = UiDraw.TextDim; }
-                    else if (v.RcsBlocks == 0)          { status = "no thrusters";     rcsCol = warn; }
-                    else if (v.MonopropCapacity <= 0)   { status = "no monoprop tank"; rcsCol = warn; }
-                    else if (v.Monoprop <= 0)           { status = "dry";              rcsCol = warn; }
-                    else if (v.ElectricCharge <= 0)     { status = "no power";         rcsCol = warn; }
-                    else                                { status = "on";               rcsCol = new Color(150, 220, 150); }
-                    string amount = v.MonopropCapacity > 0 ? $"{v.Monoprop:0}/{v.MonopropCapacity:0}  " : "";
-                    Row("RCS", $"{amount}{status}", rcsCol);
-                }
-                // mining: ore stock and the body's surveyed ore richness (shown when mining/scanning gear is fitted)
-                if (v.OreCapacity > 0 || v.ScannerOperational)
-                {
-                    if (v.OreCapacity > 0)
-                        Row("Ore", $"{v.Ore:0}/{v.OreCapacity:0}", v.Ore > 0 ? Color.White : UiDraw.TextDim);
-                    bool surveyed = ctx.State != null && ctx.State.SurveyedBodies.Contains(v.Body.Name);
-                    string richTxt = v.Body.Parent == null ? "no surface"
-                                   : surveyed ? $"{v.Body.OreRichness * 100:0}% ore" : "unsurveyed";
-                    Color richCol = v.Body.Parent == null ? new Color(255, 140, 90)
-                                  : !surveyed ? UiDraw.TextDim
-                                  : v.Body.OreRichness > 0 ? new Color(150, 220, 150) : new Color(255, 140, 90);
-                    Row("Surface ore", richTxt, richCol);
-                }
-                if (v.CrewCount > 0 || v.LsCapacity > 0)
-                {
-                    int crew = v.CrewCount;
-                    Color lsCol = !v.LifeSupportOk ? new Color(255, 100, 90) : Color.White;
-                    Row("Crew", $"{crew}/{v.SeatCount}", lsCol);
-                    LsRow("Oxygen", v.Oxygen, v.OxygenCapacity, crew * Vessel.OxygenPerCrew);
-                    LsRow("Water", v.Water, v.WaterCapacity, crew * Vessel.WaterPerCrew);
-                    LsRow("Food", v.Food, v.FoodCapacity, crew * Vessel.FoodPerCrew);
-                    // overall endurance: which resource runs out first, or whether the base sustains itself
-                    if (crew > 0)
-                    {
-                        double end = v.LifeSupportEndurance();
-                        string supTxt = v.SelfSustaining ? "self-sustaining" : UiDraw.Time(end);
-                        Color supCol = v.SelfSustaining ? new Color(150, 220, 150)
-                                     : end < 6 * 3600 ? new Color(255, 190, 90) : Color.White;
-                        Row("Supply", supTxt, supCol);
-                    }
-                }
+                if (!el.Hyperbolic) LRow("Period", UiDraw.Time(el.Period));
+                LRow("Mass", $"{v.TotalMass / 1000:0.0} t");
+                if (nav.Active && !string.IsNullOrEmpty(nav.Name)) LRow("Target", nav.Name, new Color(235, 130, 235));
             }
             else
             {
-                Row("Status", v == null ? "-" : "DESTROYED", new Color(255, 100, 90));
+                LRow("Status", v == null ? "-" : "DESTROYED", new Color(255, 100, 90));
+            }
+            {
+                const int headerH = 32;   // vessel name + gap before the first row
+                var panel = new Rectangle(10, 10, 256, headerH + rowsLeft.Count * 19 + 10);
+                UiDraw.TexPanel(pb, ctx, "gameplay_vessel_panel", panel);
+                sb.DrawString(f, vesselName, new Vector2(20, panel.Y + 8), UiDraw.Accent);
+                float ty = panel.Y + headerH;
+                foreach (var (label, value, c) in rowsLeft)
+                {
+                    sb.DrawString(f, label, new Vector2(20, ty), UiDraw.TextDim);
+                    sb.DrawString(f, value, new Vector2(110, ty), c);
+                    ty += 19;
+                }
             }
 
-            // ---- top right: time + warp ----
-            string utText = "T+ " + UiDraw.Time(ctx.Clock.UT);
-            double warp = ctx.Clock.Warp;
-            bool limited = ctx.Clock.WarpIndex > ctx.Clock.EffectiveIndex;
-            string warpText = $"WARP {warp:N0}x" + (limited ? " (limited)" : "");
-            var utSz = f.MeasureString(utText);
-            sb.DrawString(f, utText, new Vector2(w - utSz.X - 16, 12), Color.White);
-            var wpSz = f.MeasureString(warpText);
-            sb.DrawString(f, warpText, new Vector2(w - wpSz.X - 16, 32), warp > 1 ? UiDraw.Accent : UiDraw.TextDim);
+            // ---- right column: a top-down stack (time/warp, maneuver, systems, modules, science).
+            // Each right-side panel below draws at rColX/rColY and advances rColY. ----
+            const int rColW = 230;
+            int rColX = w - rColW - 10;
+            float rColY = 10;
+
+            // ---- time + warp panel ----
+            {
+                double warp = ctx.Clock.Warp;
+                bool limited = ctx.Clock.WarpIndex > ctx.Clock.EffectiveIndex;
+                var twp = new Rectangle(rColX, (int)rColY, rColW, 64);
+                UiDraw.TexPanel(pb, ctx, "gameplay_warp_panel", twp);
+                sb.DrawString(f, "T+ " + UiDraw.Time(ctx.Clock.UT), new Vector2(twp.X + 14, twp.Y + 10), Color.White);
+                string warpText = $"WARP {warp:N0}x" + (limited ? " (limited)" : "");
+                sb.DrawString(f, warpText, new Vector2(twp.X + 14, twp.Y + 34), warp > 1 ? UiDraw.Accent : UiDraw.TextDim);
+                rColY = twp.Bottom + 8;
+            }
             if (mapMode)
             {
                 string focus = $"MAP - focus: {focusName}  [F] cycle";
-                var fsz = f.MeasureString(focus);
-                sb.DrawString(f, focus, new Vector2(w - fsz.X - 16, 52), UiDraw.TextDim);
+                sb.DrawString(f, focus, new Vector2(rColX, rColY), UiDraw.TextDim);
+                rColY += 22;
             }
 
             // ---- encounter banner ----
@@ -271,9 +219,9 @@ namespace Solar.UI
                 }
             }
 
-            // ---- heading dial + throttle (bottom center) ----
-            var dial = new Vector2(w / 2f, h - 78);
-            float dr = 48;
+            // ---- heading dial + throttle (bottom center); compass enlarged 1.5x ----
+            var dial = new Vector2(w / 2f, h - 110);
+            float dr = 72;
             pb.FillCircle(dial, dr + 4, new Color(10, 16, 28, 200));
             pb.CircleOutline(dial, dr, 2, UiDraw.PanelBorder);
             // tick marks
@@ -318,25 +266,23 @@ namespace Solar.UI
                     pb.FillCircle(dial + rd * (dr - 22), 3.5f, rc);              // target-relative prograde
                     pb.CircleOutline(dial - rd * (dr - 22), 4, 1.2f, rc);        // target-relative retrograde
                 }
-                if (!string.IsNullOrEmpty(nav.Readout))
-                {
-                    var rsz = f.MeasureString(nav.Readout);
-                    sb.DrawString(f, nav.Readout, new Vector2(dial.X - rsz.X / 2, dial.Y + dr + 2), tgt);
-                }
+            }
+            // target distance + closing speed on top of the compass
+            if (nav.Active && !string.IsNullOrEmpty(nav.Readout))
+            {
+                var rsz = f.MeasureString(nav.Readout);
+                sb.DrawString(f, nav.Readout, new Vector2(dial.X - rsz.X / 2, dial.Y - dr - 22), new Color(235, 130, 235));
             }
             if (nav.SasMode > 0 && !string.IsNullOrEmpty(nav.SasLabel))
             {
                 string s = "SAS: " + nav.SasLabel;
                 var ssz = f.MeasureString(s);
-                sb.DrawString(f, s, new Vector2(dial.X - ssz.X / 2, dial.Y - dr - 18), UiDraw.Accent);
+                sb.DrawString(f, s, new Vector2(dial.X - ssz.X / 2, dial.Y + dr + 4), UiDraw.Accent);
             }
 
-            var thrRect = new Rectangle((int)(dial.X - dr - 34), (int)(dial.Y - dr), 16, (int)(dr * 2));
-            // vertical throttle: draw as background + fill from bottom
-            pb.FillRect(thrRect, new Color(20, 26, 38, 220));
-            float tf = (float)v.Throttle;
-            pb.FillRect(thrRect.X + 1, thrRect.Y + 1 + (thrRect.Height - 2) * (1 - tf), thrRect.Width - 2, (thrRect.Height - 2) * tf, new Color(255, 170, 60));
-            pb.RectOutline(thrRect, 1, UiDraw.PanelBorder);
+            // vertical throttle bar (textured progress bar), left of the dial
+            var thrRect = new Rectangle((int)(dial.X - dr - 42), (int)(dial.Y - dr), 18, (int)(dr * 2));
+            UiDraw.TexBarV(pb, progTex, thrRect, (float)v.Throttle, new Color(255, 170, 60));
             sb.DrawString(f, $"THR {v.Throttle * 100:0}%", new Vector2(thrRect.X - 6, thrRect.Bottom + 4), UiDraw.TextDim);
 
             // ---- SAS mode icons in 2 columns (left of the throttle bar), paired normal/anti ----
@@ -402,7 +348,7 @@ namespace Solar.UI
                 }
             }
 
-            // ---- propulsion strip (above the navball) ----
+            // ---- thrust (upper-left) and accel (upper-right) panels flanking the compass ----
             if (!v.Destroyed)
             {
                 double g = v.Body.Mu / Math.Max(1, v.Position.LengthSquared);
@@ -410,18 +356,22 @@ namespace Solar.UI
                 double mass = v.TotalMass;
                 double twr = g > 0 ? thrust / (mass * g) : 0;
                 double accel = thrust / mass;
-                var ps = new Rectangle((int)(dial.X - 150), (int)(dial.Y - dr - 120), 300, 44);
-                UiDraw.Panel(pb, ps);
-                void Cell(int col, string label, string value, Color c)
-                {
-                    float cx = ps.X + 10 + col * 74;
-                    sb.DrawString(f, label, new Vector2(cx, ps.Y + 5), UiDraw.TextDim);
-                    sb.DrawString(f, value, new Vector2(cx, ps.Y + 22), c);
-                }
-                Cell(0, "THRUST", UiDraw.Force(thrust), thrust > 0 ? Color.White : UiDraw.TextDim);
-                Cell(1, "TWR", twr > 0 ? $"{twr:0.00}" : "-", twr >= 1 ? new Color(150, 220, 150) : twr > 0 ? new Color(255, 170, 90) : UiDraw.TextDim);
-                Cell(2, "ACCEL", thrust > 0 ? UiDraw.Accel(accel) : "-", Color.White);
-                Cell(3, "dV REM", $"{totalDV:0} m/s", UiDraw.Accent);
+
+                const int fpW = 130, fpH = 56, fpGap = 16;
+                int fpY = (int)(dial.Y - dr - fpH + 4);   // tops of the flank panels just above the dial top
+                var tp = new Rectangle((int)(dial.X - dr - fpGap - fpW), fpY, fpW, fpH);
+                var ap = new Rectangle((int)(dial.X + dr + fpGap), fpY, fpW, fpH);
+                UiDraw.TexPanel(pb, ctx, "gameplay_thrust_panel", tp, 18);
+                UiDraw.TexPanel(pb, ctx, "gameplay_accel_panel", ap, 18);
+
+                sb.DrawString(f, "THRUST", new Vector2(tp.X + 12, tp.Y + 8), UiDraw.TextDim);
+                sb.DrawString(f, UiDraw.Force(thrust), new Vector2(tp.X + 12, tp.Y + 26), thrust > 0 ? Color.White : UiDraw.TextDim);
+                string twrTxt = twr > 0 ? $"TWR {twr:0.00}" : "TWR -";
+                sb.DrawString(f, twrTxt, new Vector2(tp.Right - f.MeasureString(twrTxt).X - 12, tp.Y + 8),
+                    twr >= 1 ? new Color(150, 220, 150) : twr > 0 ? new Color(255, 170, 90) : UiDraw.TextDim);
+
+                sb.DrawString(f, "ACCEL", new Vector2(ap.X + 12, ap.Y + 8), UiDraw.TextDim);
+                sb.DrawString(f, thrust > 0 ? UiDraw.Accel(accel) : "-", new Vector2(ap.X + 12, ap.Y + 26), Color.White);
             }
 
             // ---- stage list (bottom left) ----
@@ -429,7 +379,7 @@ namespace Solar.UI
             {
                 int rows = Math.Min(stages.Count, 6);
                 var sp = new Rectangle(10, h - 30 - rows * 38 - 28, 300, rows * 38 + 36);
-                UiDraw.Panel(pb, sp);
+                UiDraw.TexPanel(pb, ctx, "gameplay_vessel_panel", sp);
                 sb.DrawString(f, $"STAGES  dV {totalDV:0} m/s  [Space]/click fire", new Vector2(sp.X + 8, sp.Y + 6), UiDraw.TextDim);
                 float sy = sp.Y + 28;
                 for (int i = 0; i < rows; i++)
@@ -462,7 +412,7 @@ namespace Solar.UI
                         while (detail.Length > 3 && f.MeasureString(detail).X * 0.78f > maxW) detail = detail.Substring(0, detail.Length - 1);
                         UiDraw.SmallText(sb, f, detail, new Vector2(sp.X + 24, sy + 15), UiDraw.TextDim, 0.78f);
                     }
-                    UiDraw.Bar(pb, new Rectangle(sp.X + 8, (int)sy + 28, sp.Width - 16, 6), (float)StageFuelFrac(st), new Color(120, 200, 120));
+                    UiDraw.TexBar(pb, progTex, new Rectangle(sp.X + 8, (int)sy + 28, sp.Width - 16, 8), (float)StageFuelFrac(st), new Color(120, 200, 120));
                     sy += 38;
                 }
             }
@@ -475,8 +425,8 @@ namespace Solar.UI
                 bool enough = node.DeltaV <= avail + 1e-6;
                 double bt = Staging.BurnTime(v, node.DeltaV);
                 bool burning = burnSpent > 0;
-                var mp = new Rectangle(w - 250, 70, 240, 190);
-                UiDraw.Panel(pb, mp);
+                var mp = new Rectangle(rColX, (int)rColY, rColW, 190);
+                UiDraw.TexPanel(pb, ctx, "gameplay_modules_panel", mp);
                 float my = mp.Y + 8;
                 void MRow(string label, string value, Color c)
                 {
@@ -509,63 +459,152 @@ namespace Solar.UI
                     if (UiDraw.Button(pb, sb, f, br, "Warp to maneuver", ctx.Input, canWarp))
                         result.WarpToUT = warpTarget;
                 }
+                rColY = mp.Bottom + 8;
             }
 
-            // ---- module status panel (right, below the maneuver panel): an icon grid split into
-            // toggleable modules (clickable) and always-on systems (status only). Each tile is lit when
-            // the module is currently functioning and dimmed when not, with a green/red status border. ----
+            // ---- systems panel (right): resource readouts (EC, life support, RCS, ore) with bars,
+            // moved out of the left vessel panel. Each entry is a text row, optionally with a thin bar. ----
             if (!v.Destroyed)
             {
-                var toggle = new List<ModuleInstance>();
-                var systems = new List<ModuleInstance>();
+                // entries: label, value, text colour; bar = whether to draw a fill bar; frac/barCol for it
+                var sysRows = new List<(string label, string value, Color c, bool bar, float frac, Color barCol)>();
+                void SRow(string label, string value, Color c) => sysRows.Add((label, value, c, false, 0f, default));
+                void SBar(string label, string value, Color c, double frac, Color barCol) =>
+                    sysRows.Add((label, value, c, true, (float)frac, barCol));
+                var green = new Color(150, 220, 150); var amber = new Color(255, 190, 90);
+                var warn = new Color(255, 140, 90); var red = new Color(255, 100, 90);
+                Color LsCol(double a, double cap) => a <= 0 ? red : a < cap * 0.15 ? amber : Color.White;
+
+                if (v.EcCapacity > 0)
+                {
+                    Color barCol = v.ElectricCharge <= 0 ? warn : green;
+                    SBar("Power", $"{v.ElectricCharge:0}/{v.EcCapacity:0}", v.ElectricCharge <= 0 ? warn : Color.White,
+                         v.ElectricCharge / v.EcCapacity, barCol);
+                    v.EcRates(ctx.Clock.UT, ctx.Universe, out double ecProd, out double ecDraw);
+                    double ecNet = ecProd - ecDraw;
+                    SRow("EC rate", ecNet >= 0 ? $"+{ecNet:0.#}/s" : $"{ecNet:0.#}/s", ecNet < 0 ? warn : green);
+                }
+                if (v.RcsBlocks > 0 || v.MonopropCapacity > 0)
+                {
+                    string status; Color rcsCol;
+                    if (!v.RcsEnabled)                { status = "off (press R)";    rcsCol = UiDraw.TextDim; }
+                    else if (v.RcsBlocks == 0)        { status = "no thrusters";     rcsCol = warn; }
+                    else if (v.MonopropCapacity <= 0) { status = "no monoprop tank"; rcsCol = warn; }
+                    else if (v.Monoprop <= 0)         { status = "dry";              rcsCol = warn; }
+                    else if (v.ElectricCharge <= 0)   { status = "no power";         rcsCol = warn; }
+                    else                              { status = "on";               rcsCol = green; }
+                    if (v.MonopropCapacity > 0)
+                        SBar("RCS", $"{v.Monoprop:0}/{v.MonopropCapacity:0} {status}", rcsCol, v.Monoprop / v.MonopropCapacity, green);
+                    else
+                        SRow("RCS", status, rcsCol);
+                }
+                if (v.OreCapacity > 0 || v.ScannerOperational)
+                {
+                    if (v.OreCapacity > 0)
+                        SBar("Ore", $"{v.Ore:0}/{v.OreCapacity:0}", v.Ore > 0 ? Color.White : UiDraw.TextDim,
+                             v.Ore / v.OreCapacity, new Color(190, 160, 110));
+                    bool surveyed = ctx.State != null && ctx.State.SurveyedBodies.Contains(v.Body.Name);
+                    string richTxt = v.Body.Parent == null ? "no surface" : surveyed ? $"{v.Body.OreRichness * 100:0}% ore" : "unsurveyed";
+                    Color richCol = v.Body.Parent == null ? warn : !surveyed ? UiDraw.TextDim
+                                  : v.Body.OreRichness > 0 ? green : warn;
+                    SRow("Surface ore", richTxt, richCol);
+                }
+                if (v.CrewCount > 0 || v.LsCapacity > 0)
+                {
+                    int crew = v.CrewCount;
+                    SRow("Crew", $"{crew}/{v.SeatCount}", !v.LifeSupportOk ? red : Color.White);
+                    void Ls(string label, double a, double cap, double rate)
+                    {
+                        if (cap <= 0) { SRow(label, "none", red); return; }
+                        string val = rate > 0 ? UiDraw.Time(a / rate) : $"{a / cap * 100:0}%";
+                        SBar(label, val, LsCol(a, cap), a / cap, a <= 0 ? red : a < cap * 0.15 ? amber : green);
+                    }
+                    Ls("Oxygen", v.Oxygen, v.OxygenCapacity, crew * Vessel.OxygenPerCrew);
+                    Ls("Water", v.Water, v.WaterCapacity, crew * Vessel.WaterPerCrew);
+                    Ls("Food", v.Food, v.FoodCapacity, crew * Vessel.FoodPerCrew);
+                    if (crew > 0)
+                    {
+                        double end = v.LifeSupportEndurance();
+                        SRow("Supply", v.SelfSustaining ? "self-sustaining" : UiDraw.Time(end),
+                             v.SelfSustaining ? green : end < 6 * 3600 ? amber : Color.White);
+                    }
+                }
+                double atmoTop = v.Body.Atmo?.Top ?? 0;
+                if (v.Body.Atmo != null && v.Altitude < atmoTop)
+                {
+                    double q = 0.5 * v.Body.Atmo.DensityAt(v.Altitude) * v.Velocity.LengthSquared;
+                    SRow("Dyn. pressure", UiDraw.Pressure(q), q > 30_000 ? warn : Color.White);
+                }
+
+                if (sysRows.Count > 0)
+                {
+                    int hh = 24;
+                    foreach (var e in sysRows) hh += e.bar ? 28 : 19;
+                    hh += 8;
+                    var rp = new Rectangle(rColX, (int)rColY, rColW, hh);
+                    UiDraw.TexPanel(pb, ctx, "gameplay_modules_panel", rp);
+                    sb.DrawString(f, "SYSTEMS", new Vector2(rp.X + 12, rp.Y + 6), UiDraw.Accent);
+                    float yy = rp.Y + 26;
+                    foreach (var (label, value, c, bar, frac, barCol) in sysRows)
+                    {
+                        sb.DrawString(f, label, new Vector2(rp.X + 12, yy), UiDraw.TextDim);
+                        sb.DrawString(f, value, new Vector2(rp.X + 96, yy), c);
+                        yy += 18;
+                        if (bar)
+                        {
+                            UiDraw.TexBar(pb, progTex, new Rectangle(rp.X + 12, (int)yy, rColW - 24, 8), frac, barCol);
+                            yy += 10;
+                        }
+                    }
+                    rColY = rp.Bottom + 8;
+                }
+            }
+
+            // ---- module + science panels (right): icon grids. Modules holds the toggleable + passive
+            // system modules; Science holds the instruments. Each tile lit when functioning, dimmed when
+            // not, green/red status border, amber-red X when broken. ----
+            if (!v.Destroyed)
+            {
+                var modules = new List<ModuleInstance>();   // everything except science instruments
+                var science = new List<ModuleInstance>();
                 foreach (var p in v.AllParts())
                     foreach (var m in p.Modules)
-                        (m.Def.Activatable ? toggle : systems).Add(m);
+                        (m.Def.Kind == ModuleKind.Science ? science : modules).Add(m);
 
-                if (toggle.Count > 0 || systems.Count > 0)
+                const int tile = 30, gap = 6, cols = 6, pad = 10, labelH = 18;
+                int Rows(int n) => n == 0 ? 0 : (n + cols - 1) / cols;
+                ModuleInstance tip = null;   // hovered module, tooltip painted after both grids
+
+                // Draws a titled icon grid at rColX/rColY and advances rColY. clickable = toggles on click.
+                void Panel(string title, List<ModuleInstance> mods)
                 {
-                    const int tile = 30, gap = 6, cols = 6, pad = 10, labelH = 18;
-                    int innerW = cols * tile + (cols - 1) * gap;
-                    int pw2 = innerW + pad * 2;
-                    int Rows(int n) => n == 0 ? 0 : (n + cols - 1) / cols;
-                    int bodyH = 6;
-                    if (toggle.Count > 0) bodyH += labelH + Rows(toggle.Count) * (tile + gap);
-                    if (systems.Count > 0) bodyH += labelH + Rows(systems.Count) * (tile + gap);
-                    var rp = new Rectangle(w - pw2 - 10, 268, pw2, bodyH + 6);
-                    UiDraw.Panel(pb, rp);
-
-                    ModuleInstance tip = null;   // hovered module, tooltip painted after the whole grid
-                    int gy = rp.Y + 6;
-
-                    void Group(string title, List<ModuleInstance> mods, bool clickable)
+                    if (mods.Count == 0) return;
+                    int bodyH = 6 + labelH + Rows(mods.Count) * (tile + gap) + 6;
+                    var rp = new Rectangle(rColX, (int)rColY, rColW, bodyH);
+                    UiDraw.TexPanel(pb, ctx, "gameplay_modules_panel", rp);
+                    sb.DrawString(f, title, new Vector2(rp.X + pad, rp.Y + 6), UiDraw.Accent);
+                    int gy = rp.Y + 6 + labelH;
+                    for (int i = 0; i < mods.Count; i++)
                     {
-                        if (mods.Count == 0) return;
-                        sb.DrawString(f, title, new Vector2(rp.X + pad, gy), UiDraw.Accent);
-                        gy += labelH;
-                        for (int i = 0; i < mods.Count; i++)
-                        {
-                            var m = mods[i];
-                            int col = i % cols, row = i / cols;
-                            var tr = new Rectangle(rp.X + pad + col * (tile + gap), gy + row * (tile + gap), tile, tile);
-                            bool func = v.ModuleFunctioning(m, ctx.Clock.UT, ctx.Universe);
-                            pb.FillRect(tr, new Color(18, 26, 40, 230));
-                            UiDraw.Icon(pb, ctx.Textures?.Module(m.Def.Id), new Rectangle(tr.X + 2, tr.Y + 2, tile - 4, tile - 4), m.Def.Tint, !func);
-                            // a broken (malfunctioned) module gets a distinct amber-red border; otherwise green/red on/off
-                            var border = m.Broken ? new Color(255, 90, 60) : func ? UiDraw.StatusOn : UiDraw.StatusOff;
-                            pb.RectOutline(tr, 2, border);
-                            if (m.Broken) pb.Line(new Vector2(tr.X + 4, tr.Y + 4), new Vector2(tr.Right - 4, tr.Bottom - 4), 2, border);
-                            bool hover = tr.Contains((int)ctx.Input.MousePos.X, (int)ctx.Input.MousePos.Y);
-                            if (hover) tip = m;
-                            if (hover && clickable && ctx.Input.LeftClick) m.Active = !m.Active;
-                        }
-                        gy += Rows(mods.Count) * (tile + gap);
+                        var m = mods[i];
+                        int col = i % cols, row = i / cols;
+                        var tr = new Rectangle(rp.X + pad + col * (tile + gap), gy + row * (tile + gap), tile, tile);
+                        bool func = v.ModuleFunctioning(m, ctx.Clock.UT, ctx.Universe);
+                        pb.FillRect(tr, new Color(18, 26, 40, 230));
+                        UiDraw.Icon(pb, ctx.Textures?.Module(m.Def.Id), new Rectangle(tr.X + 2, tr.Y + 2, tile - 4, tile - 4), m.Def.Tint, !func);
+                        var border = m.Broken ? new Color(255, 90, 60) : func ? UiDraw.StatusOn : UiDraw.StatusOff;
+                        pb.RectOutline(tr, 2, border);
+                        if (m.Broken) pb.Line(new Vector2(tr.X + 4, tr.Y + 4), new Vector2(tr.Right - 4, tr.Bottom - 4), 2, border);
+                        bool hover = tr.Contains((int)ctx.Input.MousePos.X, (int)ctx.Input.MousePos.Y);
+                        if (hover) tip = m;
+                        if (hover && m.Def.Activatable && ctx.Input.LeftClick) m.Active = !m.Active;
                     }
-
-                    Group("MODULES  [G] solar", toggle, true);
-                    Group("SYSTEMS", systems, false);
-
-                    if (tip != null) UiDraw.ModuleTooltip(pb, sb, f, tip.Def, ctx.Input.MousePos, w, h);
+                    rColY = rp.Bottom + 8;
                 }
+
+                Panel("MODULES  [G] solar", modules);
+                Panel("SCIENCE", science);
+                if (tip != null) UiDraw.ModuleTooltip(pb, sb, f, tip.Def, ctx.Input.MousePos, w, h);
             }
 
             // ---- controls hint (bottom right) ----
