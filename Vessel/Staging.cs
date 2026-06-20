@@ -245,8 +245,11 @@ namespace Solar.Vessels
             {
                 if (part.Def.Kind == PartKind.Engine || part.Def.Kind == PartKind.SolidBooster)
                 {
-                    Thrust += part.Def.Thrust;
-                    Flow += part.Def.FuelFlowAtMax;
+                    // Liquid engines honour the in-flight power limiter / on-off (solids are not throttleable).
+                    // Scaling thrust and flow together keeps Isp (hence dV) constant while burn time grows.
+                    double pw = part.Def.Kind == PartKind.Engine ? (part.EngineOn ? part.PowerLimit : 0) : 1.0;
+                    Thrust += part.Def.Thrust * pw;
+                    Flow += part.Def.FuelFlowAtMax * pw;
                     if (!Engines.Contains(part.Def.Name)) Engines.Add(part.Def.Name);
                 }
             }
@@ -306,6 +309,7 @@ namespace Solar.Vessels
             var c = new Part(p.Def)
             {
                 Fuel = p.Fuel, Ignited = p.Ignited, Deployed = p.Deployed,
+                PowerLimit = p.PowerLimit, EngineOn = p.EngineOn,
                 Stage = p.Stage, FireStage = p.FireStage, RadialSeparate = p.RadialSeparate,
                 RadialMountId = p.RadialMountId, RadialSide = p.RadialSide, RadialSlot = p.RadialSlot,
             };

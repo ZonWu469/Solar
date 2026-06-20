@@ -21,6 +21,8 @@ namespace Solar.Parts
         public double Fuel;       // kg remaining
         public bool Ignited;      // engines
         public bool Deployed;     // parachutes
+        public double PowerLimit = 1.0;  // [0..1] per-engine thrust limiter (liquid engines, KSP-style)
+        public bool EngineOn = true;     // per-engine on/off (liquid engines)
         /// <summary>Activation stage index (0 fires first). For an axial part it is when its action fires:
         /// an engine/booster ignites, a decoupler separates, a parachute deploys. For a radial part it is
         /// the stage at which the (separate) mount is jettisoned; a radial's engines ignite / chutes deploy

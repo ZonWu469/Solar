@@ -432,7 +432,7 @@ namespace Solar.UI
                 sb.DrawString(f, mTitle, new Vector2(mp.X + 10, my), UiDraw.Accent);
                 my += 22;
                 MRow("dV req", $"{node.DeltaV:0} m/s", enough ? Color.White : new Color(255, 110, 100));
-                MRow("pro/rad", $"{node.Prograde:+0;-0} / {node.Radial:+0;-0}", UiDraw.TextDim);
+                MRow("pro/rad", $"{node.Prograde:+0.###;-0.###} / {node.Radial:+0.###;-0.###}", UiDraw.TextDim);
                 MRow("dV avail", $"{avail:0} m/s", enough ? new Color(150, 220, 150) : new Color(255, 110, 100));
                 MRow("burn time", enough && bt > 0 ? UiDraw.Time(bt) : "-", Color.White);
                 double toNode = node.UT - now;
@@ -611,7 +611,7 @@ namespace Solar.UI
 
             // ---- controls hint (bottom right) ----
             string hint = mapMode
-                ? "[click] orbit=node  [drag] handles  X=del node  [Tab/T] target  [F] focus  [C] crew  [M] flight"
+                ? "[click] orbit=node  [drag] handles  [wheel] tune (Shift/Alt finer)  X=del  [arrows] pan  [Tab/T] target  [F] focus  [M] flight"
                 : "[Shift/Ctrl] throttle  [A/D] rotate  [H] SAS  [L] gear  [Space] stage  [Tab/T] target  [K] dock  [U] undock  [C] crew  [B] base  [M] map  [,/.] warp";
             var hsz = f.MeasureString(hint);
             sb.DrawString(f, hint, new Vector2(w - hsz.X - 12, h - 24), new Color(120, 132, 150));

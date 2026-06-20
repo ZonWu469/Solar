@@ -507,6 +507,58 @@ namespace Solar.Tests
                                               && System.Math.Abs(dvHalf - expect) < 1.0);
             }
 
+            // 19g. per-engine power limiter (in-flight): halving an engine's PowerLimit scales thrust and
+            //      flow together, so the stage's dV is unchanged while its burn time doubles; switching the
+            //      engine off removes its thrust so the stage produces no dV. Guards the flight power slider.
+            {
+                Vessels.Vessel Build(double power, bool on)
+                {
+                    var v = new Vessels.Vessel();
+                    v.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                    v.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Tank T400")));
+                    v.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Terrier")) { PowerLimit = power, EngineOn = on });
+                    return v;
+                }
+                double FullDv(Vessels.Vessel v) { double s = 0; foreach (var st in Vessels.Staging.ComputeStages(v.Parts)) s += st.DeltaV; return s; }
+                double FullBt(Vessels.Vessel v) { double s = 0; foreach (var st in Vessels.Staging.ComputeStages(v.Parts)) s += st.BurnTime; return s; }
+
+                var vFull = Build(1.0, true);
+                var vHalf = Build(0.5, true);
+                var vOff = Build(0.5, false);
+                double dvFull = FullDv(vFull), dvHalf = FullDv(vHalf), dvOff = FullDv(vOff);
+                double btFull = FullBt(vFull), btHalf = FullBt(vHalf);
+                Check("engine power limiter", dvFull > 0
+                    && System.Math.Abs(dvHalf - dvFull) < 0.5            // dV unchanged by the limiter
+                    && System.Math.Abs(btHalf - 2 * btFull) < 0.5 * btFull   // burn time ~doubles at half power
+                    && dvOff == 0);                                     // engine off -> no stage dV
+            }
+
+            // 19h. encounter detection must agree with the closest-approach search. A ship whose periapsis
+            //      is exactly coincident with a child body passes deep through its SOI; even though that
+            //      passage is narrow relative to the predictor's 800-sample grid, Predict must report an
+            //      Encounter (guards the FindEncounter refinement). The reported closest approach is also
+            //      stable regardless of when the search starts, mirroring anchoring the readout to the plan.
+            {
+                var parent = new CelestialBody { Mu = mu, Radius = 1 };  // SoiRadius defaults to +inf
+                var child = new CelestialBody
+                {
+                    Mu = mu * 1e-3, Radius = 1, Parent = parent, SoiRadius = 2e5,
+                    Orbit = new OrbitalElements { A = 1e7, E = 0, ArgPe = 0, M0 = 0, Epoch = 0, Mu = mu, Dir = 1 },
+                };
+                parent.Children.Add(child);
+                double tStar = child.Orbit.Period;   // child returns to (1e7, 0) here
+                var ship = new OrbitalElements { A = 1e8, E = 0.9, ArgPe = 0, M0 = 0, Epoch = 0, Mu = mu, Dir = 1 };
+                ship.M0 = -2 * Math.PI * tStar / ship.Period;   // ship at periapsis (1e7, 0) exactly at tStar
+
+                Func<double, Vec2d> tpos = t => child.AbsolutePositionAt(t);
+                bool ca0 = Rendezvous.ClosestApproach(ship, parent, tpos, 0, ship.Period, out _, out double sep0, out _);
+                bool ca1 = Rendezvous.ClosestApproach(ship, parent, tpos, tStar * 0.5, ship.Period, out _, out double sep1, out _);
+                var pr = TrajectoryPredictor.Predict(ship, parent, 0);
+                Check("encounter detection", ca0 && ca1 && sep0 < child.SoiRadius
+                    && pr.Type == TransitionType.Encounter && pr.NextBody == child
+                    && Math.Abs(sep0 - sep1) < 1e3);   // closest approach stable across search-start times
+            }
+
             // 20. body catalog: the solar system builds from BodyCatalog with the parent hierarchy, the
             //     1/10 length scale, texture ids, and finite SOIs intact.
             {
@@ -1670,6 +1722,44 @@ namespace Solar.Tests
                 bool anchored = Math.Abs(planned1.A - planned2.A) < 1e-6   // deterministic
                                 && Math.Abs(planned1.A - fromLive.A) > 1.0; // and not what feeding the live orbit gives
                 Check("planned orbit anchored to source", anchored);
+            }
+
+            // 33. transfer-leg closest approach (drives KSP-style node tuning to a moon inside the primary's
+            //     SOI). A burn that overshoots puts the ship on an escape-class ellipse: it still crosses the
+            //     moon's distance BEFORE leaving the SOI, so the useful readout is the miss to the moon
+            //     measured over the pre-escape leg's window -- not the post-escape conic extrapolated to its
+            //     (astronomical) apoapsis. Timed right -> an encounter; mistimed -> a sane finite miss that
+            //     shrinks as the node is tuned (never the apoapsis-scale garbage the old full-period search gave).
+            {
+                var primary = new CelestialBody { Mu = mu, Radius = 1e3, SoiRadius = 1e8 };
+                const double Rc = 2e6, soi = 5e4;
+                var moon = new CelestialBody { Mu = mu * 1e-6, Radius = 1e3, SoiRadius = soi, Parent = primary,
+                    Orbit = new OrbitalElements { A = Rc, E = 0, ArgPe = 0, M0 = 0, Epoch = 0, Mu = mu, Dir = 1 } };
+                primary.Children.Add(moon);
+
+                // escape-class ellipse: periapsis 1e6, apoapsis 5e9 (>> SOI 1e8). It crosses r=Rc outbound.
+                double Rp = 1e6, Ra = 5e9, A = (Ra + Rp) / 2, e = (Ra - Rp) / (Ra + Rp);
+                var ship = new OrbitalElements { A = A, E = e, ArgPe = 0, M0 = 0, Epoch = 0, Mu = mu, Dir = 1 };
+                double nuC = Math.Acos((ship.SemiLatus / Rc - 1) / e);       // true anomaly at the moon-distance crossing
+                double tC = Kepler.TimeAtTrueAnomaly(ship, nuC, 0);
+                double escapeT = Kepler.NextRadiusCrossingOutbound(ship, primary.SoiRadius, 1e-6).Value;
+                double n = Math.Sqrt(mu / (Rc * Rc * Rc));                    // moon mean motion (circular)
+                Func<double, Vec2d> moonAbs = t => moon.AbsolutePositionAt(t);
+
+                // timed: place the moon at the crossing point at tC -> encounter + sub-SOI closest approach.
+                moon.Orbit.M0 = nuC - n * tC;
+                var hit = TrajectoryPredictor.Predict(ship, primary, 0);
+                Rendezvous.ClosestApproach(ship, primary, moonAbs, 0, escapeT, out _, out double sepHit, out _);
+                bool timed = hit.Type == TransitionType.Encounter && hit.NextBody == moon && sepHit < soi;
+
+                // mistimed: moon half an orbit away at the crossing -> escape, but the pre-escape leg still
+                // yields a sane finite miss (well under apoapsis), the number the player tunes down.
+                moon.Orbit.M0 = nuC + Math.PI - n * tC;
+                var esc = TrajectoryPredictor.Predict(ship, primary, 0);
+                Rendezvous.ClosestApproach(ship, primary, moonAbs, 0, escapeT, out _, out double sepMiss, out _);
+                bool mistimed = esc.Type == TransitionType.Escape && sepMiss > soi && sepMiss < 1e7;
+
+                Check("transfer-leg closest approach", timed && mistimed);
             }
 
             string res = $"Physics self-test: {pass}/{total} PASS";

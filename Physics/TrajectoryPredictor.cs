@@ -100,29 +100,45 @@ namespace Solar.Physics
                 return v.Length - child.SoiRadius;
             }
 
-            double step = (ut1 - ut0) / Samples;
-            double prevT = ut0 + 1e-6;
-            double prevD = Dist(prevT);
-            if (prevD < 0) return null; // already inside (boundary jitter) - ignore
+            double start = ut0 + 1e-6;
+            double prevT = start;
+            if (Dist(prevT) < 0) return null; // already inside (boundary jitter) - ignore
 
+            double bestT = prevT, bestD = Dist(prevT);
             for (int i = 1; i <= Samples; i++)
             {
                 double t = ut0 + (ut1 - ut0) * i / Samples;
                 double d = Dist(t);
-                if (d < 0)
-                {
-                    // bisect the entry time
-                    double lo = prevT, hi = t;
-                    for (int k = 0; k < 60; k++)
-                    {
-                        double mid = 0.5 * (lo + hi);
-                        if (Dist(mid) < 0) hi = mid; else lo = mid;
-                    }
-                    return 0.5 * (lo + hi);
-                }
-                prevT = t; prevD = d;
+                if (d < 0) return BisectEntry(Dist, prevT, t);   // grid crossed the SOI boundary
+                if (d < bestD) { bestD = d; bestT = t; }
+                prevT = t;
             }
+
+            // No grid sample fell inside the SOI, but a passage narrower than one step can still dip below
+            // it (the closest-approach search refines and would report it). Refine around the nearest sample;
+            // if the true minimum is inside, the entry crossing lies just before it.
+            double step = (ut1 - ut0) / Samples;
+            double lo = Math.Max(start, bestT - step), hi = Math.Min(ut1, bestT + step);
+            for (int it = 0; it < 50; it++)
+            {
+                double m1 = lo + (hi - lo) / 3, m2 = hi - (hi - lo) / 3;
+                if (Dist(m1) < Dist(m2)) hi = m2; else lo = m1;
+            }
+            double tMin = 0.5 * (lo + hi);
+            if (Dist(tMin) < 0) return BisectEntry(Dist, Math.Max(start, bestT - step), tMin);
             return null;
+        }
+
+        /// <summary>Bisect for the SOI-entry time between an outside sample (Dist &gt;= 0) and an inside
+        /// one (Dist &lt; 0).</summary>
+        private static double BisectEntry(Func<double, double> dist, double outside, double inside)
+        {
+            for (int k = 0; k < 60; k++)
+            {
+                double mid = 0.5 * (outside + inside);
+                if (dist(mid) < 0) inside = mid; else outside = mid;
+            }
+            return 0.5 * (outside + inside);
         }
     }
 }

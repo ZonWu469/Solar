@@ -281,6 +281,10 @@ namespace Solar.Vessels
             return f;
         }
 
+        /// <summary>Per-engine thrust/flow scale from the in-flight power limiter: 0 if switched off,
+        /// else its 0..1 power output. Applies to liquid engines (solids are not throttleable).</summary>
+        private static double EnginePower(Part p) => p.EngineOn ? p.PowerLimit : 0;
+
         /// <summary>Current thrust (N): throttleable liquid engines plus solid boosters (always full).</summary>
         public double CurrentThrust => LiquidThrust * Throttle + SolidThrust;
 
@@ -299,9 +303,9 @@ namespace Solar.Vessels
                     if (SegmentFuel(seg) <= 0) continue;
                     for (int i = seg.start; i <= seg.end; i++)
                     {
-                        if (Parts[i].Def.Kind == PartKind.Engine && Parts[i].Ignited) t += Parts[i].Def.Thrust;
+                        if (Parts[i].Def.Kind == PartKind.Engine && Parts[i].Ignited) t += Parts[i].Def.Thrust * EnginePower(Parts[i]);
                         foreach (var r in Parts[i].Radials)
-                            if (r.Def.Kind == PartKind.Engine && r.Ignited) t += r.Def.Thrust;
+                            if (r.Def.Kind == PartKind.Engine && r.Ignited) t += r.Def.Thrust * EnginePower(r);
                     }
                 }
                 return t;
@@ -338,9 +342,9 @@ namespace Solar.Vessels
                         if (SegmentFuel(seg) <= 0) continue;
                         for (int i = seg.start; i <= seg.end; i++)
                         {
-                            if (Parts[i].Def.Kind == PartKind.Engine && Parts[i].Ignited) flow += Parts[i].Def.FuelFlowAtMax * Throttle;
+                            if (Parts[i].Def.Kind == PartKind.Engine && Parts[i].Ignited) flow += Parts[i].Def.FuelFlowAtMax * Throttle * EnginePower(Parts[i]);
                             foreach (var r in Parts[i].Radials)
-                                if (r.Def.Kind == PartKind.Engine && r.Ignited) flow += r.Def.FuelFlowAtMax * Throttle;
+                                if (r.Def.Kind == PartKind.Engine && r.Ignited) flow += r.Def.FuelFlowAtMax * Throttle * EnginePower(r);
                         }
                     }
                 return flow;

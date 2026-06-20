@@ -69,10 +69,13 @@ namespace Solar.Scenes
         private Part _popupPart;
         private Vector2 _popupPos;
         private Rectangle _popupCloseRect, _popupDecoupleRect;
+        private Rectangle _popupEngineToggleRect, _popupPowerRect;   // engine on/off + power slider
+        private bool _powerDragging;
         private Vector2 _menuPos;
         private double _flightZoom = 0.35;   // m per pixel
         private double _mapZoom;
         private int _focus;                  // 0 = vessel, otherwise body index + 1
+        private Vec2d _mapPan;               // map-view arrow-key pan offset (world meters), added on top of the focus
 
         // ----- target / rendezvous -----
         private CelestialBody _targetBody;   // one of _targetBody / _targetVessel is non-null when targeting
@@ -86,6 +89,13 @@ namespace Solar.Scenes
         private bool _buildAtColony;         // deferred: open the editor to build a vessel at this base
         private bool _caValid;               // closest-approach solution for this frame
         private double _caUT, _caSep, _caRelSpeed;
+        // The planned patch the closest-approach was measured on (may be a pre-encounter leg around a
+        // different body than the final planned conic), plus the target-position function used, so the
+        // on-map approach markers render against exactly what the readout reports.
+        private OrbitalElements _caYouEl;
+        private CelestialBody _caYouPrimary;
+        private Func<double, Vec2d> _caTpos;
+        private double _caStart;             // search-window start the approach/arrival times anchor to
         private List<ProximityPoint> _prox = new();  // geometric orbit-curve proximities (throttled)
         private double _proxTimer;
 
@@ -104,6 +114,7 @@ namespace Solar.Scenes
         private int _hoverNode = -1;        // node under the cursor (handle or body)
         private int _hoverX = -1;           // node whose X delete button is hovered
         private double _dragStartProj, _dragStartValue;
+        private double _dragFineMult = 1.0;  // active handle-drag sensitivity factor (Alt/Alt+Shift = finer)
         private double _burnSpent;          // delta-v consumed against the current (nearest future) node
         private double _burnTargetUT = double.NaN;  // UT of the node _burnSpent is keyed to
         private double? _warpTo;            // target UT for an active "warp to maneuver"
@@ -404,7 +415,7 @@ namespace Solar.Scenes
             }
             if (inp.Pressed(Keys.Escape)) { if (_popupPart != null) _popupPart = null; else _showExitDialog = !_showExitDialog; }
             if (_showExitDialog) return;
-            if (inp.Pressed(Keys.M)) _map = !_map;
+            if (inp.Pressed(Keys.M)) { _map = !_map; _mapPan = default; }   // recenter on view switch
             if (inp.Pressed(Keys.N)) _slopeView = !_slopeView;   // toggle the slope (landing-spot) overlay
             if (inp.Pressed(Keys.Tab)) CycleTarget(inp.Down(Keys.LeftShift) || inp.Down(Keys.RightShift) ? -1 : 1);
             if (inp.Pressed(Keys.T)) _showTargetWindow = !_showTargetWindow;
@@ -417,7 +428,18 @@ namespace Solar.Scenes
             { _showColony = !_showColony; if (!_showColony) _showAddModule = false; }
             if (!(_vessel != null && _vessel.Landed)) { _showColony = false; _showAddModule = false; }
             if (_buildAtColony) { _buildAtColony = false; BuildAtColony(); return; }
-            if (_map && inp.Pressed(Keys.F)) _focus = (_focus + 1) % (Ctx.Universe.Bodies.Count + 1);
+            if (_map && inp.Pressed(Keys.F)) { _focus = (_focus + 1) % (Ctx.Universe.Bodies.Count + 1); _mapPan = default; }
+            // arrow-key map panning: constant screen-pixel speed (scaled by zoom). Screen Y is flipped,
+            // so Down moves the view content up -> negative world Y.
+            if (_map)
+            {
+                const double panPxPerSec = 420;
+                double panStep = panPxPerSec * realDt * _mapZoom;
+                if (inp.Down(Keys.Right)) _mapPan.X += panStep;
+                if (inp.Down(Keys.Left)) _mapPan.X -= panStep;
+                if (inp.Down(Keys.Up)) _mapPan.Y += panStep;
+                if (inp.Down(Keys.Down)) _mapPan.Y -= panStep;
+            }
 
             // map-view ship popup is handled first so its clicks don't fall through to node editing;
             // the flight-view part popup is the analogous click-handler for the non-map view
@@ -460,8 +482,9 @@ namespace Solar.Scenes
                     bool rotInAtmo = rotBody?.Atmo != null && _vessel.Altitude < rotBody.Atmo.Top + 500;
                     double alpha = _vessel.ControlTorque / _vessel.MomentOfInertia;   // available angular accel (rad/s^2)
                     double maxRate = _vessel.MaxTurnRate;
-                    bool left = inp.Down(Keys.A) || inp.Down(Keys.Left);
-                    bool right = inp.Down(Keys.D) || inp.Down(Keys.Right);
+                    // arrows pan the map view, so only A/D rotate there; both rotate in flight view
+                    bool left = inp.Down(Keys.A) || (!_map && inp.Down(Keys.Left));
+                    bool right = inp.Down(Keys.D) || (!_map && inp.Down(Keys.Right));
 
                     if (left ^ right)
                     {
@@ -943,20 +966,69 @@ namespace Solar.Scenes
 
         private void UpdateClosestApproach(double ut)
         {
-            _caValid = false;
+            _caValid = false; _caTpos = null; _caYouPrimary = null;
             if (!HasTarget || _vessel == null || _vessel.Destroyed || _vessel.Landed) { _prox.Clear(); return; }
-            if (!YourPlannedOrbit(ut, out var you, out var youPrimary)) { _prox.Clear(); return; }
             if (!TargetOrbitBody(ut, out var tEl, out var tPrimary)) { _prox.Clear(); return; }
+            var segs = Projection(ut, refreshNodes: false);
+            if (segs.Count == 0) { _prox.Clear(); return; }
 
-            double window = you.Hyperbolic || double.IsNaN(you.Period) ? 6 * 3600.0 : you.Period;
-            Func<double, Vec2d> tpos = t => tPrimary.AbsolutePositionAt(t) + Kepler.StateAtTime(tEl, t).pos;
-            _caValid = Rendezvous.ClosestApproach(you, youPrimary, tpos, ut, window, out _caUT, out _caSep, out _caRelSpeed);
+            // The body whose SOI an encounter would enter: the target itself if it's a body, else the
+            // body the target vessel orbits. Tuning a transfer means shrinking the miss to this body.
+            CelestialBody approachBody = _targetBody != null ? _targetBody : _targetVessel?.Body;
+
+            // Pick which planned patch to measure on, and what to measure against:
+            //  1. a patch that shares the target's primary  -> measure the true rendezvous to the target
+            //     conic there (we're planned into the same SOI as it);
+            //  2. otherwise the pre-encounter leg that shares the approach body's primary -> measure the
+            //     miss distance to the approach body itself, so the readout converges as the node is tuned
+            //     toward an SOI entry (instead of chasing a post-escape heliocentric patch off to deep space).
+            // Each patch is searched over its OWN validity window, not the final conic's full period.
+            ProjSegment seg = default; bool haveSeg = false;
+            OrbitalElements proxTgtEl = tEl; CelestialBody proxTgtPrimary = tPrimary;
+
+            for (int i = segs.Count - 1; i >= 0; i--)
+                if (segs[i].Body == tPrimary && !double.IsNaN(segs[i].El.A)) { seg = segs[i]; haveSeg = true; break; }
+            if (haveSeg)
+            {
+                var te = tEl; var tp = tPrimary;
+                _caTpos = t => tp.AbsolutePositionAt(t) + Kepler.StateAtTime(te, t).pos;
+            }
+            else if (approachBody != null && approachBody.Parent != null)
+            {
+                for (int i = segs.Count - 1; i >= 0; i--)
+                    if (segs[i].Body == approachBody.Parent && !double.IsNaN(segs[i].El.A)) { seg = segs[i]; haveSeg = true; break; }
+                if (haveSeg)
+                {
+                    var ab = approachBody;
+                    _caTpos = t => ab.AbsolutePositionAt(t);          // miss distance to the approach body
+                    proxTgtEl = ab.Orbit; proxTgtPrimary = ab.Parent; // "Orbit gap" vs the body's own path
+                }
+            }
+            if (!haveSeg)
+            {
+                // fallback (e.g. same-SOI rendezvous, no usable transfer leg): last conic vs the target.
+                var last = segs[segs.Count - 1];
+                if (double.IsNaN(last.El.A)) { _prox.Clear(); return; }
+                seg = last; haveSeg = true;
+                var te = tEl; var tp = tPrimary;
+                _caTpos = t => tp.AbsolutePositionAt(t) + Kepler.StateAtTime(te, t).pos;
+            }
+
+            _caYouEl = seg.El; _caYouPrimary = seg.Body;
+            _caStart = Math.Max(ut, seg.StartUT);
+            double winEnd = double.IsInfinity(seg.EndUT)
+                ? _caStart + (seg.El.Hyperbolic || double.IsNaN(seg.El.Period) ? 6 * 3600.0 : seg.El.Period)
+                : seg.EndUT;
+            double window = winEnd - _caStart;
+            _caValid = Rendezvous.ClosestApproach(seg.El, seg.Body, _caTpos, _caStart, window,
+                                                  out _caUT, out _caSep, out _caRelSpeed);
 
             // geometric orbit-curve proximities (intersections + closest points) -- recompute every ~8 frames
             if (--_proxTimer <= 0)
             {
                 _proxTimer = 8;
-                _prox = Rendezvous.OrbitProximity(you, youPrimary.AbsolutePositionAt(ut), tEl, tPrimary.AbsolutePositionAt(ut));
+                _prox = Rendezvous.OrbitProximity(seg.El, seg.Body.AbsolutePositionAt(ut),
+                                                  proxTgtEl, proxTgtPrimary.AbsolutePositionAt(ut));
             }
         }
 
@@ -1104,7 +1176,8 @@ namespace Solar.Scenes
 
             if (_map)
             {
-                _cam.Center = _focus == 0 ? vesselPos : Ctx.Universe.Bodies[_focus - 1].AbsolutePositionAt(ut);
+                Vec2d focusPos = _focus == 0 ? vesselPos : Ctx.Universe.Bodies[_focus - 1].AbsolutePositionAt(ut);
+                _cam.Center = focusPos + _mapPan;
                 _cam.MetersPerPixel = _mapZoom;
             }
             else
@@ -1283,6 +1356,11 @@ namespace Solar.Scenes
                 if (_popupCloseRect.Contains((int)m.X, (int)m.Y)) { _popupPart = null; return true; }
                 if (_popupPart.Def.Kind == PartKind.Decoupler && _popupDecoupleRect.Contains((int)m.X, (int)m.Y))
                 { DecoupleSelected(ut); return true; }
+                if (_popupPart.Def.Kind == PartKind.Engine)
+                {
+                    if (_popupEngineToggleRect.Contains((int)m.X, (int)m.Y)) { _popupPart.EngineOn = !_popupPart.EngineOn; return true; }
+                    if (_popupPowerRect.Contains((int)m.X, (int)m.Y)) return true;   // slider drag owned by HSlider in DrawPartPopup
+                }
                 // a click landing on another part re-targets the popup; clicks elsewhere leave it open (static)
                 if (PickPartAt(m, out var other)) { _popupPart = other; _popupPos = m; }
                 return true;
@@ -1367,13 +1445,16 @@ namespace Solar.Scenes
             }
 
             bool decoupler = d.Kind == PartKind.Decoupler;
+            bool engine = d.Kind == PartKind.Engine;     // liquid engine: on/off + power limiter
             float lhTitle = f.MeasureString("X").Y + 2;
             float lhSmall = f.MeasureString("X").Y * small + 2;
             float tw = f.MeasureString(d.Name).X + 22;   // leave room for the close glyph
             foreach (var ln in detail) tw = Math.Max(tw, f.MeasureString(ln).X * small);
+            if (engine) tw = Math.Max(tw, 140);          // keep the slider usably wide
             const int btnH = 26;
+            int engineH = engine ? btnH + 6 + (int)lhSmall + 12 + 4 : 0;
             int bw = (int)tw + 18;
-            int bh = (int)(lhTitle + detail.Count * lhSmall) + 12 + (decoupler ? btnH + 6 : 0);
+            int bh = (int)(lhTitle + detail.Count * lhSmall) + 12 + (decoupler ? btnH + 6 : 0) + engineH;
             int bx = (int)Math.Clamp(_popupPos.X, 4, Math.Max(4, Ctx.W - bw - 4));
             int by = (int)Math.Clamp(_popupPos.Y, 4, Math.Max(4, Ctx.H - bh - 4));
 
@@ -1400,6 +1481,20 @@ namespace Solar.Scenes
                 UiDraw.Button(pb, sb, f, _popupDecoupleRect, "Decouple", inp);   // click handled in UpdatePartPopup
             }
             else _popupDecoupleRect = Rectangle.Empty;
+
+            if (engine)
+            {
+                // on/off toggle (click handled in UpdatePartPopup) + power-limiter slider (HSlider drives itself)
+                ty += 2;
+                _popupEngineToggleRect = new Rectangle(bx + 9, (int)ty, bw - 18, btnH);
+                UiDraw.Button(pb, sb, f, _popupEngineToggleRect, p.EngineOn ? "Engine: ON" : "Engine: OFF", inp);
+                ty += btnH + 6;
+                UiDraw.SmallText(sb, f, $"Power: {p.PowerLimit * 100:0}%", new Vector2(bx + 9, ty), UiDraw.TextDim, small);
+                ty += lhSmall;
+                _popupPowerRect = new Rectangle(bx + 9, (int)ty, bw - 18, 12);
+                p.PowerLimit = UiDraw.HSlider(pb, _popupPowerRect, p.PowerLimit, inp, ref _powerDragging);
+            }
+            else { _popupEngineToggleRect = Rectangle.Empty; _popupPowerRect = Rectangle.Empty; }
         }
 
         /// <summary>Advance the target through none -> each item -> none.</summary>
@@ -1709,22 +1804,6 @@ namespace Solar.Scenes
             return false;
         }
 
-        /// <summary>Your final planned conic (after all pending nodes) and the body you orbit.</summary>
-        private bool YourPlannedOrbit(double ut, out OrbitalElements el, out CelestialBody primary)
-            => YourPlannedOrbit(ut, out el, out primary, out _);
-
-        /// <summary>As above, also reporting the UT at which the final planned conic begins (the last
-        /// node/transition time) so arrival times can be anchored to when the plan takes effect.</summary>
-        private bool YourPlannedOrbit(double ut, out OrbitalElements el, out CelestialBody primary, out double startUT)
-        {
-            el = default; primary = null; startUT = ut;
-            var segs = Projection(ut, refreshNodes: false);
-            if (segs.Count == 0) return false;
-            var last = segs[segs.Count - 1];
-            el = last.El; primary = last.Body; startUT = last.StartUT;
-            return !double.IsNaN(el.A);
-        }
-
         // =====================================================================  maneuver planning
 
         /// <summary>The vessel's live coast orbit + primary (the trajectory currently drawn).</summary>
@@ -1854,10 +1933,11 @@ namespace Solar.Scenes
                 if (_hoverHandle < 0 && Vector2.Distance(mouse, ns) <= NodeHit) _hoverNode = n;
             }
 
-            // scroll-wheel fine-tune when hovering a handle (takes priority over zoom)
+            // scroll-wheel fine-tune when hovering a handle (takes priority over zoom). The wheel is the
+            // precise tool: Shift/Alt/Alt+Shift step ever finer (down to 0.001 m/s) for SOI-grazing edits.
             if (_hoverHandle >= 0 && _hoverNode >= 0 && inp.WheelDelta != 0)
             {
-                double step = (inp.Down(Keys.LeftShift) || inp.Down(Keys.RightShift)) ? 0.1 : 1.0;
+                double step = FineTier(inp, 1.0, 0.1, 0.01, 0.001);
                 AdjustComponent(_nodes[_hoverNode], _hoverHandle, Math.Sign(inp.WheelDelta) * step);
                 wheelConsumed = true;
             }
@@ -1866,7 +1946,7 @@ namespace Solar.Scenes
             var kbNode = NextNode(ut);
             if (kbNode != null)
             {
-                double ks = (inp.Down(Keys.LeftShift) || inp.Down(Keys.RightShift)) ? 0.5 : 5.0;
+                double ks = FineTier(inp, 5.0, 0.5, 0.05, 0.005);
                 if (inp.Pressed(Keys.OemCloseBrackets)) kbNode.Prograde += ks;
                 if (inp.Pressed(Keys.OemOpenBrackets)) kbNode.Prograde -= ks;
                 if (inp.Pressed(Keys.OemQuotes)) kbNode.Radial += ks;
@@ -1882,7 +1962,7 @@ namespace Solar.Scenes
                 }
                 else if (_hoverHandle >= 0 && _hoverNode >= 0)
                 {
-                    _dragHandle = _hoverHandle; _dragNode = _hoverNode;
+                    _dragHandle = _hoverHandle; _dragNode = _hoverNode; _dragFineMult = 1.0;
                     ManeuverGeometry(_nodes[_dragNode], ut, out var ns, out var pd, out var rd);
                     Vector2 axis = _dragHandle < 2 ? pd : rd;
                     _dragStartProj = Vector2.Dot(mouse - ns, axis);
@@ -1931,7 +2011,16 @@ namespace Solar.Scenes
                 {
                     Vector2 axis = _dragHandle < 2 ? pd : rd;
                     double proj = Vector2.Dot(mouse - ns, axis);
-                    double sens = Math.Max(0.4, Kepler.StateAtTime(src, node.UT).vel.Length * 0.004);
+                    // Alt / Alt+Shift make the drag 10x / 100x finer; re-anchor when the tier changes so the
+                    // value never jumps (the wheel is the truly precise tool — drag stays pixel-limited).
+                    double mult = FineTier(inp, 1.0, 1.0, 0.1, 0.01);
+                    if (mult != _dragFineMult)
+                    {
+                        _dragStartValue = _dragHandle < 2 ? node.Prograde : node.Radial;
+                        _dragStartProj = proj;
+                        _dragFineMult = mult;
+                    }
+                    double sens = Math.Max(0.4, Kepler.StateAtTime(src, node.UT).vel.Length * 0.004) * mult;
                     double val = _dragStartValue + (proj - _dragStartProj) * sens;
                     if (_dragHandle < 2) node.Prograde = val; else node.Radial = val;
                 }
@@ -1960,6 +2049,15 @@ namespace Solar.Scenes
             var (rN, vN) = Kepler.StateAtTime(orbit, node.UT);
             Vec2d bd = node.BurnDelta(rN, vN);
             return bd.Length > 1e-6 ? bd.Angle() : double.NaN;
+        }
+
+        /// <summary>Maneuver fine-tune amount selected by held modifiers: none / Shift / Alt / Alt+Shift
+        /// (finest). Shared by the scroll-wheel, keyboard and drag tuning so the tiers stay consistent.</summary>
+        private static double FineTier(InputState inp, double none, double shift, double alt, double altShift)
+        {
+            bool s = inp.Down(Keys.LeftShift) || inp.Down(Keys.RightShift);
+            bool a = inp.Down(Keys.LeftAlt) || inp.Down(Keys.RightAlt);
+            return a ? (s ? altShift : alt) : (s ? shift : none);
         }
 
         private static void AdjustComponent(Maneuver node, int handle, double d)
@@ -2620,16 +2718,19 @@ namespace Solar.Scenes
                 sb.DrawString(Ctx.Font, _targetName ?? "Target", p + new Vector2(12, 8), TargetColor);
             }
 
-            // closest-approach markers
-            if (_caValid && YourPlannedOrbit(ut, out var you, out var youPrimary))
+            // closest-approach markers -- drawn on exactly the patch the readout was measured on
+            if (_caValid && _caYouPrimary != null && _caTpos != null && !double.IsNaN(_caYouEl.A))
             {
-                Vec2d youCa = youPrimary.AbsolutePositionAt(_caUT) + Kepler.StateAtTime(you, _caUT).pos;
-                Vec2d tgtCa = TargetCaPos(_caUT);
+                Vec2d youCa = _caYouPrimary.AbsolutePositionAt(_caUT) + Kepler.StateAtTime(_caYouEl, _caUT).pos;
+                Vec2d tgtCa = _caTpos(_caUT);   // where the target/approach body will be at closest approach
                 var ys = _cam.WorldToScreen(youCa);
                 var tsScreen = _cam.WorldToScreen(tgtCa);
                 pb.Line(ys, tsScreen, 1f, new Color(180, 180, 200, 160));
                 pb.FillCircle(ys, 4, new Color(120, 220, 255));
-                pb.CircleOutline(tsScreen, 5, 1.5f, TargetColor);
+                // the target's projected position at the approach: a labelled ring so it's findable even
+                // when it sits away from the body's current (possibly focused) position.
+                pb.CircleOutline(tsScreen, 6, 2f, TargetColor);
+                sb.DrawString(Ctx.Font, _targetName ?? "target", tsScreen + new Vector2(9, 5), TargetColor);
                 var mid = (ys + tsScreen) / 2;
                 sb.DrawString(Ctx.Font, UiDraw.Dist(_caSep), mid + new Vector2(6, -6), new Color(200, 210, 230));
             }
@@ -2637,11 +2738,13 @@ namespace Solar.Scenes
             // geometric orbit-curve proximities: intersections ("Meet") + up-to-2 closest points
             var meet = new Color(255, 190, 70);
             var close = new Color(140, 230, 160);
-            bool havePlan = YourPlannedOrbit(ut, out var youP, out var youPrimaryP, out var planStart);
+            bool havePlan = _caValid && _caYouPrimary != null && _caTpos != null && !double.IsNaN(_caYouEl.A);
             foreach (var p in _prox)
             {
                 var ys = _cam.WorldToScreenD(p.YouPos);
-                if (!_cam.OnScreen(ys, 40)) continue;
+                // generous margin: when focused on the target body the crossing point can sit off the
+                // edge of the view while its target-arrival marker is still worth drawing.
+                if (!_cam.OnScreen(ys, 400)) continue;
                 var yp = new Vector2((float)ys.X, (float)ys.Y);
                 if (p.Intersect)
                 {
@@ -2650,9 +2753,9 @@ namespace Solar.Scenes
                     // the two, labelled with the miss distance and time-to-intersection.
                     if (havePlan)
                     {
-                        double tArr   = Kepler.TimeAtTrueAnomaly(youP, p.NuYou, Math.Max(ut, planStart));
-                        Vec2d shipArr = youPrimaryP.AbsolutePositionAt(tArr) + Kepler.StateAtTime(youP, tArr).pos;
-                        Vec2d tgtArr  = TargetCaPos(tArr);
+                        double tArr   = Kepler.TimeAtTrueAnomaly(_caYouEl, p.NuYou, _caStart);
+                        Vec2d shipArr = _caYouPrimary.AbsolutePositionAt(tArr) + Kepler.StateAtTime(_caYouEl, tArr).pos;
+                        Vec2d tgtArr  = _caTpos(tArr);
                         var sp = _cam.WorldToScreen(shipArr);
                         var tp = _cam.WorldToScreen(tgtArr);
                         pb.Line(sp, tp, 1f, meet * 0.7f);
@@ -2675,14 +2778,6 @@ namespace Solar.Scenes
                     sb.DrawString(Ctx.Font, UiDraw.Dist(p.Sep), yp + new Vector2(8, -8), close);
                 }
             }
-        }
-
-        /// <summary>Target's absolute position at an arbitrary UT, propagated along its conic.</summary>
-        private Vec2d TargetCaPos(double ut)
-        {
-            if (TargetOrbitBody(ut, out var tEl, out var tPrimary))
-                return tPrimary.AbsolutePositionAt(ut) + Kepler.StateAtTime(tEl, ut).pos;
-            return TargetPos(ut);
         }
 
         private void DrawApPeMarkers(PrimitiveBatch pb, Microsoft.Xna.Framework.Graphics.SpriteBatch sb,
@@ -2793,7 +2888,7 @@ namespace Solar.Scenes
                     {
                         double comp = k < 2 ? node.Prograde : node.Radial;
                         string axis = k < 2 ? "pro" : "rad";
-                        sb.DrawString(Ctx.Font, $"{axis} {comp:+0;-0} m/s", hp[k] + new Vector2(9, -6), hc[k]);
+                        sb.DrawString(Ctx.Font, $"{axis} {comp:+0.###;-0.###} m/s", hp[k] + new Vector2(9, -6), hc[k]);
                     }
                 }
 
