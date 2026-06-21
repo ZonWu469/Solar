@@ -24,6 +24,8 @@ namespace Solar.Rendering
             float pxPerM = (float)(1.0 / cam.MetersPerPixel);
             float hPx = (float)Math.Max(v.TotalHeight, 2) * pxPerM;
 
+            const float OpenChuteWidthM = 11f;   // deployed canopy width (m); height follows the art's aspect
+
             var upS = new Vector2((float)Math.Cos(v.Heading), -(float)Math.Sin(v.Heading));
             var rightS = new Vector2(-upS.Y, upS.X);
 
@@ -33,6 +35,20 @@ namespace Solar.Rendering
             double zenA = v.Position.Angle();
             var vertS = new Vector2((float)Math.Cos(zenA), -(float)Math.Sin(zenA));
             var vperpS = new Vector2(-vertS.Y, vertS.X);   // across the canopy
+
+            // Draw a deployed-parachute canopy texture hanging from the part top (anchor). The image's
+            // bottom-center is the cables-attachment node, pinned at the anchor; the canopy (image top)
+            // extends out along the zenith (vertS), and the art's aspect ratio is preserved.
+            void DrawOpenChute(Microsoft.Xna.Framework.Graphics.Texture2D open, Vector2 anchor)
+            {
+                float hM = OpenChuteWidthM * (float)open.Height / open.Width;
+                float halfW = (OpenChuteWidthM * 0.5f) * pxPerM, hPxLen = hM * pxPerM;
+                Vector2 topL = anchor + vertS * hPxLen - vperpS * halfW;
+                Vector2 topR = anchor + vertS * hPxLen + vperpS * halfW;
+                Vector2 botL = anchor - vperpS * halfW;
+                Vector2 botR = anchor + vperpS * halfW;
+                pb.TexturedQuad(open, topL, topR, botR, botL, Color.White);   // a,b = image top; c,d = image bottom
+            }
 
             if (forceIcon || hPx < 7)
             {
@@ -198,13 +214,18 @@ namespace Solar.Rendering
                 }
                 if (d.Kind == PartKind.Parachute && p.Deployed)
                 {
-                    var top = P(0, y + h);
-                    var canopy = top + vertS * (7f * pxPerM);
-                    var lTop = top + vertS * (6f * pxPerM) - vperpS * (4.4f * pxPerM);
-                    var rTop = top + vertS * (6f * pxPerM) + vperpS * (4.4f * pxPerM);
-                    pb.Line(P(-w * 0.4f, y + h), lTop, Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
-                    pb.Line(P(w * 0.4f, y + h), rTop, Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
-                    pb.FillCircle(canopy, 5.5f * pxPerM, new Color(235, 130, 60), PlanetRenderer.Darken(new Color(235, 130, 60), 0.3f));
+                    var open = tex?.Part(d.Id + "-open");
+                    if (open != null) DrawOpenChute(open, P(0, y + h));
+                    else
+                    {
+                        var top = P(0, y + h);
+                        var canopy = top + vertS * (7f * pxPerM);
+                        var lTop = top + vertS * (6f * pxPerM) - vperpS * (4.4f * pxPerM);
+                        var rTop = top + vertS * (6f * pxPerM) + vperpS * (4.4f * pxPerM);
+                        pb.Line(P(-w * 0.4f, y + h), lTop, Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
+                        pb.Line(P(w * 0.4f, y + h), rTop, Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
+                        pb.FillCircle(canopy, 5.5f * pxPerM, new Color(235, 130, 60), PlanetRenderer.Darken(new Color(235, 130, 60), 0.3f));
+                    }
                 }
                 // landing gear deploy: strut+pad extending downward from the bottom-third of the axial part
                 // (unreachable in practice since landing gear is always radial; kept for completeness).
@@ -307,7 +328,11 @@ namespace Solar.Rendering
                     if (r.RadialMountId < 0) continue;
                     if (!mounts.TryGetValue(r.RadialMountId, out var m)) { m = (0f, new System.Collections.Generic.List<(int, float)>()); mounts[r.RadialMountId] = m; }
                     m.w = Math.Max(m.w, (float)r.Def.Width);
-                    if (r.RadialSide == 0) m.slots.Add((r.RadialSlot, (float)r.Def.Height));
+                    // record each sub-stack slot once; a mirrored pair has both sides, a single-sided mount
+                    // (lateral thruster) only one, so key off the slot rather than assuming side 0 is present
+                    bool seen = false;
+                    foreach (var sl in m.slots) if (sl.slot == r.RadialSlot) { seen = true; break; }
+                    if (!seen) m.slots.Add((r.RadialSlot, (float)r.Def.Height));
                     mounts[r.RadialMountId] = m;
                 }
                 var mountOffset = new System.Collections.Generic.Dictionary<int, float>();
@@ -381,7 +406,10 @@ namespace Solar.Rendering
                     }
                     // off-axis (radial) engine firing on the J/L command: plume exits opposite its thrust
                     // direction. Local thrust dir for angle t is (sin t, cos t); command sign flips it.
-                    if (rOffAxis && r.Ignited && radialFlaming && Math.Abs(latCmd) > 1e-6f)
+                    // single-sided thruster only fires (and plumes) when the command matches the side it
+                    // pushes away from (side 1 = left pushes +Right on latCmd>0; side 0 = right on latCmd<0)
+                    bool rFires = r.RadialSide < 0 || Math.Sign(latCmd) == (r.RadialSide == 1 ? 1 : -1);
+                    if (rOffAxis && r.Ignited && radialFlaming && Math.Abs(latCmd) > 1e-6f && rFires)
                     {
                         float t = (float)(rd.ThrustAngle * Math.PI / 180.0);
                         float s = Math.Sign(latCmd);
@@ -395,13 +423,18 @@ namespace Solar.Rendering
                     // deployed radial parachute: canopy above the radial part (mirrors the axial chute)
                     if (rd.Kind == PartKind.Parachute && r.Deployed)
                     {
-                        var top = P(xc, yb + rh);
-                        var canopy = top + vertS * (7f * pxPerM);
-                        var lTop = top + vertS * (6f * pxPerM) - vperpS * (4.4f * pxPerM);
-                        var rTop = top + vertS * (6f * pxPerM) + vperpS * (4.4f * pxPerM);
-                        pb.Line(P(xc - rw * 0.4f, yb + rh), lTop, Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
-                        pb.Line(P(xc + rw * 0.4f, yb + rh), rTop, Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
-                        pb.FillCircle(canopy, 5.5f * pxPerM, new Color(235, 130, 60), PlanetRenderer.Darken(new Color(235, 130, 60), 0.3f));
+                        var open = tex?.Part(rd.Id + "-open");
+                        if (open != null) DrawOpenChute(open, P(xc, yb + rh));
+                        else
+                        {
+                            var top = P(xc, yb + rh);
+                            var canopy = top + vertS * (7f * pxPerM);
+                            var lTop = top + vertS * (6f * pxPerM) - vperpS * (4.4f * pxPerM);
+                            var rTop = top + vertS * (6f * pxPerM) + vperpS * (4.4f * pxPerM);
+                            pb.Line(P(xc - rw * 0.4f, yb + rh), lTop, Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
+                            pb.Line(P(xc + rw * 0.4f, yb + rh), rTop, Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
+                            pb.FillCircle(canopy, 5.5f * pxPerM, new Color(235, 130, 60), PlanetRenderer.Darken(new Color(235, 130, 60), 0.3f));
+                        }
                     }
                     // deployed radial landing gear: when no texture is authored, draw a procedural
                     // strut + foot pad. The texture (when present) already depicts the deployed gear,

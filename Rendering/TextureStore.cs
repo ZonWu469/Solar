@@ -28,7 +28,11 @@ namespace Solar.Rendering
 
         public TextureStore(ContentManager content)
         {
-            foreach (var p in PartCatalog.All) TryLoad(content, _parts, "Textures/parts/", p.Id);
+            foreach (var p in PartCatalog.All)
+            {
+                TryLoad(content, _parts, "Textures/parts/", p.Id);
+                TryLoad(content, _parts, "Textures/parts/", p.Id + "-open");   // deployed-chute canopy art, where authored
+            }
             foreach (var m in ModuleCatalog.All) TryLoad(content, _modules, "Textures/modules/", m.Id);
             foreach (var b in Solar.Physics.BodyCatalog.All) TryLoad(content, _bodies, "Textures/bodies/", b.Id);
             foreach (var id in UiIds) TryLoad(content, _ui, "Textures/UI/", id);

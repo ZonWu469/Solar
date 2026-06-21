@@ -831,6 +831,18 @@
 /processorParam:TextureFormat=Color
 /build:Textures/parts/drogue-chute.png
 
+#begin Textures/parts/drogue-chute-open.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/parts/drogue-chute-open.png
+
 #begin Textures/parts/fin-set.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -915,6 +927,18 @@
 /processorParam:TextureFormat=Color
 /build:Textures/parts/landing-gear.png
 
+#begin Textures/parts/LandingGear.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/parts/LandingGear.png
+
 #begin Textures/parts/large-parachute.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -926,6 +950,18 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:Textures/parts/large-parachute.png
+
+#begin Textures/parts/large-parachute-open.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/parts/large-parachute-open.png
 
 #begin Textures/parts/main-hub.png
 /importer:TextureImporter
@@ -1023,6 +1059,18 @@
 /processorParam:TextureFormat=Color
 /build:Textures/parts/OLD_service-bay-1-7m.png
 
+#begin Textures/parts/OLD2_service-bay-1-7m.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/parts/OLD2_service-bay-1-7m.png
+
 #begin Textures/parts/parachute.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -1034,6 +1082,18 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:Textures/parts/parachute.png
+
+#begin Textures/parts/parachute-open.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/parts/parachute-open.png
 
 #begin Textures/parts/pit-thruster.png
 /importer:TextureImporter
@@ -1155,6 +1215,18 @@
 /processorParam:TextureFormat=Color
 /build:Textures/parts/radial-drogue.png
 
+#begin Textures/parts/radial-drogue-open.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/parts/radial-drogue-open.png
+
 #begin Textures/parts/radial-parachute.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -1167,6 +1239,18 @@
 /processorParam:TextureFormat=Color
 /build:Textures/parts/radial-parachute.png
 
+#begin Textures/parts/radial-parachute-open.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/parts/radial-parachute-open.png
+
 #begin Textures/parts/radial-tank.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -1178,6 +1262,18 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:Textures/parts/radial-tank.png
+
+#begin Textures/parts/radial-thruster.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/parts/radial-thruster.png
 
 #begin Textures/parts/rhino.png
 /importer:TextureImporter
