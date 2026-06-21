@@ -1,0 +1,77 @@
+SolarGit Part Catalog
+=====================
+
+ENGINES
+-------
+Spark            Small orbital maneuvering thruster tuned for pinpoint burns and satellite insertion.
+Terrier          Vacuum-optimized sustainer designed to push upper stages through deep-space transfers.
+Swivel           Thrust-vectoring workhorse gimbaled for atmospheric ascent and mid-stage steering.
+Mainsail         Heavy-lift booster engine belting raw power for lifting colossal payloads off the pad.
+Nerv             Nuclear thermal core that sips propellant, built for interplanetary cruise efficiency.
+Lateral Thruster (Q/E)  Side-mounted reaction thruster providing rotational authority during docking and fine alignment.
+Dart             Compact sustainer with a narrow bell optimized for high-altitude and vacuum burns.
+Ion Drive        Electrostatic grid accelerator delivering whisper-thin thrust over marathon burn durations.
+Vector           High-thrust, high-g clustered mainstage built for super-heavy lift and dense-atmo punching.
+Poodle           Bell-housed vacuum specialist rewarding upper stages with generous specific impulse.
+Rhino            Colossal sustainer delivering titanic thrust for the heaviest translunar injection burns.
+Dawn             Ultra-light monopropellant micro-thruster for cubesat nudges and fine trim maneuvers.
+Aerospike        Altitude-compensating aerospike nozzle maintaining peak efficiency from sea-level to vacuum.
+Nuclear Lightbulb  Closed-cycle gas-core nuclear engine trading propellant frugality for continuous high-efficiency thrust.
+PIT Thruster     Pulsed inductive thruster flinging plasma slugs at absurd exhaust velocities for interstellar probes.
+
+PODS (COMMAND MODULES)
+----------------------
+Pod Mk1          Single-kerbal entry capsule with integrated reaction wheels for early-career suborbital hops.
+Pod Mk2          Up-rated three-seat command pod sporting improved torque authority and crew capacity.
+Pod Mk3          Heavy quadruple-seat command module built to helm interplanetary mothership missions.
+Probe Core       Lightweight remote-guidance unit packing bare-minimum avionics for disposable satellite buses.
+Probe Core XL    Upscaled probe brain with expanded attitude control for medium-class uncrewed vessels.
+Mk1 Lander Can   Skeletal two-seat lander cabin with generous sight-lines for surface descent and ascent.
+Lander Can 2     Enclosed two-seat lander module with integral SAS, ideal for vacuum-surface excursions.
+Big Pod          Spacious multi-crew command deck housing advanced stability assist for colony-ferry duties.
+Service Pod Mk1  Pre-outfitted crew capsule sporting integrated solar panels, battery, and comms antenna.
+Comsat Core      Communications-focused probe hub with a built-in RTG, battery, and relay antenna.
+Main Hub         Central station core packing robust torque authority, crew slots, and preinstalled power systems.
+Inflatable Habitat  Compact launch-form habitat that expands on deployment to house crew for long-duration stays.
+
+SOLID BOOSTERS
+--------------
+Thumper SRB      Reliable single-segment kick-stage providing an aggressive punch off the launch clamp.
+Thumper-R        Radially-attached variant of the Thumper offering strap-on surge without a central stack.
+Sledgehammer SRB Hefty segmented booster delivering near-liquid-class thrust for heavy early-ascent shove.
+Imperator SRB    Monolithic super-booster unleashing a brutal thrust curve to bully the heaviest stacks skyward.
+
+STRUCTURAL BAYS & ADAPTERS
+--------------------------
+Service Bay 1.7m  Compact equipment bay for tucking away small modules inside a protective cylindrical shell.
+Service Bay 2.3m  Wider service compartment accommodating bulkier payloads within an aerodynamic fairing.
+Cargo Truss      Open-lattice truss segment for mounting exposed payloads and science instruments.
+Stack Bi-Adapter  Bifurcated adapter splitting a single stack into twin attachment nodes for parallel staging.
+Stack Tri-Adapter Trifurcated adapter branching one stack into three mounting points for clustered configurations.
+I-Beam           Slim structural spine used to extend vessel length or offset components with minimal drag.
+Long I-Beam      Extended structural rail offering generous standoff distance for asymmetric payload mounting.
+Flat Platform    Broad mounting plate providing a stable base for surface outposts and sprawling assemblies.
+Heavy Platform   Reinforced extra-wide foundation plate designed to anchor massive surface installations.
+Power Service Bay  Equipment enclosure preloaded with solar panels and battery for plug-and-play power needs.
+Crew Tube        Pressurized cylindrical corridor linking habitable modules with pass-through crew transfer.
+
+DOCKING PORTS
+-------------
+Docking Port Sr  Senior docking collar built for mating heavy station modules and large interplanetary vessels.
+Docking Port Jr  Compact junior docking interface suited for lightweight probes and small resupply craft.
+Shielded Port    Aerodynamically-capped docking ring that stays sleek during launch, then opens in orbit.
+Docking Port Medium  Mid-size universal docking adapter balancing form factor and structural compatibility.
+
+TANKS
+-----
+Tank T100        Petite propellant canister sized for upper-stage topping and small satellite buses.
+Tank T200        Modest fuel drum for kick-stage duties and lightweight transfer maneuvers.
+Tank T400        Mid-capacity tank pairing well with sustainer engines for orbital insertion and transfer burns.
+Tank T400-R      Radially-attachable variant of the T400, clamping fuel reserves onto the flanks of a booster core.
+Tank T800        Long-duration propellant reservoir feeding deep-space injection stages on extended missions.
+Jumbo T2000      Oversized orange monolith storing enough propellant to feed the hungriest first-stage engines.
+Tank T1600       Tall-form tank bridging the gap between mid-range and jumbo capacities in a slender profile.
+Tank T4000       Heavy industrial-class tankage scaled for colossal boosters and interplanetary departure stages.
+Tank T8000       Behemoth cryogenic reservoir forming the backbone of super-heavy lift launch vehicles.
+Radial Tank      Auxiliary side-saddle tank providing supplemental propellant without lengthening the stack.
+Toroidal Tank T1200  Donut-shaped tank hugging the vessel waistline, ideal for low-profile lander fuel storage.
