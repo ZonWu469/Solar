@@ -18,7 +18,10 @@
     "TintR": 225,
     "TintG": 228,
     "TintB": 235,
-    "DefaultModules": null
+    "DefaultModules": [
+      "life-support",
+      "battery"
+    ]
   },
   {
     "Name": "Parachute",
@@ -589,7 +592,10 @@
     "TintR": 215,
     "TintG": 220,
     "TintB": 230,
-    "DefaultModules": null
+    "DefaultModules": [
+      "life-support",
+      "battery"
+    ]
   },
   {
     "Name": "Pod Mk3",
@@ -610,7 +616,10 @@
     "TintR": 200,
     "TintG": 210,
     "TintB": 225,
-    "DefaultModules": null
+    "DefaultModules": [
+      "life-support",
+      "battery"
+    ]
   },
   {
     "Name": "Probe Core",
@@ -631,7 +640,10 @@
     "TintR": 180,
     "TintG": 180,
     "TintB": 200,
-    "DefaultModules": null
+    "DefaultModules": [
+      "battery",
+      "antenna"
+    ]
   },
   {
     "Name": "Probe Core XL",
@@ -652,7 +664,10 @@
     "TintR": 170,
     "TintG": 170,
     "TintB": 195,
-    "DefaultModules": null
+    "DefaultModules": [
+      "battery",
+      "antenna"
+    ]
   },
   {
     "Name": "Tank T100",
@@ -1006,7 +1021,7 @@
     "ControlAuthority": 0,
     "Sas": false,
     "ImpactTolerance": 0,
-    "Slots": 2,
+    "Slots": 3,
     "TintR": 135,
     "TintG": 145,
     "TintB": 160,
@@ -1027,7 +1042,7 @@
     "ControlAuthority": 0,
     "Sas": false,
     "ImpactTolerance": 0,
-    "Slots": 2,
+    "Slots": 3,
     "TintR": 160,
     "TintG": 165,
     "TintB": 175,
@@ -1304,7 +1319,10 @@
     "TintR": 210,
     "TintG": 215,
     "TintB": 225,
-    "DefaultModules": null
+    "DefaultModules": [
+      "life-support",
+      "battery"
+    ]
   },
   {
     "Name": "Lander Can 2",
@@ -1325,7 +1343,10 @@
     "TintR": 205,
     "TintG": 212,
     "TintB": 222,
-    "DefaultModules": null
+    "DefaultModules": [
+      "life-support",
+      "battery"
+    ]
   },
   {
     "Name": "Big Pod",
@@ -1346,7 +1367,11 @@
     "TintR": 200,
     "TintG": 208,
     "TintB": 222,
-    "DefaultModules": null
+    "DefaultModules": [
+      "life-support",
+      "battery",
+      "reaction-wheel"
+    ]
   },
   {
     "Name": "Service Pod Mk1",
@@ -1465,7 +1490,10 @@
     "TintR": 212,
     "TintG": 216,
     "TintB": 226,
-    "DefaultModules": null
+    "DefaultModules": [
+      "life-support",
+      "co2-scrubber"
+    ]
   },
   {
     "Name": "Crew Tube",

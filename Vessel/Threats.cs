@@ -13,15 +13,16 @@ namespace Solar.Vessels
     /// <see cref="ModuleInstance"/>/<see cref="CrewMember"/> instances, which persist with the save.</summary>
     public static class Threats
     {
-        // TODO(balance.json): all rate constants below are global tunables (per-second).
-        const double WearPerSec        = 1.0 / (2920 * 3600);   // a running module is fully worn after ~4 months
-        const double BreakBaseRate     = 1.0 / (200 * 3600);  // break chance/s at zero wear, reliability 1
-        const double RepairPerSec      = 1.0 / (2 * 3600);    // an engineer repairs a broken module in ~2 h
-        public const double RadDeathDose = 1000.0;            // accumulated dose that kills a crew member
-        const double RadDecayPerSec    = RadDeathDose / (48 * 3600); // dose clears slowly outside any belt
-        const double InfectBaseRate    = 1.0 / (2920 * 3600);  // base infection chance/s per healthy crew every 4 months
-        const double IllnessGrowPerSec = 1.0 / (72 * 3600);   // untreated sickness worsens over ~72 h
-        const double IllnessDeathRate  = 1.0 / (24 * 3600);   // death chance/s scaled by illness once terminal
+        // All hazard rates are global tunables sourced from Content/balance.json via Core.Balance (with
+        // in-code defaults). Aliased here so the rest of the file reads unchanged.
+        static double WearPerSec        => Core.Balance.WearPerSec;        // a running module fully wears over ~8 months
+        static double BreakBaseRate     => Core.Balance.BreakBaseRate;     // break chance/s at zero wear, reliability 1
+        static double RepairPerSec      => Core.Balance.RepairPerSec;      // an engineer repairs a broken module in ~2 h
+        public static double RadDeathDose => Core.Balance.RadDeathDose;    // accumulated dose that kills a crew member
+        static double RadDecayPerSec    => Core.Balance.RadDecayPerSec;    // dose clears slowly outside any belt
+        static double InfectBaseRate    => Core.Balance.InfectBaseRate;    // base infection chance/s per healthy crew
+        static double IllnessGrowPerSec => Core.Balance.IllnessGrowPerSec; // untreated sickness worsens over ~72 h
+        static double IllnessDeathRate  => Core.Balance.IllnessDeathRate;  // death chance/s scaled by illness once terminal
 
         /// <summary>Whether a per-second hazard of rate <paramref name="ratePerSec"/> fires across a step of
         /// <paramref name="dt"/> seconds, using the exponential survival law so one big time-warp step is
@@ -41,7 +42,8 @@ namespace Solar.Vessels
         private static void Malfunctions(Vessel v, double dt, double ut, Universe u, Random rng)
         {
             double engineer = v.CrewSkill(CrewRole.Engineer);   // >= 1; cuts failure rate, speeds repair
-            bool canRepair = v.Landed && engineer > 1 && v.ElectricCharge > 0;
+            // an engineer can repair anywhere there's power (e.g. a crewed orbital station), not only when landed
+            bool canRepair = engineer > 1 && v.ElectricCharge > 0;
             foreach (var p in v.AllParts())
                 foreach (var m in p.Modules)
                 {

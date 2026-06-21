@@ -312,6 +312,8 @@ namespace Solar.Core
         public double ColonyGrowthTimer;  // accumulated self-sustaining time toward the next colonist
         public double LastUT;        // UT this ship was last simulated, so a colony can catch up production on load
         public bool EnginesIgnited;
+        public bool MissionCancelable = true;   // flight can still be scrapped back to the editor (pre first touch/dock)
+        public bool HasLeftLaunchSite;
         public int CurrentStage;     // next stage to fire, so a resumed ship stages correctly
         public double ElectricCharge;
         public double Monoprop;      // monopropellant for RCS translation
@@ -342,6 +344,8 @@ namespace Solar.Core
                 ColonyGrowthTimer = v.ColonyGrowthTimer,
                 LastUT = ut,
                 EnginesIgnited = v.EnginesIgnited,
+                MissionCancelable = v.MissionCancelable,
+                HasLeftLaunchSite = v.HasLeftLaunchSite,
                 CurrentStage = v.CurrentStage,
                 ElectricCharge = v.ElectricCharge,
                 Monoprop = v.Monoprop,
@@ -390,6 +394,8 @@ namespace Solar.Core
                 IsColony = IsColony,
                 ColonyGrowthTimer = ColonyGrowthTimer,
                 EnginesIgnited = EnginesIgnited,
+                MissionCancelable = MissionCancelable,
+                HasLeftLaunchSite = HasLeftLaunchSite,
                 CurrentStage = CurrentStage,
                 ElectricCharge = ElectricCharge,
                 Monoprop = Monoprop,

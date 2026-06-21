@@ -107,11 +107,14 @@ namespace Solar.Physics
             // Radiation belts: trapped-particle bands a few thousand km up (altitude above the surface,
             // km) with a dose rate (units/s) crew accumulate inside. Earth has a Van-Allen-analog band;
             // the giant magnetospheres of Jupiter and Saturn carry fierce belts. Tunable per body.
+            // A thin, lethal-on-prolonged-exposure band rather than a wide instant-kill blanket: keep it
+            // narrow enough that LEO (below it) and high/areostationary orbits (above it) are safe, so the
+            // belt is a transit hazard you cross, not somewhere a parking orbit silently kills the crew.
             var belts = new Dictionary<string, (double inner, double outer, double dose)>
             {
-                ["Earth"]   = (1500, 40000, 0.3),
-                ["Jupiter"] = (100000, 3000000, 3.0),
-                ["Saturn"]  = (60000, 1000000, 1.2),
+                ["Earth"]   = (1000, 6000, 0.05),
+                ["Jupiter"] = (100000, 3000000, 2.1),
+                ["Saturn"]  = (60000, 1000000, 0.85),
             };
             foreach (var b in bodies)
                 if (belts.TryGetValue(b.Name, out var z))

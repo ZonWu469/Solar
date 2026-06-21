@@ -33,6 +33,7 @@ namespace Solar
             PartCatalog.Load();   // load Content/parts.json (or seed from built-in catalog)
             ModuleCatalog.Load(); // load Content/modules.json (or seed from built-in catalog)
             Solar.Physics.BodyCatalog.Load(); // load Content/bodies.json (or seed from built-in solar system)
+            Solar.Core.Balance.Load();        // load Content/balance.json hazard/life-support tunables (or keep code defaults)
             _ctx = new GameContext
             {
                 Game = this,

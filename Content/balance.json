@@ -1,0 +1,19 @@
+{
+  "_comment": "Global survival-hazard and life-support tunables. Durations are in HOURS. Any field may be omitted; omitted fields use the in-code default in Core/Balance.cs. Deleting this file is safe (defaults stand).",
+
+  "WearHours": 5840,
+  "BreakHours": 1000,
+  "RepairHours": 2,
+
+  "RadDeathDose": 1000,
+  "RadDecayHours": 18,
+
+  "InfectHours": 8760,
+  "IllnessGrowHours": 72,
+  "IllnessDeathHours": 24,
+
+  "OxygenPerCrew": 0.5,
+  "WaterPerCrew": 0.2,
+  "FoodPerCrew": 0.1,
+  "LsDeathHours": 6
+}

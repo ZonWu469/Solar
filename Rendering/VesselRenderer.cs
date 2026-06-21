@@ -297,26 +297,33 @@ namespace Solar.Rendering
                         {
                             case ModuleKind.SolarPanel:
                             {
-                                float my = y + h * 0.5f, pl = w * 1.3f, ph2 = Math.Max(0.5f, h * 0.35f);
+                                const float SolarLen = 1.2f, SolarHalf = 0.4f;
+                                float my = y + h * 0.5f;
                                 if (mtex != null)
                                 {
                                     // two wings; the left one mirrored so the right-oriented art reads correctly
-                                    pb.TexturedQuad(mtex, P(-w / 2, my + ph2), P(-w / 2 - pl, my + ph2), P(-w / 2 - pl, my - ph2), P(-w / 2, my - ph2), Color.White, true);
-                                    pb.TexturedQuad(mtex, P(w / 2, my + ph2), P(w / 2 + pl, my + ph2), P(w / 2 + pl, my - ph2), P(w / 2, my - ph2), Color.White, false);
+                                    pb.TexturedQuad(mtex, P(-w / 2, my + SolarHalf), P(-w / 2 - SolarLen, my + SolarHalf), P(-w / 2 - SolarLen, my - SolarHalf), P(-w / 2, my - SolarHalf), Color.White, true);
+                                    pb.TexturedQuad(mtex, P(w / 2, my + SolarHalf), P(w / 2 + SolarLen, my + SolarHalf), P(w / 2 + SolarLen, my - SolarHalf), P(w / 2, my - SolarHalf), Color.White, false);
                                 }
                                 else
                                 {
                                     Color pc = new Color(70, 130, 235), pcd = PlanetRenderer.Darken(pc, 0.4f);
-                                    pb.Quad(P(-w / 2, my - ph2), P(-w / 2, my + ph2), P(-w / 2 - pl, my + ph2), P(-w / 2 - pl, my - ph2), pc, pc, pcd, pcd);
-                                    pb.Quad(P(w / 2, my - ph2), P(w / 2, my + ph2), P(w / 2 + pl, my + ph2), P(w / 2 + pl, my - ph2), pc, pc, pcd, pcd);
+                                    pb.Quad(P(-w / 2, my - SolarHalf), P(-w / 2, my + SolarHalf), P(-w / 2 - SolarLen, my + SolarHalf), P(-w / 2 - SolarLen, my - SolarHalf), pc, pc, pcd, pcd);
+                                    pb.Quad(P(w / 2, my - SolarHalf), P(w / 2, my + SolarHalf), P(w / 2 + SolarLen, my + SolarHalf), P(w / 2 + SolarLen, my - SolarHalf), pc, pc, pcd, pcd);
                                 }
                                 break;
                             }
                             case ModuleKind.Harvester:
+                                if (mtex != null) IconBox(mtex, -w / 2, y + h * 0.25f, w * 0.5f, h * 0.4f);
+                                else pb.FillCircle(P(-w / 2, y + h * 0.25f), w * 0.16f * pxPerM, new Color(255, 180, 80));
+                                break;
                             case ModuleKind.IsruConverter:
+                                if (mtex != null) IconBox(mtex, w / 2, y + h * 0.25f, w * 0.5f, h * 0.4f);
+                                else pb.FillCircle(P(w / 2, y + h * 0.25f), w * 0.16f * pxPerM, new Color(255, 180, 80));
+                                break;
                             case ModuleKind.OreScanner:
-                                if (mtex != null) IconBox(mtex, 0, y + h * 0.5f, w * 0.5f, h * 0.5f);
-                                else pb.FillCircle(P(0, y + h * 0.5f), w * 0.16f * pxPerM, new Color(255, 180, 80));
+                                if (mtex != null) IconBox(mtex, w / 2, y + h * 0.75f, w * 0.5f, h * 0.4f);
+                                else pb.FillCircle(P(w / 2, y + h * 0.75f), w * 0.16f * pxPerM, new Color(255, 180, 80));
                                 break;
                             case ModuleKind.Light:
                             {

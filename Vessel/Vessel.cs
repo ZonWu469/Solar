@@ -28,6 +28,11 @@ namespace Solar.Vessels
         public bool EnginesIgnited;  // first stage has been fired
         public int CurrentStage;     // next stage index to fire (0 = first); advanced by Staging.FireNext
         public bool IsDebris;
+        // Mission can be cancelled (flight scrapped, design reopened in the editor) from launch until the
+        // ship first touches another object (lands/crashes after liftoff) or docks. HasLeftLaunchSite guards
+        // the touch test against pad jitter so resting on the launch pad never locks cancel.
+        public bool MissionCancelable = true;
+        public bool HasLeftLaunchSite;
 
         // RCS translation: per-frame body-frame command (set by the flight scene from input),
         // x = right(+)/left(-), y = fore(+, along Up)/aft(-); each component in [-1,1].
@@ -49,12 +54,12 @@ namespace Solar.Vessels
         /// <summary>Modules an engineer repaired this tick; the flight scene drains these to toast.</summary>
         public readonly List<string> RecentRepairs = new();
 
-        // per-crew life-support consumption (units/s) and how long crew survive total deprivation
-        // TODO(balance.json): the four life-support constants below are global tunables.
-        public const double OxygenPerCrew = 0.5;
-        public const double WaterPerCrew = 0.2;
-        public const double FoodPerCrew = 0.1;
-        public const double LsDeathTime = 21600;  // 6 h of an empty resource kills one crew member
+        // per-crew life-support consumption (units/s) and how long crew survive total deprivation.
+        // Global tunables sourced from Content/balance.json via Core.Balance (with in-code defaults).
+        public static double OxygenPerCrew => Core.Balance.OxygenPerCrew;
+        public static double WaterPerCrew => Core.Balance.WaterPerCrew;
+        public static double FoodPerCrew => Core.Balance.FoodPerCrew;
+        public static double LsDeathTime => Core.Balance.LsDeathTime;  // 6 h of an empty resource kills one crew member
 
         public const double G0 = 9.81;   // TODO(balance.json): standard gravity used by the rocket equation
 

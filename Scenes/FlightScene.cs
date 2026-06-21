@@ -493,7 +493,8 @@ namespace Solar.Scenes
             {
                 double factor = Math.Pow(1.18, -inp.WheelDelta / 120.0);
                 if (_map) _mapZoom = Math.Clamp(_mapZoom * factor, 50, 5e8);
-                else _flightZoom = Math.Clamp(_flightZoom * factor, 0.02, 400);
+                // min m/px (max zoom-in) capped at ~100 px/m so part textures (~64-135 px/m native) stay crisp
+                else _flightZoom = Math.Clamp(_flightZoom * factor, 0.01, 400);
             }
             if (inp.Pressed(Keys.OemComma)) { clock.WarpDown(); _warpTo = null; }
             if (inp.Pressed(Keys.OemPeriod)) { clock.WarpUp(); _warpTo = null; }
@@ -619,6 +620,7 @@ namespace Solar.Scenes
                         if (_vessel.CurrentThrust > _vessel.TotalMass * g)
                         {
                             _vessel.Landed = false;
+                            _vessel.HasLeftLaunchSite = true;
                             _vessel.OnRails = false;
                             _endMessage = null;
                         }
@@ -936,6 +938,7 @@ namespace Solar.Scenes
                 _vessel.Velocity = (_vessel.Velocity * m1 + o.Velocity * m2) / (m1 + m2);
             }
             _vessel.DockWith(o, myPort, theirPort, q, offset);
+            _vessel.MissionCancelable = false;   // docked with another ship: lock out mission cancel
             _others.Remove(ts);
             Ctx.State.RemoveShip(ts.Name);
             ClearTarget();
@@ -1158,6 +1161,7 @@ namespace Solar.Scenes
             double surfR = v.Body.SurfaceRadiusAt(ang);
             if (v.Position.Length > surfR) return false;
             v.Position = v.Position.Normalized() * surfR;
+            if (v.HasLeftLaunchSite) v.MissionCancelable = false;   // touched an object: lock out mission cancel
             double slope = v.Body.Terrain?.SlopeAt(ang) ?? 0;
             if (slope > Solar.Physics.Terrain.LandableSlope)
             {
@@ -2233,7 +2237,6 @@ namespace Solar.Scenes
             DrawScienceStatus(pb, sb, ut);
             DrawCrewPanel(pb, sb);
             DrawColonyPanel(pb, sb, ut);
-            DrawCancelMission(pb, sb);
             if (_map) DrawShipMenu(pb, sb);
             else DrawPartPopup(pb, sb);
 
@@ -2286,8 +2289,9 @@ namespace Solar.Scenes
             var f = Ctx.Font;
             var inp = Ctx.Input;
             pb.FillRect(0, 0, Ctx.W, Ctx.H, new Color(0, 0, 0, 150));   // dim the world behind
-            bool onPad = _vessel is { Destroyed: false, Landed: true, EnginesIgnited: false };
-            int w = 320, h = onPad ? 310 : 262;
+            // a mission can be scrapped back to the editor until the ship first touches an object or docks
+            bool canCancel = _vessel is { Destroyed: false, MissionCancelable: true };
+            int w = 320, h = canCancel ? 310 : 262;
             var r = new Rectangle(Ctx.W / 2 - w / 2, Ctx.H / 2 - h / 2, w, h);
             UiDraw.Panel(pb, r);
             const string title = "PAUSED";
@@ -2301,27 +2305,15 @@ namespace Solar.Scenes
             if (UiDraw.Button(pb, sb, f, new Rectangle(bx, by, bw, bh), "Return to game", inp))
                 _showExitDialog = false;
             by += bh + 10;
-            // on the pad (landed, never launched): scrap the launch and return to the editor
-            if (onPad && UiDraw.Button(pb, sb, f, new Rectangle(bx, by, bw, bh), "Back to editor (scrap launch)", inp))
-            { _cancelMission = true; _showExitDialog = false; }
-            if (onPad) by += bh + 10;
             if (UiDraw.Button(pb, sb, f, new Rectangle(bx, by, bw, bh), "Space Center", inp))
                 _exitToHub = true;
             by += bh + 10;
+            // until first touch/dock: scrap the flight and reopen the design in the editor
+            if (canCancel && UiDraw.Button(pb, sb, f, new Rectangle(bx, by, bw, bh), "Cancel mission", inp))
+            { _cancelMission = true; _showExitDialog = false; }
+            if (canCancel) by += bh + 10;
             if (UiDraw.Button(pb, sb, f, new Rectangle(bx, by, bw, bh), "Exit to main menu", inp))
                 _exitToTitle = true;
-        }
-
-        /// <summary>A "Cancel mission" button shown only while the ship is on the pad (landed and never
-        /// launched): scraps the flight and reopens the design in the editor. The scene switch is
-        /// deferred to the next Update via <see cref="_cancelMission"/>.</summary>
-        private void DrawCancelMission(PrimitiveBatch pb, Microsoft.Xna.Framework.Graphics.SpriteBatch sb)
-        {
-            if (_showExitDialog) return;   // don't sit under the modal
-            var v = _vessel;
-            if (v == null || v.Destroyed || !v.Landed || v.EnginesIgnited) return;
-            var rect = new Rectangle(Ctx.W / 2 - 90, 8, 180, 28);
-            if (UiDraw.Button(pb, sb, Ctx.Font, rect, "Cancel mission", Ctx.Input)) _cancelMission = true;
         }
 
         /// <summary>In-flight crew panel: lists crew per crewable axial part, with Up/Dn buttons to

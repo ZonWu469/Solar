@@ -2049,6 +2049,62 @@ namespace Solar.Tests
                 Check("radial parachute deploys not drops", chuteEvent && noDrop && deployedAttached);
             }
 
+            // 30. mission-cancelable defaults: a fresh vessel can be scrapped back to the editor (true), and
+            //     has not yet left the launch site, until first touch/dock flips MissionCancelable off.
+            {
+                var v = new Vessels.Vessel();
+                Check("mission cancelable default", v.MissionCancelable && !v.HasLeftLaunchSite);
+            }
+
+            // 31. balance.json tunables load with sane, gentler-than-legacy values (and survive an absent file
+            //     via the in-code defaults). Module break base rate must be far below the old 1/(200 h).
+            {
+                Core.Balance.Load();
+                bool positive = Core.Balance.WearPerSec > 0 && Core.Balance.BreakBaseRate > 0
+                                && Core.Balance.RadDecayPerSec > 0 && Core.Balance.InfectBaseRate > 0
+                                && Core.Balance.OxygenPerCrew > 0 && Core.Balance.LsDeathTime > 0;
+                bool gentler = Core.Balance.BreakBaseRate < 1.0 / (500 * 3600)      // breaks rarer than every 500 h
+                               && Core.Balance.InfectBaseRate < 1.0 / (4000 * 3600); // infection rarer than every 4000 h
+                Check("balance tunables", positive && gentler);
+            }
+
+            // 32. radiation belt retune: Earth's belt is a thin, low-dose band (a transit hazard), not the old
+            //     wide instant-kill blanket. A 400 km LEO sits safely below it; a 3000 km orbit is inside it.
+            {
+                Physics.BodyCatalog.Load();
+                var earth = Physics.BodyCatalog.All.Find(b => b.Name == "Earth");
+                bool retuned = earth != null && earth.RadBeltDose > 0 && earth.RadBeltDose <= 0.1
+                               && earth.RadBeltOuterKm <= 10000 && earth.RadBeltInnerKm >= 500;
+                bool leoSafe = earth != null && (400 < earth.RadBeltInnerKm || 400 > earth.RadBeltOuterKm);
+                bool beltHit = earth != null && 3000 >= earth.RadBeltInnerKm && 3000 <= earth.RadBeltOuterKm;
+                Check("radiation belt retune", retuned && leoSafe && beltHit);
+            }
+
+            // 33. pre-fit defaults: crewed pods ship a life-support buffer + battery; probes ship power + comms;
+            //     and a part's default loadout always fits inside its slot budget.
+            {
+                bool DefaultsFit(string partName)
+                {
+                    var d = Parts.PartCatalog.Get(partName);
+                    if (d == null) return false;
+                    int used = 0;
+                    foreach (var id in d.DefaultModules)
+                    {
+                        var m = Parts.ModuleCatalog.GetById(id) ?? Parts.ModuleCatalog.Get(id);
+                        if (m == null) return false;
+                        used += m.SlotCost;
+                    }
+                    return used <= d.Slots;
+                }
+                var pod = Parts.PartCatalog.Get("Pod Mk1");
+                var probe = Parts.PartCatalog.Get("Probe Core");
+                bool podOk = pod != null && pod.DefaultModules.Contains("life-support") && pod.DefaultModules.Contains("battery");
+                bool probeOk = probe != null && probe.DefaultModules.Contains("battery") && probe.DefaultModules.Contains("antenna");
+                bool fit = DefaultsFit("Pod Mk1") && DefaultsFit("Big Pod") && DefaultsFit("Inflatable Habitat")
+                           && DefaultsFit("Probe Core");
+                Check("part pre-fit defaults", podOk && probeOk && fit);
+            }
+
             string res = $"Physics self-test: {pass}/{total} PASS";
             if (fails.Count > 0) res += "  FAILED: " + string.Join(", ", fails);
             return res;
