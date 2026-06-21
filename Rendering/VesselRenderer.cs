@@ -27,6 +27,13 @@ namespace Solar.Rendering
             var upS = new Vector2((float)Math.Cos(v.Heading), -(float)Math.Sin(v.Heading));
             var rightS = new Vector2(-upS.Y, upS.X);
 
+            // Local-vertical (zenith) in screen space: v.Position points from the SOI body center to the
+            // vessel, so its angle is "away from the planet". Y is flipped going world->screen. A deployed
+            // parachute hangs along this (opposite gravity), independent of the ship's heading.
+            double zenA = v.Position.Angle();
+            var vertS = new Vector2((float)Math.Cos(zenA), -(float)Math.Sin(zenA));
+            var vperpS = new Vector2(-vertS.Y, vertS.X);   // across the canopy
+
             if (forceIcon || hPx < 7)
             {
                 Color ic = v.IsDebris ? new Color(140, 140, 140) : Color.White;
@@ -45,6 +52,11 @@ namespace Solar.Rendering
             float rcsMag = (float)Math.Min(1, rcsLen);
             float jx = 0, jy = 0;
             if (rcsLen > 1e-6) { jx = -(float)(v.RcsCommand.X / rcsLen); jy = -(float)(v.RcsCommand.Y / rcsLen); }
+
+            // off-axis (radial / lateral) engines fire on the signed J/L command; their plume exits
+            // opposite the thrust direction, so it swings to the craft's other side as the player flips J<->L.
+            float latCmd = !v.IsDebris ? (float)Math.Clamp(v.RcsCommand.X, -1, 1) : 0f;
+            bool radialFlaming = !v.IsDebris && v.RadialThrusting;
 
             // Draw one sub-stack (the root stack, or a docked module) in the vessel's local frame.
             // A module's parts are rotated by `q` quarter-turns and shifted by `off` so its ports overlap.
@@ -86,6 +98,18 @@ namespace Solar.Rendering
                         pb.Tri(P(cx + dw, dy), P(cx, dy - dh), P(cx, dy + dh), dia);
                     }
                 }
+            }
+            // Plume along an arbitrary local direction (dx,dy unit) — used by off-axis radial engines whose
+            // exhaust does not exit straight down the stack.
+            void DrawDirPlume(float cx, float cy, float dx, float dy, float halfWRef, float len, PartDef d)
+            {
+                float ws = d.ExhaustWidthScale;
+                float outerHalf = halfWRef * ws, innerHalf = halfWRef * 0.533f * ws;
+                float L = len * d.ExhaustLengthScale;
+                float px = -dy, py = dx;   // across the jet axis
+                Color core = Color.Lerp(d.ExhaustCoreColor, Color.White, 0.30f);
+                pb.Tri(P(cx + px * outerHalf, cy + py * outerHalf), P(cx - px * outerHalf, cy - py * outerHalf), P(cx + dx * L, cy + dy * L), d.ExhaustColor);
+                pb.Tri(P(cx + px * innerHalf, cy + py * innerHalf), P(cx - px * innerHalf, cy - py * innerHalf), P(cx + dx * L * 0.55f, cy + dy * L * 0.55f), core);
             }
             float y = 0;
             for (int i = to - 1; i >= from; i--)
@@ -174,9 +198,12 @@ namespace Solar.Rendering
                 }
                 if (d.Kind == PartKind.Parachute && p.Deployed)
                 {
-                    var canopy = P(0, y + h + 7f);
-                    pb.Line(P(-w * 0.4f, y + h), P(-4.4f, y + h + 6f), Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
-                    pb.Line(P(w * 0.4f, y + h), P(4.4f, y + h + 6f), Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
+                    var top = P(0, y + h);
+                    var canopy = top + vertS * (7f * pxPerM);
+                    var lTop = top + vertS * (6f * pxPerM) - vperpS * (4.4f * pxPerM);
+                    var rTop = top + vertS * (6f * pxPerM) + vperpS * (4.4f * pxPerM);
+                    pb.Line(P(-w * 0.4f, y + h), lTop, Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
+                    pb.Line(P(w * 0.4f, y + h), rTop, Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
                     pb.FillCircle(canopy, 5.5f * pxPerM, new Color(235, 130, 60), PlanetRenderer.Darken(new Color(235, 130, 60), 0.3f));
                 }
                 // landing gear deploy: strut+pad extending downward from the bottom-third of the axial part
@@ -340,7 +367,8 @@ namespace Solar.Rendering
                     // a radial liquid engine carries no fuel of its own (it burns the radial tank's
                     // cross-fed pool), so gate its flame on vessel thrust like the axial engines above;
                     // solids burn self-contained fuel, so keep their own-fuel check.
-                    bool rFlame = r.Ignited &&
+                    bool rOffAxis = rd.Kind == PartKind.Engine && Math.Abs(rd.ThrustAngle) > 1e-6;
+                    bool rFlame = r.Ignited && !rOffAxis &&
                         (rd.Kind == PartKind.SolidBooster ? r.Fuel > 0
                          : rd.Kind == PartKind.Engine ? (flaming && v.Throttle > 0)
                          : false);
@@ -351,13 +379,28 @@ namespace Solar.Rendering
                         float flen = rh * (0.9f + 2.0f * rThr) * flick;
                         DrawPlume(xc, yb, rw * 0.30f, flen, rThr, rd, flick);
                     }
+                    // off-axis (radial) engine firing on the J/L command: plume exits opposite its thrust
+                    // direction. Local thrust dir for angle t is (sin t, cos t); command sign flips it.
+                    if (rOffAxis && r.Ignited && radialFlaming && Math.Abs(latCmd) > 1e-6f)
+                    {
+                        float t = (float)(rd.ThrustAngle * Math.PI / 180.0);
+                        float s = Math.Sign(latCmd);
+                        float ex = -(float)Math.Sin(t) * s, ey = -(float)Math.Cos(t) * s;   // exhaust = -thrust
+                        float flick = 1f + 0.12f * (float)Math.Sin(anim * 37 + (i + k) * 2.1);
+                        float mag = Math.Abs(latCmd);
+                        float flen = Math.Max(rw, rh) * (0.9f + 2.0f * mag) * flick;
+                        DrawDirPlume(xc, yb + rh * 0.5f, ex, ey, rw * 0.30f, flen, rd);
+                    }
 
                     // deployed radial parachute: canopy above the radial part (mirrors the axial chute)
                     if (rd.Kind == PartKind.Parachute && r.Deployed)
                     {
-                        var canopy = P(xc, yb + rh + 7f);
-                        pb.Line(P(xc - rw * 0.4f, yb + rh), P(xc - 4.4f, yb + rh + 6f), Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
-                        pb.Line(P(xc + rw * 0.4f, yb + rh), P(xc + 4.4f, yb + rh + 6f), Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
+                        var top = P(xc, yb + rh);
+                        var canopy = top + vertS * (7f * pxPerM);
+                        var lTop = top + vertS * (6f * pxPerM) - vperpS * (4.4f * pxPerM);
+                        var rTop = top + vertS * (6f * pxPerM) + vperpS * (4.4f * pxPerM);
+                        pb.Line(P(xc - rw * 0.4f, yb + rh), lTop, Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
+                        pb.Line(P(xc + rw * 0.4f, yb + rh), rTop, Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
                         pb.FillCircle(canopy, 5.5f * pxPerM, new Color(235, 130, 60), PlanetRenderer.Darken(new Color(235, 130, 60), 0.3f));
                     }
                     // deployed radial landing gear: when no texture is authored, draw a procedural

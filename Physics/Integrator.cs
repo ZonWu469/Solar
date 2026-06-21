@@ -11,8 +11,9 @@ namespace Solar.Physics
         {
             double mu = v.Body.Mu;
             double mass = v.TotalMass;
-            double thrust = v.CurrentThrust;
-            Vec2d thrustAcc = v.Up * (thrust / mass) + v.RcsAccel;  // main engine + RCS translation
+            // engines fire along their authored thrust direction (axial by default; radially-angled engines
+            // push sideways), so use the world thrust vector rather than a scalar along Up.
+            Vec2d thrustAcc = v.ThrustVector / mass + v.RcsAccel;  // main engines + RCS translation
             var atmo = v.Body.Atmo;
             double bodyRadius = v.Body.Radius;
             double cda = v.TotalCdA;

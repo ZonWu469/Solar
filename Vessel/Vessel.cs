@@ -132,6 +132,54 @@ namespace Solar.Vessels
             get { foreach (var p in AllParts()) if (p.Def.Kind == PartKind.Parachute && p.Deployed) return true; return false; }
         }
 
+        /// <summary>Mass-weighted axial position of the center of mass (local +Y, up the stack). Radials are
+        /// taken at their host part's axial station. Used to place the chute drag point relative to the CoM.</summary>
+        public double CenterOfMassY
+        {
+            get
+            {
+                double m = 0, my = 0;
+                foreach (var p in Parts)
+                {
+                    double y = PartLocalCenter(p).Y;
+                    double pm = p.Mass; foreach (var r in p.Radials) pm += r.Mass;
+                    m += pm; my += pm * y;
+                }
+                return m > 0 ? my / m : 0;
+            }
+        }
+
+        /// <summary>The deployed parachutes' drag application point as a signed axial offset from the center
+        /// of mass (local +Y): positive when the chutes sit above the CoM. <paramref name="bothEnds"/> is
+        /// true when significant chute drag acts both above and below the CoM (top+bottom chutes), the cue
+        /// to hold the craft broadside (flat) for a horizontal descent. Returns false if no chute is deployed.</summary>
+        public bool DeployedChuteOffset(out double offsetFromCoM, out bool bothEnds)
+        {
+            offsetFromCoM = 0; bothEnds = false;
+            double com = CenterOfMassY;
+            double w = 0, wy = 0, above = 0, below = 0;
+            foreach (var p in Parts)
+            {
+                double y = PartLocalCenter(p).Y;
+                AccumChute(p, y, com, ref w, ref wy, ref above, ref below);
+                foreach (var r in p.Radials) AccumChute(r, y, com, ref w, ref wy, ref above, ref below);
+            }
+            if (w <= 0) return false;
+            offsetFromCoM = wy / w - com;
+            bothEnds = above > 0.15 * w && below > 0.15 * w;
+            return true;
+        }
+
+        private static void AccumChute(Part p, double y, double com,
+                                       ref double w, ref double wy, ref double above, ref double below)
+        {
+            if (p.Def.Kind != PartKind.Parachute || !p.Deployed) return;
+            double cda = p.Def.DeployedCdA;
+            if (cda <= 0) return;
+            w += cda; wy += cda * y;
+            if (y >= com) above += cda; else below += cda;
+        }
+
         public bool HasFins
         {
             get { foreach (var p in Parts) if (p.Def.Kind == PartKind.Fins) return true; return false; }
@@ -288,11 +336,85 @@ namespace Solar.Vessels
         /// <summary>Current thrust (N): throttleable liquid engines plus solid boosters (always full).</summary>
         public double CurrentThrust => LiquidThrust * Throttle + SolidThrust;
 
-        /// <summary>Thrust achievable right now (liquid at full throttle + solids), for TWR/preview.</summary>
+        /// <summary>An engine is "axial" when it fires (near) along the craft +Up axis; otherwise it is an
+        /// off-axis (radial / lateral) engine driven by the J/L translation command rather than the throttle.</summary>
+        private static bool IsAxial(Part p) => Math.Abs(p.Def.ThrustAngle) < 1e-6;
+
+        /// <summary>Signed lateral throttle for off-axis engines, from the J/L translation command
+        /// (<see cref="RcsCommand"/>.X): +1 fires toward craft +Right, -1 toward -Right (bidirectional).</summary>
+        private double LateralCommand => Math.Clamp(RcsCommand.X, -1, 1);
+
+        /// <summary>True while off-axis (radial) engines are actively firing on the lateral command: an ignited,
+        /// fuelled off-axis engine plus a nonzero J/L command. Gates physics/rails like a throttle burn.</summary>
+        public bool RadialThrusting
+        {
+            get
+            {
+                if (LateralCommand == 0) return false;
+                foreach (var seg in Segments())
+                {
+                    if (SegmentFuel(seg) <= 0) continue;
+                    for (int i = seg.start; i <= seg.end; i++)
+                    {
+                        if (IsOffAxisEngineLive(Parts[i])) return true;
+                        foreach (var r in Parts[i].Radials) if (IsOffAxisEngineLive(r)) return true;
+                    }
+                }
+                return false;
+            }
+        }
+
+        private static bool IsOffAxisEngineLive(Part p) =>
+            p.Def.Kind == PartKind.Engine && p.Ignited && !IsAxial(p);
+
+        /// <summary>World-frame direction an engine fires, given its authored <see cref="PartDef.ThrustAngle"/>
+        /// (deg, 0 = craft <see cref="Up"/>; +90 = <see cref="Right"/>, -90 = left), per the angle/screen
+        /// convention (Right = Up rotated -90 deg = world angle Heading - 90).</summary>
+        public Vec2d ThrustDir(double angleDeg) => Vec2d.FromAngle(Heading - angleDeg * (Math.PI / 180.0));
+
+        /// <summary>World-frame thrust force vector (N). Axial engines fire along craft +Up scaled by
+        /// <see cref="Throttle"/>; off-axis (radial) engines fire along their <see cref="PartDef.ThrustAngle"/>
+        /// scaled by the signed J/L command (<see cref="LateralCommand"/>), so the player aims them
+        /// left/right independently of the throttle. The magnitude equals <see cref="CurrentThrust"/> for an
+        /// all-axial stack at full throttle. Same fuel/segment/power gating as
+        /// <see cref="LiquidThrust"/> + <see cref="SolidThrust"/>.</summary>
+        public Vec2d ThrustVector
+        {
+            get
+            {
+                Vec2d sum = Vec2d.Zero;
+                double lateral = LateralCommand;
+                foreach (var seg in Segments())
+                {
+                    if (SegmentFuel(seg) <= 0) continue;
+                    for (int i = seg.start; i <= seg.end; i++)
+                    {
+                        AddEngineThrust(ref sum, Parts[i], lateral);
+                        foreach (var r in Parts[i].Radials) AddEngineThrust(ref sum, r, lateral);
+                    }
+                }
+                foreach (var p in AllParts())
+                    if (p.Def.Kind == PartKind.SolidBooster && p.Ignited && p.Fuel > 0)
+                        sum += ThrustDir(p.Def.ThrustAngle) * p.Def.Thrust;
+                return sum;
+            }
+        }
+
+        private void AddEngineThrust(ref Vec2d sum, Part p, double lateral)
+        {
+            if (p.Def.Kind != PartKind.Engine || !p.Ignited) return;
+            double level = IsAxial(p) ? Throttle : lateral;   // axial -> throttle; off-axis -> signed J/L command
+            if (level == 0) return;
+            sum += ThrustDir(p.Def.ThrustAngle) * (p.Def.Thrust * EnginePower(p) * level);
+        }
+
+        /// <summary>Thrust achievable right now (axial liquid at full throttle + solids), for TWR/preview.
+        /// Off-axis (radial) engines are a separate lateral system and are excluded.</summary>
         public double MaxAvailableThrust => LiquidThrust + SolidThrust;
 
-        /// <summary>Throttleable thrust from ignited liquid engines whose segment still has fuel
-        /// (radial engines on a segment's parts draw from the same cross-fed pool).</summary>
+        /// <summary>Throttleable thrust from ignited <em>axial</em> liquid engines whose segment still has fuel
+        /// (radial engines on a segment's parts draw from the same cross-fed pool). Off-axis engines fire on
+        /// the J/L command instead, so they are excluded from this main-throttle figure.</summary>
         public double LiquidThrust
         {
             get
@@ -303,9 +425,9 @@ namespace Solar.Vessels
                     if (SegmentFuel(seg) <= 0) continue;
                     for (int i = seg.start; i <= seg.end; i++)
                     {
-                        if (Parts[i].Def.Kind == PartKind.Engine && Parts[i].Ignited) t += Parts[i].Def.Thrust * EnginePower(Parts[i]);
+                        if (Parts[i].Def.Kind == PartKind.Engine && Parts[i].Ignited && IsAxial(Parts[i])) t += Parts[i].Def.Thrust * EnginePower(Parts[i]);
                         foreach (var r in Parts[i].Radials)
-                            if (r.Def.Kind == PartKind.Engine && r.Ignited) t += r.Def.Thrust * EnginePower(r);
+                            if (r.Def.Kind == PartKind.Engine && r.Ignited && IsAxial(r)) t += r.Def.Thrust * EnginePower(r);
                     }
                 }
                 return t;
@@ -342,9 +464,9 @@ namespace Solar.Vessels
                         if (SegmentFuel(seg) <= 0) continue;
                         for (int i = seg.start; i <= seg.end; i++)
                         {
-                            if (Parts[i].Def.Kind == PartKind.Engine && Parts[i].Ignited) flow += Parts[i].Def.FuelFlowAtMax * Throttle * EnginePower(Parts[i]);
+                            if (Parts[i].Def.Kind == PartKind.Engine && Parts[i].Ignited && IsAxial(Parts[i])) flow += Parts[i].Def.FuelFlowAtMax * Throttle * EnginePower(Parts[i]);
                             foreach (var r in Parts[i].Radials)
-                                if (r.Def.Kind == PartKind.Engine && r.Ignited) flow += r.Def.FuelFlowAtMax * Throttle * EnginePower(r);
+                                if (r.Def.Kind == PartKind.Engine && r.Ignited && IsAxial(r)) flow += r.Def.FuelFlowAtMax * Throttle * EnginePower(r);
                         }
                     }
                 return flow;
@@ -367,9 +489,9 @@ namespace Solar.Vessels
                     bool hasLiquidEngine = false;
                     for (int i = seg.start; i <= seg.end && !hasLiquidEngine; i++)
                     {
-                        if (Parts[i].Def.Kind == PartKind.Engine && Parts[i].Ignited) { hasLiquidEngine = true; break; }
+                        if (Parts[i].Def.Kind == PartKind.Engine && Parts[i].Ignited && IsAxial(Parts[i])) { hasLiquidEngine = true; break; }
                         foreach (var r in Parts[i].Radials)
-                            if (r.Def.Kind == PartKind.Engine && r.Ignited) { hasLiquidEngine = true; break; }
+                            if (r.Def.Kind == PartKind.Engine && r.Ignited && IsAxial(r)) { hasLiquidEngine = true; break; }
                     }
                     if (hasLiquidEngine) fuel += SegmentFuel(seg);
                 }
@@ -386,18 +508,20 @@ namespace Solar.Vessels
                 if (p.Def.Kind == PartKind.SolidBooster && p.Ignited && p.Fuel > 0)
                     p.Fuel = Math.Max(0, p.Fuel - p.Def.FuelFlowAtMax * dt);
 
-            if (Throttle <= 0) return;
+            // liquid engines draw from their segment's cross-fed pool: axial engines flow at the main
+            // throttle, off-axis (radial) engines at the magnitude of the signed J/L command.
+            double lateral = Math.Abs(LateralCommand);
+            if (Throttle <= 0 && lateral <= 0) return;
             foreach (var seg in Segments())
             {
                 double flow = 0;
                 for (int i = seg.start; i <= seg.end; i++)
                 {
-                    if (Parts[i].Def.Kind == PartKind.Engine && Parts[i].Ignited) flow += Parts[i].Def.FuelFlowAtMax;
-                    foreach (var r in Parts[i].Radials)
-                        if (r.Def.Kind == PartKind.Engine && r.Ignited) flow += r.Def.FuelFlowAtMax;
+                    AccumEngineFlow(Parts[i], ref flow, lateral);
+                    foreach (var r in Parts[i].Radials) AccumEngineFlow(r, ref flow, lateral);
                 }
                 if (flow <= 0) continue;
-                double amount = flow * Throttle * dt;
+                double amount = flow * dt;
                 double avail = SegmentFuel(seg);
                 if (avail <= 0) continue;
                 double factor = Math.Max(0, 1 - amount / avail);
@@ -408,6 +532,13 @@ namespace Solar.Vessels
                         if (r.Def.Kind != PartKind.SolidBooster) r.Fuel *= factor;
                 }
             }
+        }
+
+        private void AccumEngineFlow(Part p, ref double flow, double lateral)
+        {
+            if (p.Def.Kind != PartKind.Engine || !p.Ignited) return;
+            double level = IsAxial(p) ? Throttle : lateral;
+            if (level > 0) flow += p.Def.FuelFlowAtMax * level;
         }
 
         // ----- RCS translation -----

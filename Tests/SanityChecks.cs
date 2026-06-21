@@ -1762,6 +1762,135 @@ namespace Solar.Tests
                 Check("transfer-leg closest approach", timed && mistimed);
             }
 
+            // 34. chained patched-conic prediction: after an encounter, the inside-SOI flyby leg (the conic
+            //     the map draws and the player drops a capture node on) must be a valid, SOI-bounded conic,
+            //     and a second Predict on it must not blow up. Guards BuildProjection's multi-leg walk.
+            {
+                var primary = new CelestialBody { Mu = mu, Radius = 1e3, SoiRadius = 1e8 };
+                const double Rc = 2e6, soi = 5e4;
+                var moon = new CelestialBody { Mu = mu * 1e-6, Radius = 1e3, SoiRadius = soi, Parent = primary,
+                    Orbit = new OrbitalElements { A = Rc, E = 0, ArgPe = 0, M0 = 0, Epoch = 0, Mu = mu, Dir = 1 } };
+                primary.Children.Add(moon);
+
+                double Rp = 1e6, Ra = 5e9, A = (Ra + Rp) / 2, e = (Ra - Rp) / (Ra + Rp);
+                var ship = new OrbitalElements { A = A, E = e, ArgPe = 0, M0 = 0, Epoch = 0, Mu = mu, Dir = 1 };
+                double nuC = Math.Acos((ship.SemiLatus / Rc - 1) / e);
+                double tC = Kepler.TimeAtTrueAnomaly(ship, nuC, 0);
+                double n = Math.Sqrt(mu / (Rc * Rc * Rc));
+                moon.Orbit.M0 = nuC - n * tC;                       // moon at the crossing point -> encounter
+
+                var enc = TrajectoryPredictor.Predict(ship, primary, 0);
+                var flyby = enc.NextOrbit;
+                bool ok = enc.Type == TransitionType.Encounter && enc.NextBody == moon
+                          && !double.IsNaN(flyby.A) && !double.IsNaN(flyby.E) && flyby.Periapsis < soi;
+                var back = TrajectoryPredictor.Predict(flyby, moon, enc.TransitionUT);
+                ok = ok && !double.IsNaN(back.Orbit.A)
+                        && (back.Type == TransitionType.None || back.TransitionUT >= enc.TransitionUT - 1);
+                Check("chained patched-conic flyby", ok);
+            }
+
+            // 35. off-axis engine thrust: ThrustDir maps the authored angle to the craft frame (0 = Up,
+            //     +/-90 = right/left). An all-axial stack's ThrustVector equals CurrentThrust along Up. A
+            //     radial (90-deg) engine fires on the SIGNED J/L command (RcsCommand.X), not the throttle:
+            //     +1 -> +Right, -1 -> -Right, command 0 -> no thrust; and it is excluded from the scalar
+            //     CurrentThrust / MaxAvailableThrust (those stay the main-throttle figure). Guards the
+            //     left/right-firing horizontal-landing thrusters.
+            {
+                var v = new Vessels.Vessel { Heading = Math.PI / 2 };       // Up = (0,1), Right = (1,0)
+                bool dirOk = (v.ThrustDir(0) - v.Up).Length < 1e-9
+                          && (v.ThrustDir(90) - v.Right).Length < 1e-9
+                          && (v.ThrustDir(-90) + v.Right).Length < 1e-9;
+
+                var ax = new Vessels.Vessel { Heading = Math.PI / 2, Throttle = 1 };
+                ax.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                ax.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Tank T400")) { Fuel = 400 });
+                ax.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Terrier")) { Ignited = true });
+                bool axOk = ax.CurrentThrust > 0 && (ax.ThrustVector - ax.Up * ax.CurrentThrust).Length < 1e-3;
+
+                double rt = Parts.PartCatalog.Get("Lateral Thruster (J/L)").Thrust;
+                var rad = new Vessels.Vessel { Heading = Math.PI / 2, Throttle = 1 };
+                rad.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                rad.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Tank T400")) { Fuel = 400 });
+                rad.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Lateral Thruster (J/L)")) { Ignited = true });
+                // throttle alone (no lateral command) produces no radial thrust, and the radial engine is
+                // excluded from the scalar throttle thrust figures.
+                bool offThrottle = rad.ThrustVector.Length < 1e-6 && rad.CurrentThrust == 0 && rad.MaxAvailableThrust == 0;
+                rad.RcsCommand = new Vec2d(1, 0);
+                var tvR = rad.ThrustVector;
+                bool rightOk = (tvR - rad.Right * rt).Length < 1e-3 && Math.Abs(tvR.Dot(rad.Up)) < 1e-3 * tvR.Length;
+                rad.RcsCommand = new Vec2d(-1, 0);
+                bool leftOk = (rad.ThrustVector + rad.Right * rt).Length < 1e-3;
+                bool radOk = offThrottle && rightOk && leftOk;
+
+                Check("off-axis engine thrust", dirOk && axOk && radOk);
+            }
+
+            // 36. chute weathervane geometry: a top-mounted chute sits above the CoM (offset>0 -> craft
+            //     points retrograde); adding a bottom chute balances it (bothEnds -> hold broadside / flat).
+            //     Guards the horizontal-landing chute attitude model.
+            {
+                var top = new Vessels.Vessel();
+                top.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Parachute")) { Deployed = true });
+                top.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                top.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Tank T400")));
+                bool topOk = top.DeployedChuteOffset(out double offTop, out bool bothTop) && offTop > 0 && !bothTop;
+
+                var both = new Vessels.Vessel();
+                both.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Parachute")) { Deployed = true });
+                both.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                both.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Tank T400")));
+                both.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Parachute")) { Deployed = true });
+                bool bothOk = both.DeployedChuteOffset(out _, out bool bothEnds) && bothEnds;
+
+                var none = new Vessels.Vessel();
+                none.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                bool noneOk = !none.DeployedChuteOffset(out _, out _);
+
+                Check("chute weathervane geometry", topOk && bothOk && noneOk);
+            }
+
+            // 37. radial-engine fuel draw: an off-axis engine fired on the J/L command burns its segment's
+            //     cross-fed fuel even at zero throttle; with no command and no throttle nothing drains.
+            {
+                var df = new Vessels.Vessel { Throttle = 0 };
+                df.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                var tnk = new Parts.Part(Parts.PartCatalog.Get("Tank T400")) { Fuel = 400 };
+                df.Parts.Add(tnk);
+                df.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Lateral Thruster (J/L)")) { Ignited = true });
+
+                df.RcsCommand = new Vec2d(1, 0);
+                double before = tnk.Fuel;
+                df.DrainFuel(1.0);
+                bool drained = tnk.Fuel < before - 1e-6;
+
+                df.RcsCommand = Vec2d.Zero;
+                double held = tnk.Fuel;
+                df.DrainFuel(1.0);
+                bool noDrain = Math.Abs(tnk.Fuel - held) < 1e-9;
+
+                Check("radial-engine fuel draw", drained && noDrain);
+            }
+
+            // 38. RadialThrusting gate: true only with an ignited, fuelled off-axis engine AND a nonzero
+            //     lateral command; an all-axial stack never reports it even while commanding J/L.
+            {
+                var r = new Vessels.Vessel();
+                r.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                r.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Tank T400")) { Fuel = 400 });
+                r.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Lateral Thruster (J/L)")) { Ignited = true });
+                bool noCmd = !r.RadialThrusting;
+                r.RcsCommand = new Vec2d(1, 0);
+                bool firing = r.RadialThrusting;
+
+                var ax = new Vessels.Vessel { RcsCommand = new Vec2d(1, 0) };
+                ax.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                ax.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Tank T400")) { Fuel = 400 });
+                ax.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Terrier")) { Ignited = true });
+                bool axialNever = !ax.RadialThrusting;
+
+                Check("radial-thrusting gate", noCmd && firing && axialNever);
+            }
+
             string res = $"Physics self-test: {pass}/{total} PASS";
             if (fails.Count > 0) res += "  FAILED: " + string.Join(", ", fails);
             return res;

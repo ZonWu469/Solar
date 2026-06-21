@@ -14,6 +14,7 @@ namespace Solar.Parts
         public double DryMass;       // kg
         public double FuelCapacity;  // kg
         public double Thrust;        // N
+        public double ThrustAngle;   // deg, thrust direction relative to the craft (0 = Up/axial; +90 = right, -90 = left)
         public double Isp;           // s
         public double Width;         // m
         public double Height;        // m

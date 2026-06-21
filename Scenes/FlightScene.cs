@@ -76,6 +76,11 @@ namespace Solar.Scenes
         private double _mapZoom;
         private int _focus;                  // 0 = vessel, otherwise body index + 1
         private Vec2d _mapPan;               // map-view arrow-key pan offset (world meters), added on top of the focus
+        // "Focus the encounter": when set, the map centers on this body at its (fixed) transition time
+        // so the tiny inside-SOI flyby leg fills the screen and a capture node can be dropped on it.
+        // Refreshed each frame from the current projection while active; cleared by the normal focus cycle.
+        private CelestialBody _encFocusBody;
+        private double _encFocusUT;
 
         // ----- target / rendezvous -----
         private CelestialBody _targetBody;   // one of _targetBody / _targetVessel is non-null when targeting
@@ -237,7 +242,7 @@ namespace Solar.Scenes
                 bool inAtmo = body.Atmo != null && _vessel.Altitude < body.Atmo.Top + 500;
                 bool thrusting = _vessel.CurrentThrust > 0;
                 // off-rails only by close-proximity physics? convert to rails so the save self-propagates.
-                if (!_vessel.OnRails && !inAtmo && !thrusting && !_vessel.RcsActive) _vessel.GoOnRails(ut);
+                if (!_vessel.OnRails && !inAtmo && !thrusting && !_vessel.RcsActive && !_vessel.RadialThrusting) _vessel.GoOnRails(ut);
                 // otherwise keep the live state authoritative, but refresh the stored conic from it so an
                 // on-rails save is never stale (a saved-off-rails burn/atmo ship reloads from Position).
                 else _vessel.Orbit = Kepler.ElementsFromState(_vessel.Position, _vessel.Velocity, body.Mu, ut);
@@ -394,6 +399,41 @@ namespace Solar.Scenes
             return _projSegs;
         }
 
+        /// <summary>The route's SOI encounters (descents into a child body's SOI): the body entered, the
+        /// fixed transition time the inside-SOI leg is drawn around, and the SOI-entry world point (where
+        /// the encounter marker sits). Drives the encounter ghost/marker drawing and the "focus the
+        /// encounter" affordance so a capture node can be planned on the otherwise-tiny flyby leg.</summary>
+        private IEnumerable<(CelestialBody body, double transUT, Vec2d entryPos)> PlannedEncounters(double ut)
+        {
+            var segs = Projection(ut, refreshNodes: false);
+            for (int i = 0; i + 1 < segs.Count; i++)
+            {
+                var a = segs[i]; var b = segs[i + 1];
+                if (b.Body != a.Body && b.Body.Parent == a.Body && !double.IsInfinity(a.EndUT))
+                    yield return (b.Body, a.EndUT, a.PrimaryAbs + Kepler.StateAtTime(a.El, a.EndUT).pos);
+            }
+        }
+
+        /// <summary>Center + zoom the map on an encounter so its inside-SOI flyby leg fills the screen.</summary>
+        private void FocusEncounter(CelestialBody body, double transUT)
+        {
+            _encFocusBody = body; _encFocusUT = transUT; _mapPan = default;
+            double screen = Math.Max(200, Math.Min(_cam.ScreenW, _cam.ScreenH));
+            _mapZoom = Math.Clamp(2 * body.SoiRadius / (0.6 * screen), 50, 5e8);  // SOI diameter ~ 60% of view
+        }
+
+        /// <summary>Whether the mouse is over a route encounter marker; yields the body + transition time.</summary>
+        private bool ClickedEncounterMarker(double ut, Vector2 mouse, out CelestialBody body, out double transUT)
+        {
+            body = null; transUT = 0; float best = 12f;
+            foreach (var (eb, et, entry) in PlannedEncounters(ut))
+            {
+                float d = Vector2.Distance(mouse, _cam.WorldToScreen(entry));
+                if (d < best) { best = d; body = eb; transUT = et; }
+            }
+            return body != null;
+        }
+
         public override void Update(double dt)
         {
             double realDt = Math.Min(dt, 0.1);
@@ -428,7 +468,7 @@ namespace Solar.Scenes
             { _showColony = !_showColony; if (!_showColony) _showAddModule = false; }
             if (!(_vessel != null && _vessel.Landed)) { _showColony = false; _showAddModule = false; }
             if (_buildAtColony) { _buildAtColony = false; BuildAtColony(); return; }
-            if (_map && inp.Pressed(Keys.F)) { _focus = (_focus + 1) % (Ctx.Universe.Bodies.Count + 1); _mapPan = default; }
+            if (_map && inp.Pressed(Keys.F)) { _focus = (_focus + 1) % (Ctx.Universe.Bodies.Count + 1); _mapPan = default; _encFocusBody = null; }
             // arrow-key map panning: constant screen-pixel speed (scaled by zoom). Screen Y is flipped,
             // so Down moves the view content up -> negative world Y.
             if (_map)
@@ -492,6 +532,17 @@ namespace Solar.Scenes
                         _vessel.AngularVelocity = Math.Clamp(_vessel.AngularVelocity + dir * alpha * realDt, -maxRate, maxRate);
                         _sas = SasMode.Off;                  // manual input releases the hold
                     }
+                    else if (ChuteAttitudeTarget() is double chuteHold)
+                    {
+                        // deployed chutes weathervane the craft aerodynamically (no power needed, scaled by
+                        // dynamic pressure): a single chute points its end retrograde (KSP-style); balanced
+                        // top+bottom chutes hold the craft broadside for a horizontal descent / landing.
+                        double diff = Kepler.WrapPi(chuteHold - _vessel.Heading);
+                        double aero = Math.Clamp(_vessel.DynamicPressure / 400.0, 0, 1);   // 0 in thin air -> full near the ground
+                        double target = Math.Clamp(diff * 2.5, -maxRate, maxRate);
+                        _vessel.AngularVelocity += (target - _vessel.AngularVelocity) * Math.Min(1, 3.0 * aero * realDt);
+                        _vessel.AngularVelocity *= Math.Max(0, 1 - 0.8 * aero * realDt);   // damp the oscillation
+                    }
                     else if (_sas != SasMode.Off && !_vessel.SasAvailable)
                     {
                         _sas = SasMode.Off;                  // power lost (or SAS part gone): drop the hold
@@ -538,7 +589,7 @@ namespace Solar.Scenes
                 // A ship in close proximity is RK4-integrated; integrate the focused vessel the same
                 // way so the pair stays rigidly co-located (matching an analytic conic against RK4
                 // makes them slowly drift and jump across rails round-trips at pause/scene boundaries).
-                bool needsPhysics = !_vessel.Landed && (thrusting || inAtmo || _vessel.RcsActive || AnyOtherNear());
+                bool needsPhysics = !_vessel.Landed && (thrusting || inAtmo || _vessel.RcsActive || _vessel.RadialThrusting || AnyOtherNear());
 
                 clock.MaxWarpIndex = _vessel.Landed
                     ? (thrusting ? SimClock.PhysicsMaxIndex : SimClock.Levels.Length - 1)
@@ -1115,7 +1166,11 @@ namespace Solar.Scenes
                 v.Velocity = Vec2d.Zero;
                 v.Landed = true;
                 v.Throttle = 0;
-                v.Heading = SurfaceNormalAngle(v.Body, ang);   // rest aligned to the local slope
+                // rest at whichever of {upright (Up along the surface normal), flat-on-its-side (Up along the
+                // tangent, either way)} is nearest the craft's touchdown heading, so a craft coming in broadside
+                // under top+bottom chutes settles horizontally instead of snapping upright.
+                double normal = SurfaceNormalAngle(v.Body, ang);
+                v.Heading = NearestAngle(v.Heading, normal, normal + Math.PI / 2, normal - Math.PI / 2);
                 _endMessage = $"Landed safely on {v.Body.Name}!   [Esc] to base";
             }
             else
@@ -1135,6 +1190,18 @@ namespace Solar.Scenes
             Vec2d pB = Vec2d.FromAngle(ang + e, body.SurfaceRadiusAt(ang + e));
             Vec2d tangent = pB - pA;
             return new Vec2d(tangent.Y, -tangent.X).Angle();   // tangent rotated -90 deg -> outward normal
+        }
+
+        /// <summary>The candidate angle closest to <paramref name="current"/> (smallest wrapped difference).</summary>
+        private static double NearestAngle(double current, params double[] candidates)
+        {
+            double best = candidates[0], bestD = double.MaxValue;
+            foreach (double c in candidates)
+            {
+                double d = Math.Abs(Kepler.WrapPi(c - current));
+                if (d < bestD) { bestD = d; best = c; }
+            }
+            return best;
         }
 
         private void UpdateDebris(double realDt)
@@ -1176,7 +1243,11 @@ namespace Solar.Scenes
 
             if (_map)
             {
-                Vec2d focusPos = _focus == 0 ? vesselPos : Ctx.Universe.Bodies[_focus - 1].AbsolutePositionAt(ut);
+                // encounter focus pins the camera to the encountered body at the (fixed) transition time,
+                // where the inside-SOI flyby leg is actually drawn; otherwise the chosen body / the vessel.
+                Vec2d focusPos = _encFocusBody != null
+                    ? _encFocusBody.AbsolutePositionAt(_encFocusUT)
+                    : _focus == 0 ? vesselPos : Ctx.Universe.Bodies[_focus - 1].AbsolutePositionAt(ut);
                 _cam.Center = focusPos + _mapPan;
                 _cam.MetersPerPixel = _mapZoom;
             }
@@ -1552,6 +1623,24 @@ namespace Solar.Scenes
         /// <summary>World angle the current SAS mode points at, or null if unavailable this frame.</summary>
         private double? SasHoldAngle(double ut) => HoldAngleFor(_sas, ut);
 
+        /// <summary>Heading deployed chutes aerodynamically weathervane the craft toward, or null when no
+        /// chute is deployed / there's no airflow. A single (one-ended) chute trails its end downwind so
+        /// the craft points retrograde; balanced top+bottom chutes hold broadside (flat across the airflow),
+        /// the nearer of velocity +/- 90 deg, for a horizontal descent / landing.</summary>
+        private double? ChuteAttitudeTarget()
+        {
+            var v = _vessel;
+            if (v == null || v.Landed || v.Velocity.Length < 1.0 || v.DynamicPressure < 1.0) return null;
+            if (!v.DeployedChuteOffset(out double offset, out bool bothEnds)) return null;
+            double prograde = v.Velocity.Angle();
+            if (bothEnds)
+            {
+                double a = prograde + Math.PI / 2, b = prograde - Math.PI / 2;
+                return Math.Abs(Kepler.WrapPi(a - v.Heading)) <= Math.Abs(Kepler.WrapPi(b - v.Heading)) ? a : b;
+            }
+            return offset >= 0 ? (-v.Velocity).Angle() : prograde;   // chute end trails downwind (retrograde)
+        }
+
         /// <summary>World angle a given SAS mode points at, or null if it can't be computed this frame.</summary>
         private double? HoldAngleFor(SasMode m, double ut)
         {
@@ -1899,7 +1988,7 @@ namespace Solar.Scenes
             if (!LiveOrbit(ut, out var live, out var body, out var primaryAbs))
             {
                 if (_vessel == null || _vessel.Destroyed || _vessel.Landed) { _nodes.Clear(); _burnSpent = 0; }
-                _dragHandle = -1; _dragNode = -1; _hoverHandle = -1; _hoverNode = -1; _hoverX = -1;
+                _dragHandle = -1; _dragNode = -1; _hoverHandle = -1; _hoverNode = -1; _hoverX = -1; _encFocusBody = null;
                 return;
             }
 
@@ -1910,6 +1999,16 @@ namespace Solar.Scenes
             _projStamp = double.NaN;
             Projection(ut, refreshNodes: !thrusting);
             double nodeSig0 = NodeSignature();   // invalidate the cache below if any edit changes the nodes
+
+            // keep an active encounter focus tracking the encounter as the node is tuned; drop it once the
+            // route no longer reaches that body's SOI.
+            if (_encFocusBody != null)
+            {
+                bool still = false;
+                foreach (var (eb, et, _) in PlannedEncounters(ut))
+                    if (eb == _encFocusBody) { _encFocusUT = et; still = true; break; }
+                if (!still) _encFocusBody = null;
+            }
 
             Vector2 mouse = inp.MousePos;
 
@@ -1971,6 +2070,14 @@ namespace Solar.Scenes
                 else if (_hoverNode >= 0)
                 {
                     _dragHandle = 4; _dragNode = _hoverNode; // move node along its orbit
+                }
+                else if (ClickedEncounterMarker(ut, mouse, out var encBody, out var encUT))
+                {
+                    // clicking an encounter marker frames that flyby (toggles off if already framed) so the
+                    // inside-SOI leg fills the screen and a capture node can be dropped on it
+                    if (_encFocusBody == encBody) _encFocusBody = null;
+                    else FocusEncounter(encBody, encUT);
+                    _dragHandle = -1; _dragNode = -1;
                 }
                 else if (!_showTargetWindow)
                 {
@@ -2852,8 +2959,26 @@ namespace Solar.Scenes
                 // transition marker where this patch hands off to a different SOI
                 if (i + 1 < segs.Count && segs[i + 1].Body != sg.Body && !double.IsInfinity(sg.EndUT))
                 {
+                    var next = segs[i + 1];
                     Vec2d mPos = sg.PrimaryAbs + Kepler.StateAtTime(sg.El, sg.EndUT).pos;
-                    pb.CircleOutline(_cam.WorldToScreen(mPos), 6, 1.5f, orange);
+                    var ms = _cam.WorldToScreen(mPos);
+                    pb.CircleOutline(ms, 6, 1.5f, orange);
+
+                    // Encounter (descent into a child SOI): draw the encountered body + its SOI ring at the
+                    // encounter time, and a closest-approach (Pe) marker on the flyby leg, so the "passage
+                    // close to <body>" is visible. Click the marker to frame this flyby (see ClickedEncounterMarker)
+                    // and plan a capture node on the otherwise-tiny inside-SOI leg.
+                    if (next.Body.Parent == sg.Body)
+                    {
+                        var encCol = Color.Lerp(next.Body.BodyColor, orange, 0.5f);
+                        var bs = _cam.WorldToScreen(next.PrimaryAbs);
+                        float soiPx = (float)(next.Body.SoiRadius / _cam.MetersPerPixel);
+                        if (soiPx >= 3) pb.CircleOutline(bs, soiPx, 1.2f, encCol * 0.7f);
+                        pb.CircleOutline(bs, Math.Max(3f, (float)(next.Body.Radius / _cam.MetersPerPixel)), 1.4f, encCol);
+                        sb.DrawString(Ctx.Font, next.Body.Name, ms + new Vector2(9, -7), encCol);
+                        if (i + 1 != lastPlanned)
+                            DrawApPeMarkers(pb, sb, next.El, next.PrimaryAbs, next.Body.Radius, encCol, new Color(255, 210, 140));
+                    }
                 }
             }
 

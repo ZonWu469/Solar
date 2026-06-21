@@ -78,6 +78,7 @@ namespace Solar.Parts
         public double DryMass { get; set; }
         public double FuelCapacity { get; set; }
         public double Thrust { get; set; }
+        public double ThrustAngle { get; set; }
         public double Isp { get; set; }
         public double Width { get; set; }
         public double Height { get; set; }
@@ -104,7 +105,7 @@ namespace Solar.Parts
         public static PartDefDto FromPart(PartDef p) => new()
         {
             Name = p.Name, Id = p.Id, Kind = p.Kind, DryMass = p.DryMass, FuelCapacity = p.FuelCapacity,
-            Thrust = p.Thrust, Isp = p.Isp, Width = p.Width, Height = p.Height, CdA = p.CdA,
+            Thrust = p.Thrust, ThrustAngle = p.ThrustAngle, Isp = p.Isp, Width = p.Width, Height = p.Height, CdA = p.CdA,
             DeployedCdA = p.DeployedCdA, ControlAuthority = p.ControlAuthority, Sas = p.Sas, ImpactTolerance = p.ImpactTolerance,
             Slots = p.Slots,
             TintR = p.Tint.R, TintG = p.Tint.G, TintB = p.Tint.B,
@@ -118,7 +119,7 @@ namespace Solar.Parts
         {
             Name = Name, Id = string.IsNullOrEmpty(Id) ? PartDef.Slug(Name) : Id,
             Kind = Kind, DryMass = DryMass, FuelCapacity = FuelCapacity,
-            Thrust = Thrust, Isp = Isp, Width = Width, Height = Height, CdA = CdA,
+            Thrust = Thrust, ThrustAngle = ThrustAngle, Isp = Isp, Width = Width, Height = Height, CdA = CdA,
             // migration-safe fallbacks so older parts.json (missing these fields) still behaves:
             DeployedCdA = DeployedCdA > 0 ? DeployedCdA : (Kind == PartKind.Parachute ? PartCatalog.ChuteDeployedCdA : 0),
             ControlAuthority = ControlAuthority > 0 ? ControlAuthority : (Kind == PartKind.Pod ? DefaultPodAuthority(DryMass) : 0),
