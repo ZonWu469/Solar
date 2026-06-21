@@ -509,7 +509,12 @@ namespace Solar.Scenes
                 if (inp.Pressed(Keys.L)) ToggleGear();
                 if (inp.Pressed(Keys.H)) CycleSas();
                 if (inp.Pressed(Keys.R)) _vessel.RcsEnabled = !_vessel.RcsEnabled;
-                _vessel.RcsCommand = Vec2d.Zero;
+                // translation command: Q/E left-right (drives the off-axis lateral thrusters and RCS) is
+                // read even while landed so the thruster responds the instant the craft lifts off; the I/K
+                // fore-aft RCS and the rotation model below are flight-only.
+                double rx = 0, ry = 0;
+                if (inp.Down(Keys.E)) rx += 1;
+                if (inp.Down(Keys.Q)) rx -= 1;
                 if (_vessel.Landed)
                 {
                     _vessel.AngularVelocity = 0;             // no spinning while sitting on the surface
@@ -569,14 +574,11 @@ namespace Solar.Scenes
                     else
                         _vessel.AngularVelocity = 0;
 
-                    // RCS translation: I/K fore-aft (along Up axis), J/L left-right
-                    double rx = 0, ry = 0;
+                    // RCS fore-aft translation: I/K along the Up axis (left-right Q/E is read above)
                     if (inp.Down(Keys.I)) ry += 1;
                     if (inp.Down(Keys.K)) ry -= 1;
-                    if (inp.Down(Keys.L)) rx += 1;
-                    if (inp.Down(Keys.J)) rx -= 1;
-                    _vessel.RcsCommand = new Vec2d(rx, ry);
                 }
+                _vessel.RcsCommand = new Vec2d(rx, ry);
                 if (inp.Pressed(Keys.Space)) FireNextStage();
             }
 

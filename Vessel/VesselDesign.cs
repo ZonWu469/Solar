@@ -20,6 +20,10 @@ namespace Solar.Vessels
         /// the host axial part and of the drop <see cref="Stage"/>. -1 = derive from geometry (fires with
         /// the host; a radial chute deploys last).</summary>
         public int FireStage = -1;
+        /// <summary>Which side this mount occupies: -1 = mirrored symmetric pair (the default for boosters,
+        /// decouplers, tanks, gear), 0 = right side only, 1 = left side only. Lateral thrusters mount on a
+        /// single chosen side; <see cref="MaterializeRadials"/> emits one runtime part instead of a pair.</summary>
+        public int Side = -1;
         public PartDef Root => Parts.Count > 0 ? Parts[0] : null;
         public RadialMount() { }
         public RadialMount(PartDef root, bool separate = true) { if (root != null) Parts.Add(root); Separate = separate; }
@@ -53,11 +57,17 @@ namespace Solar.Vessels
         /// <summary>Mount a radial part as a new symmetric pair. When <paramref name="separate"/> is left
         /// unset, the staging choice defaults by part type: a booster/engine or a radial decoupler drops as
         /// its own stage (STG), while a fuel tank or structural part rides the core (KEEP) so it actually
-        /// feeds the rocket.</summary>
-        public void AddRadial(PartDef def, bool? separate = null)
-            => Mounts.Add(new RadialMount(def, separate ?? (def != null && (def.Kind == PartKind.Engine
+        /// feeds the rocket. A lateral thruster is a flight control, so it defaults to KEEP too (welded,
+        /// ignites with its host stage, never jettisoned) rather than dropping like a booster.</summary>
+        public void AddRadial(PartDef def, bool? separate = null, int side = -1)
+            => Mounts.Add(new RadialMount(def, separate ?? (def != null && !def.IsLateralThruster
+                                                            && (def.Kind == PartKind.Engine
                                                                           || def.Kind == PartKind.SolidBooster
-                                                                          || def.Kind == PartKind.RadialDecoupler))));
+                                                                          || def.Kind == PartKind.RadialDecoupler)))
+               {
+                   // lateral thrusters mount single-sided; default to the right side if no side was chosen
+                   Side = def != null && def.IsLateralThruster ? (side >= 0 ? side : 0) : -1
+               });
 
         /// <summary>Attach <paramref name="def"/> to the bottom of an existing radial mount's sub-stack
         /// (e.g. an engine below a radial tank).</summary>
@@ -121,7 +131,10 @@ namespace Solar.Vessels
             for (int mi = 0; mi < e.Mounts.Count; mi++)
             {
                 var mount = e.Mounts[mi];
-                for (int side = 0; side <= 1; side++)
+                // single-sided mount (lateral thruster): one runtime side-stack; otherwise a mirrored pair
+                int sideLo = mount.Side >= 0 ? mount.Side : 0;
+                int sideHi = mount.Side >= 0 ? mount.Side : 1;
+                for (int side = sideLo; side <= sideHi; side++)
                     for (int slot = 0; slot < mount.Parts.Count; slot++)
                         host.Radials.Add(new Part(mount.Parts[slot])
                         {
@@ -158,10 +171,16 @@ namespace Solar.Vessels
                 foreach (var kv in byMount)
                 {
                     var group = kv.Value;
-                    int side0 = int.MaxValue;
-                    foreach (var r in group) if (r.RadialSide >= 0 && r.RadialSide < side0) side0 = r.RadialSide;
+                    int side0 = int.MaxValue; bool side0Seen = false, side1Seen = false;
+                    foreach (var r in group)
+                    {
+                        if (r.RadialSide == 0) side0Seen = true; else if (r.RadialSide == 1) side1Seen = true;
+                        if (r.RadialSide >= 0 && r.RadialSide < side0) side0 = r.RadialSide;
+                    }
                     group.Sort((a, b) => a.RadialSlot.CompareTo(b.RadialSlot));
-                    var mount = new RadialMount { Separate = group[0].RadialSeparate, Stage = group[0].Stage, FireStage = group[0].FireStage };
+                    // present on one side only => single-sided mount (lateral thruster); both => mirrored pair
+                    int mountSide = (side0Seen ^ side1Seen) ? (side0Seen ? 0 : 1) : -1;
+                    var mount = new RadialMount { Separate = group[0].RadialSeparate, Stage = group[0].Stage, FireStage = group[0].FireStage, Side = mountSide };
                     foreach (var r in group)
                         if (r.RadialSide == side0 || r.RadialSide < 0) mount.Parts.Add(r.Def);
                     if (mount.Parts.Count > 0) e.Mounts.Add(mount);

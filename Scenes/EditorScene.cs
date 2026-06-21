@@ -440,17 +440,28 @@ namespace Solar.Scenes
                         float ph = (float)(e.Def.Height * scale), pw = (float)(e.Def.Width * scale);
                         float yy = gaps[hoverPart];
                         pb.RectOutline(new Rectangle((int)(cx - pw / 2 - 10), (int)yy - 2, (int)pw + 20, (int)ph + 4), 2, new Color(120, 230, 140));
-                        // ghost the symmetric pair at the column where it would land
+                        // ghost the mount at the column where it would land
                         float gw = (float)(_held.Width * scale), gh = (float)(_held.Height * scale);
                         float off = NextMountOffset(e, pw, scale, gw);
                         float gyTop = yy + (ph - gh) * 0.5f;
-                        DrawGhost(pb, _held, cx + off, gyTop, gw, gh);
-                        DrawGhost(pb, _held, cx - off, gyTop, gw, gh);
-                        if (inp.LeftClick) { e.AddRadial(_held); _selected = hoverPart; }
+                        if (_held.IsLateralThruster)
+                        {
+                            // single-sided: ghost only the side the cursor is hovering (0 = right, 1 = left)
+                            int side = inp.MousePos.X < cx ? 1 : 0;
+                            DrawGhost(pb, _held, cx + (side == 1 ? -off : off), gyTop, gw, gh);
+                            if (inp.LeftClick) { e.AddRadial(_held, side: side); _selected = hoverPart; }
+                        }
+                        else
+                        {
+                            DrawGhost(pb, _held, cx + off, gyTop, gw, gh);
+                            DrawGhost(pb, _held, cx - off, gyTop, gw, gh);
+                            if (inp.LeftClick) { e.AddRadial(_held); _selected = hoverPart; }
+                        }
                     }
                     else
                     {
-                        var msg = "Hover a part to mount " + _held.Name + " radially (mirrored pair)";
+                        var msg = "Hover a part to mount " + _held.Name + " radially"
+                                  + (_held.IsLateralThruster ? " (single side - hover left/right)" : " (mirrored pair)");
                         sb.DrawString(f, msg, new Vector2(cx - f.MeasureString(msg).X / 2, topY - 22), new Color(120, 230, 140));
                     }
                 }
@@ -466,9 +477,11 @@ namespace Solar.Scenes
                             float cxh = hit.rect.X + hit.rect.Width / 2f;
                             if (cxh < cx) leftX = cxh; else rightX = cxh;
                         }
-                    DrawGhost(pb, _held, leftX, bottom, gw, gh);
-                    DrawGhost(pb, _held, rightX, bottom, gw, gh);
-                    var tip = "Attach " + _held.Name + " below this radial (mirrored)";
+                    // a single-sided mount (lateral thruster) only has one column; ghost just that side
+                    int tgtSide = hitMount >= 0 && hitMount < Stack[hitStack].Mounts.Count ? Stack[hitStack].Mounts[hitMount].Side : -1;
+                    if (tgtSide != 1) DrawGhost(pb, _held, rightX, bottom, gw, gh);
+                    if (tgtSide != 0) DrawGhost(pb, _held, leftX, bottom, gw, gh);
+                    var tip = "Attach " + _held.Name + " below this radial" + (tgtSide >= 0 ? " (single side)" : " (mirrored)");
                     sb.DrawString(f, tip, new Vector2(cx - f.MeasureString(tip).X / 2, topY - 22), new Color(120, 230, 140));
                     if (inp.LeftClick) { Stack[hitStack].AppendToMount(hitMount, _held); _selected = hitStack; }
                 }
@@ -602,6 +615,9 @@ namespace Solar.Scenes
                 float yTop = gear ? y + ph * 0.67f : y + (ph - colH) * 0.5f;
                 for (int s = -1; s <= 1; s += 2)
                 {
+                    // single-sided mounts (lateral thrusters) draw only their chosen side (0 = right, 1 = left)
+                    if (mount.Side == 0 && s < 0) continue;
+                    if (mount.Side == 1 && s > 0) continue;
                     float side = cx + s * cxOff;
                     float yy = yTop;
                     for (int pi = 0; pi < mount.Parts.Count; pi++)

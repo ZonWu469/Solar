@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 
@@ -44,6 +45,11 @@ namespace Solar.Parts
         /// than stacking inline. Drives the editor's radial-attach interaction.</summary>
         public bool Radial => Kind == PartKind.RadialDecoupler || Kind == PartKind.LandingGear
                               || (Id != null && (Id.EndsWith("-r") || Id.StartsWith("radial-")));
+
+        /// <summary>An off-axis radial engine (e.g. <c>radial-thruster</c>): fires sideways on the Q/E
+        /// command rather than along the craft axis. These mount on a single chosen side instead of as a
+        /// mirrored pair (see <see cref="Solar.Vessels.RadialMount.Side"/>).</summary>
+        public bool IsLateralThruster => Kind == PartKind.Engine && Math.Abs(ThrustAngle) > 1e-6;
 
         /// <summary>Number of module slots this part exposes (set per-part in parts.json). Pods and
         /// tanks carry equipment; structural parts don't. Entries that omit it fall back to

@@ -46,7 +46,7 @@ namespace Solar.Parts
         /// false = it stays welded to its host part and only leaves when that part is decoupled.</summary>
         public bool RadialSeparate = true;
         /// <summary>Design round-trip tags (ignored by physics): which radial mount this part belongs to
-        /// on its host, its side (0 = left, 1 = right), and its slot in the mount's vertical sub-stack
+        /// on its host, its side (0 = right, 1 = left), and its slot in the mount's vertical sub-stack
         /// (0 = against the host). Let <see cref="VesselDesign.FromVessel"/> regroup the flat
         /// <see cref="Radials"/> list back into design mounts. -1 means "not a materialized radial".</summary>
         public int RadialMountId = -1, RadialSide = -1, RadialSlot = -1;

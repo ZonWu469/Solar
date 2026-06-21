@@ -69,7 +69,7 @@ namespace Solar.Rendering
             float jx = 0, jy = 0;
             if (rcsLen > 1e-6) { jx = -(float)(v.RcsCommand.X / rcsLen); jy = -(float)(v.RcsCommand.Y / rcsLen); }
 
-            // off-axis (radial / lateral) engines fire on the signed J/L command; their plume exits
+            // off-axis (radial / lateral) engines fire on the signed Q/E command; their plume exits
             // opposite the thrust direction, so it swings to the craft's other side as the player flips J<->L.
             float latCmd = !v.IsDebris ? (float)Math.Clamp(v.RcsCommand.X, -1, 1) : 0f;
             bool radialFlaming = !v.IsDebris && v.RadialThrusting;
@@ -404,7 +404,7 @@ namespace Solar.Rendering
                         float flen = rh * (0.9f + 2.0f * rThr) * flick;
                         DrawPlume(xc, yb, rw * 0.30f, flen, rThr, rd, flick);
                     }
-                    // off-axis (radial) engine firing on the J/L command: plume exits opposite its thrust
+                    // off-axis (radial) engine firing on the Q/E command: plume exits opposite its thrust
                     // direction. Local thrust dir for angle t is (sin t, cos t); command sign flips it.
                     // single-sided thruster only fires (and plumes) when the command matches the side it
                     // pushes away from (side 1 = left pushes +Right on latCmd>0; side 0 = right on latCmd<0)

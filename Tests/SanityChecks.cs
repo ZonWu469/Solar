@@ -1791,7 +1791,7 @@ namespace Solar.Tests
 
             // 35. off-axis engine thrust: ThrustDir maps the authored angle to the craft frame (0 = Up,
             //     +/-90 = right/left). An all-axial stack's ThrustVector equals CurrentThrust along Up. A
-            //     radial (90-deg) engine fires on the SIGNED J/L command (RcsCommand.X), not the throttle:
+            //     radial (90-deg) engine fires on the SIGNED Q/E command (RcsCommand.X), not the throttle:
             //     +1 -> +Right, -1 -> -Right, command 0 -> no thrust; and it is excluded from the scalar
             //     CurrentThrust / MaxAvailableThrust (those stay the main-throttle figure). Guards the
             //     left/right-firing horizontal-landing thrusters.
@@ -1807,11 +1807,11 @@ namespace Solar.Tests
                 ax.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Terrier")) { Ignited = true });
                 bool axOk = ax.CurrentThrust > 0 && (ax.ThrustVector - ax.Up * ax.CurrentThrust).Length < 1e-3;
 
-                double rt = Parts.PartCatalog.Get("Lateral Thruster (J/L)").Thrust;
+                double rt = Parts.PartCatalog.Get("Lateral Thruster (Q/E)").Thrust;
                 var rad = new Vessels.Vessel { Heading = Math.PI / 2, Throttle = 1 };
                 rad.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
                 rad.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Tank T400")) { Fuel = 400 });
-                rad.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Lateral Thruster (J/L)")) { Ignited = true });
+                rad.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Lateral Thruster (Q/E)")) { Ignited = true });
                 // throttle alone (no lateral command) produces no radial thrust, and the radial engine is
                 // excluded from the scalar throttle thrust figures.
                 bool offThrottle = rad.ThrustVector.Length < 1e-6 && rad.CurrentThrust == 0 && rad.MaxAvailableThrust == 0;
@@ -1823,6 +1823,38 @@ namespace Solar.Tests
                 bool radOk = offThrottle && rightOk && leftOk;
 
                 Check("off-axis engine thrust", dirOk && axOk && radOk);
+            }
+
+            // 35b. single-sided lateral thrusters: a side-tagged off-axis engine pushes away from its
+            //      mount side and fires only on the matching Q/E command. Left (RadialSide 1) pushes +Right
+            //      on a +command; right (RadialSide 0) pushes -Right on a -command; a lone thruster cannot
+            //      push the other way. Guards the per-side thrust gate.
+            {
+                double rt = Parts.PartCatalog.Get("Lateral Thruster (Q/E)").Thrust;
+                var v = new Vessels.Vessel { Heading = Math.PI / 2 };       // Up = (0,1), Right = (1,0)
+                v.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                var host = new Parts.Part(Parts.PartCatalog.Get("Tank T400")) { Fuel = 400 };
+                host.Radials.Add(new Parts.Part(Parts.PartCatalog.Get("Lateral Thruster (Q/E)")) { Ignited = true, RadialSide = 1 }); // left
+                host.Radials.Add(new Parts.Part(Parts.PartCatalog.Get("Lateral Thruster (Q/E)")) { Ignited = true, RadialSide = 0 }); // right
+                v.Parts.Add(host);
+
+                v.RcsCommand = new Vec2d(1, 0);    // command +Right -> only the left thruster fires (+Right)
+                bool leftFires = (v.ThrustVector - v.Right * rt).Length < 1e-3;
+                v.RcsCommand = new Vec2d(-1, 0);   // command -Right -> only the right thruster fires (-Right)
+                bool rightFires = (v.ThrustVector + v.Right * rt).Length < 1e-3;
+
+                // a lone left thruster can only push +Right; a -Right command yields no thrust
+                var lone = new Vessels.Vessel { Heading = Math.PI / 2 };
+                lone.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                var lh = new Parts.Part(Parts.PartCatalog.Get("Tank T400")) { Fuel = 400 };
+                lh.Radials.Add(new Parts.Part(Parts.PartCatalog.Get("Lateral Thruster (Q/E)")) { Ignited = true, RadialSide = 1 });
+                lone.Parts.Add(lh);
+                lone.RcsCommand = new Vec2d(-1, 0);
+                bool loneBlocked = lone.ThrustVector.Length < 1e-6;
+                lone.RcsCommand = new Vec2d(1, 0);
+                bool loneFires = (lone.ThrustVector - lone.Right * rt).Length < 1e-3;
+
+                Check("single-sided thruster gate", leftFires && rightFires && loneBlocked && loneFires);
             }
 
             // 36. chute weathervane geometry: a top-mounted chute sits above the CoM (offset>0 -> craft
@@ -1849,14 +1881,14 @@ namespace Solar.Tests
                 Check("chute weathervane geometry", topOk && bothOk && noneOk);
             }
 
-            // 37. radial-engine fuel draw: an off-axis engine fired on the J/L command burns its segment's
+            // 37. radial-engine fuel draw: an off-axis engine fired on the Q/E command burns its segment's
             //     cross-fed fuel even at zero throttle; with no command and no throttle nothing drains.
             {
                 var df = new Vessels.Vessel { Throttle = 0 };
                 df.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
                 var tnk = new Parts.Part(Parts.PartCatalog.Get("Tank T400")) { Fuel = 400 };
                 df.Parts.Add(tnk);
-                df.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Lateral Thruster (J/L)")) { Ignited = true });
+                df.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Lateral Thruster (Q/E)")) { Ignited = true });
 
                 df.RcsCommand = new Vec2d(1, 0);
                 double before = tnk.Fuel;
@@ -1872,12 +1904,12 @@ namespace Solar.Tests
             }
 
             // 38. RadialThrusting gate: true only with an ignited, fuelled off-axis engine AND a nonzero
-            //     lateral command; an all-axial stack never reports it even while commanding J/L.
+            //     lateral command; an all-axial stack never reports it even while commanding Q/E.
             {
                 var r = new Vessels.Vessel();
                 r.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
                 r.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Tank T400")) { Fuel = 400 });
-                r.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Lateral Thruster (J/L)")) { Ignited = true });
+                r.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Lateral Thruster (Q/E)")) { Ignited = true });
                 bool noCmd = !r.RadialThrusting;
                 r.RcsCommand = new Vec2d(1, 0);
                 bool firing = r.RadialThrusting;
@@ -1889,6 +1921,40 @@ namespace Solar.Tests
                 bool axialNever = !ax.RadialThrusting;
 
                 Check("radial-thrusting gate", noCmd && firing && axialNever);
+            }
+
+            // 38c. lateral thruster launch flow: a thruster mounted through the editor path (AddRadial)
+            //      defaults to welded (KEEP, not a jettisoned strap-on), ignites with its host engine's
+            //      stage, adds no spurious jettison stage, and fires on the matching Q/E command after
+            //      staging. Guards the design->Instantiate->FireNext wiring the checks above bypass by
+            //      hand-building the vessel with Ignited/RadialSide already set.
+            {
+                var d = new Vessels.VesselDesign();
+                d.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Pod Mk1")));
+                var tankEntry = new Vessels.StackEntry(Parts.PartCatalog.Get("Tank T400"));
+                tankEntry.AddRadial(Parts.PartCatalog.Get("Lateral Thruster (Q/E)"), side: 0);   // right side
+                d.Stack.Add(tankEntry);
+                d.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Terrier")));
+
+                var v = d.Instantiate();
+                v.Heading = Math.PI / 2; v.Throttle = 0;   // Right = (1,0); zero throttle isolates the lateral engine
+
+                Parts.Part thr = null;
+                foreach (var p in v.Parts) foreach (var rr in p.Radials) if (rr.Def.IsLateralThruster) thr = rr;
+                bool welded = thr != null && !thr.RadialSeparate;          // KEEP, not strap-on
+                bool offBefore = thr != null && !thr.Ignited;             // dead until its stage fires
+
+                Vessels.Staging.FireNext(v);                              // fire stage 0 (liftoff)
+                bool litWithEngine = thr != null && thr.Ignited && thr.FireStage == 0;
+                bool oneStage = Vessels.Staging.MaxStage(v.Parts) == 0;   // no extra "Drop boosters" stage
+
+                double rt = Parts.PartCatalog.Get("Lateral Thruster (Q/E)").Thrust;
+                v.RcsCommand = new Vec2d(-1, 0);                          // right-mounted thruster fires on -Right (Q)
+                bool fires = (v.ThrustVector + v.Right * rt).Length < 1e-3;
+                v.RcsCommand = Vec2d.Zero;
+                bool silent = v.ThrustVector.Length < 1e-6;
+
+                Check("lateral thruster launch flow", welded && offBefore && litWithEngine && oneStage && fires && silent);
             }
 
             string res = $"Physics self-test: {pass}/{total} PASS";

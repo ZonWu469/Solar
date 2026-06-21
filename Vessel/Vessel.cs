@@ -337,35 +337,50 @@ namespace Solar.Vessels
         public double CurrentThrust => LiquidThrust * Throttle + SolidThrust;
 
         /// <summary>An engine is "axial" when it fires (near) along the craft +Up axis; otherwise it is an
-        /// off-axis (radial / lateral) engine driven by the J/L translation command rather than the throttle.</summary>
+        /// off-axis (radial / lateral) engine driven by the Q/E translation command rather than the throttle.</summary>
         private static bool IsAxial(Part p) => Math.Abs(p.Def.ThrustAngle) < 1e-6;
 
-        /// <summary>Signed lateral throttle for off-axis engines, from the J/L translation command
+        /// <summary>Signed lateral throttle for off-axis engines, from the Q/E translation command
         /// (<see cref="RcsCommand"/>.X): +1 fires toward craft +Right, -1 toward -Right (bidirectional).</summary>
         private double LateralCommand => Math.Clamp(RcsCommand.X, -1, 1);
 
         /// <summary>True while off-axis (radial) engines are actively firing on the lateral command: an ignited,
-        /// fuelled off-axis engine plus a nonzero J/L command. Gates physics/rails like a throttle burn.</summary>
+        /// fuelled off-axis engine plus a nonzero Q/E command. Gates physics/rails like a throttle burn.</summary>
         public bool RadialThrusting
         {
             get
             {
-                if (LateralCommand == 0) return false;
+                double lateral = LateralCommand;
+                if (lateral == 0) return false;
                 foreach (var seg in Segments())
                 {
                     if (SegmentFuel(seg) <= 0) continue;
                     for (int i = seg.start; i <= seg.end; i++)
                     {
-                        if (IsOffAxisEngineLive(Parts[i])) return true;
-                        foreach (var r in Parts[i].Radials) if (IsOffAxisEngineLive(r)) return true;
+                        if (IsOffAxisEngineLive(Parts[i], lateral)) return true;
+                        foreach (var r in Parts[i].Radials) if (IsOffAxisEngineLive(r, lateral)) return true;
                     }
                 }
                 return false;
             }
         }
 
-        private static bool IsOffAxisEngineLive(Part p) =>
-            p.Def.Kind == PartKind.Engine && p.Ignited && !IsAxial(p);
+        // an ignited off-axis engine that actually fires on the current lateral command (its mount side
+        // must match the commanded direction, so a single-sided thruster only burns toward where it pushes)
+        private bool IsOffAxisEngineLive(Part p, double lateral) =>
+            p.Def.Kind == PartKind.Engine && p.Ignited && !IsAxial(p) && EngineLevel(p, lateral) != 0;
+
+        /// <summary>Signed drive level for an engine under the current lateral command (sign matches craft
+        /// +Right). Axial -> throttle. A single-sided off-axis thruster (<see cref="Part.RadialSide"/> &gt;= 0)
+        /// only fires when the Q/E command points the way it pushes (left-mounted/side 1 pushes +Right,
+        /// right-mounted/side 0 pushes -Right), so it never reverses. Untagged off-axis engines
+        /// (RadialSide &lt; 0) keep the old bidirectional behavior.</summary>
+        private double EngineLevel(Part p, double lateral)
+        {
+            if (IsAxial(p)) return Throttle;
+            if (p.RadialSide >= 0 && Math.Sign(lateral) != (p.RadialSide == 1 ? 1 : -1)) return 0;
+            return lateral;
+        }
 
         /// <summary>World-frame direction an engine fires, given its authored <see cref="PartDef.ThrustAngle"/>
         /// (deg, 0 = craft <see cref="Up"/>; +90 = <see cref="Right"/>, -90 = left), per the angle/screen
@@ -374,7 +389,7 @@ namespace Solar.Vessels
 
         /// <summary>World-frame thrust force vector (N). Axial engines fire along craft +Up scaled by
         /// <see cref="Throttle"/>; off-axis (radial) engines fire along their <see cref="PartDef.ThrustAngle"/>
-        /// scaled by the signed J/L command (<see cref="LateralCommand"/>), so the player aims them
+        /// scaled by the signed Q/E command (<see cref="LateralCommand"/>), so the player aims them
         /// left/right independently of the throttle. The magnitude equals <see cref="CurrentThrust"/> for an
         /// all-axial stack at full throttle. Same fuel/segment/power gating as
         /// <see cref="LiquidThrust"/> + <see cref="SolidThrust"/>.</summary>
@@ -403,7 +418,7 @@ namespace Solar.Vessels
         private void AddEngineThrust(ref Vec2d sum, Part p, double lateral)
         {
             if (p.Def.Kind != PartKind.Engine || !p.Ignited) return;
-            double level = IsAxial(p) ? Throttle : lateral;   // axial -> throttle; off-axis -> signed J/L command
+            double level = EngineLevel(p, lateral);   // axial -> throttle; off-axis -> side-gated Q/E command
             if (level == 0) return;
             sum += ThrustDir(p.Def.ThrustAngle) * (p.Def.Thrust * EnginePower(p) * level);
         }
@@ -414,7 +429,7 @@ namespace Solar.Vessels
 
         /// <summary>Throttleable thrust from ignited <em>axial</em> liquid engines whose segment still has fuel
         /// (radial engines on a segment's parts draw from the same cross-fed pool). Off-axis engines fire on
-        /// the J/L command instead, so they are excluded from this main-throttle figure.</summary>
+        /// the Q/E command instead, so they are excluded from this main-throttle figure.</summary>
         public double LiquidThrust
         {
             get
@@ -509,7 +524,7 @@ namespace Solar.Vessels
                     p.Fuel = Math.Max(0, p.Fuel - p.Def.FuelFlowAtMax * dt);
 
             // liquid engines draw from their segment's cross-fed pool: axial engines flow at the main
-            // throttle, off-axis (radial) engines at the magnitude of the signed J/L command.
+            // throttle, off-axis (radial) engines at the magnitude of the signed Q/E command.
             double lateral = Math.Abs(LateralCommand);
             if (Throttle <= 0 && lateral <= 0) return;
             foreach (var seg in Segments())
@@ -537,7 +552,7 @@ namespace Solar.Vessels
         private void AccumEngineFlow(Part p, ref double flow, double lateral)
         {
             if (p.Def.Kind != PartKind.Engine || !p.Ignited) return;
-            double level = IsAxial(p) ? Throttle : lateral;
+            double level = Math.Abs(EngineLevel(p, lateral));   // a thruster burns whichever way it fires
             if (level > 0) flow += p.Def.FuelFlowAtMax * level;
         }
 
