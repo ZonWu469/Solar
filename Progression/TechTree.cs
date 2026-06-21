@@ -173,6 +173,12 @@ namespace Solar.Progression
                 Description = "The T8000 and massive Sledgehammer SRB — for missions that rewrite the record books.",
             },
             new TechNode {
+                Id = "ultra-heavy", Title = "Imperator-Heavy", Cost = 180, Prereqs = new[] { "megarocketry" },
+                Parts = new[] { "tank-t16000", "imperator-srb" },
+                Modules = new string[0],
+                Description = "The T16000 and massive Imperator SRB — for missions that rewrite the record books.",
+            },
+            new TechNode {
                 Id = "aerospace", Title = "Aerospace", Cost = 110, Prereqs = new[] { "megarocketry" },
                 Parts = new[] { "aerospike" },
                 Modules = new string[0],

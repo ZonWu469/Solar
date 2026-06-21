@@ -867,6 +867,18 @@
 /processorParam:TextureFormat=Color
 /build:Textures/parts/heavy-landing-gear.png
 
+#begin Textures/parts/imperator-srb.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/parts/imperator-srb.png
+
 #begin Textures/parts/inflatable-habitat.png
 /importer:TextureImporter
 /processor:TextureProcessor
