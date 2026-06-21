@@ -93,11 +93,17 @@ namespace Solar.Vessels
             }
         }
 
-        /// <summary>The highest stage index in use across the vessel's parts (and radials).</summary>
+        /// <summary>The highest stage index in use across the vessel's parts (and radials). Radials count
+        /// their <see cref="Part.FireStage"/> too: a welded booster can ignite at a stage above its drop
+        /// <see cref="Part.Stage"/>, and that ignition event must still be reachable by the stage walk.</summary>
         public static int MaxStage(IReadOnlyList<Part> parts)
         {
             int m = 0;
-            foreach (var p in parts) { if (p.Stage > m) m = p.Stage; foreach (var r in p.Radials) if (r.Stage > m) m = r.Stage; }
+            foreach (var p in parts)
+            {
+                if (p.Stage > m) m = p.Stage;
+                foreach (var r in p.Radials) { if (r.Stage > m) m = r.Stage; if (r.FireStage > m) m = r.FireStage; }
+            }
             return m;
         }
 
@@ -107,9 +113,11 @@ namespace Solar.Vessels
         /// <see cref="Vessel.CurrentStage"/> and returns the jettisoned debris (or null).</summary>
         public static Vessel FireNext(Vessel v)
         {
-            AssignDefaultStages(v.Parts);
-            int s = v.CurrentStage;
-            v.CurrentStage++;
+            // Snap to the next stage that actually does something (NextEventStage assigns default stages),
+            // so [Space]/click always fires the stage the HUD highlights and never wastes a press on a gap.
+            int s = NextEventStage(v);
+            if (s < 0) return null;            // nothing left to stage
+            v.CurrentStage = s + 1;
 
             // ---- ignitions + chute deploys ----
             bool ignitedAny = false;
@@ -133,7 +141,8 @@ namespace Solar.Vessels
             {
                 var host = v.Parts[i];
                 for (int k = host.Radials.Count - 1; k >= 0; k--)
-                    if (host.Radials[k].RadialSeparate && host.Radials[k].Stage == s)
+                    // parachutes deploy (above) and are never jettisoned as a strap-on
+                    if (host.Radials[k].RadialSeparate && host.Radials[k].Def.Kind != PartKind.Parachute && host.Radials[k].Stage == s)
                     { freed.Add(host.Radials[k]); host.Radials.RemoveAt(k); }
             }
 
@@ -168,6 +177,40 @@ namespace Solar.Vessels
             }
             foreach (var r in freed) debris.Parts.Add(r);  // freed radials become standalone debris parts
             return debris;
+        }
+
+        /// <summary>The next stage index (&gt;= the vessel's <see cref="Vessel.CurrentStage"/>) that actually
+        /// does something — ignites an engine/booster, fires a decoupler, jettisons a separate strap-on, or
+        /// deploys a parachute — or -1 if none remain. Both the HUD's active row and <see cref="FireNext"/>
+        /// key off this, so the highlighted stage is always exactly what the next press fires (no drift, no
+        /// wasted presses on empty stage indices). Fills default stages as a side effect.</summary>
+        public static int NextEventStage(Vessel v)
+        {
+            AssignDefaultStages(v.Parts);
+            int max = MaxStage(v.Parts);
+            for (int s = Math.Max(0, v.CurrentStage); s <= max; s++)
+                if (HasEventAt(v.Parts, s)) return s;
+            return -1;
+        }
+
+        /// <summary>Whether firing stage <paramref name="s"/> would activate anything on these parts. Mirrors
+        /// the action set in <see cref="FireNext"/>: axial engines/boosters/decouplers/parachutes at
+        /// <see cref="Part.Stage"/>; radial engines/boosters/parachutes at their <see cref="Part.FireStage"/>;
+        /// and separate (non-parachute) strap-ons jettisoned at their <see cref="Part.Stage"/>.</summary>
+        private static bool HasEventAt(IReadOnlyList<Part> parts, int s)
+        {
+            foreach (var p in parts)
+            {
+                if (p.Stage == s && (p.Def.Kind == PartKind.Engine || p.Def.Kind == PartKind.SolidBooster
+                    || p.Def.Kind == PartKind.Decoupler || p.Def.Kind == PartKind.Parachute)) return true;
+                foreach (var r in p.Radials)
+                {
+                    if (r.Def.Kind == PartKind.Parachute) { if (r.FireStage == s) return true; }
+                    else if ((r.Def.Kind == PartKind.Engine || r.Def.Kind == PartKind.SolidBooster) && r.FireStage == s) return true;
+                    else if (r.RadialSeparate && r.Stage == s) return true;   // strap-on jettison
+                }
+            }
+            return false;
         }
 
         /// <summary>Fire one specific decoupler regardless of the current stage pointer (the in-flight part
@@ -274,9 +317,10 @@ namespace Solar.Vessels
             if (dec >= 0)
                 for (int i = dec; i < present.Count; i++) { res.Add(present[i]); foreach (var r in present[i].Radials) res.Add(r); }
             // separate radials firing this stage on hosts that are NOT part of the dropped axial group
+            // (parachutes deploy instead of jettisoning, so they never count as a drop)
             for (int i = 0; i < decStart; i++)
                 foreach (var r in present[i].Radials)
-                    if (r.RadialSeparate && r.Stage == stage) res.Add(r);
+                    if (r.RadialSeparate && r.Def.Kind != PartKind.Parachute && r.Stage == stage) res.Add(r);
             return res;
         }
 
@@ -291,7 +335,7 @@ namespace Solar.Vessels
             {
                 var host = present[i];
                 for (int k = host.Radials.Count - 1; k >= 0; k--)
-                    if (host.Radials[k].RadialSeparate && host.Radials[k].Stage == stage) host.Radials.RemoveAt(k);
+                    if (host.Radials[k].RadialSeparate && host.Radials[k].Def.Kind != PartKind.Parachute && host.Radials[k].Stage == stage) host.Radials.RemoveAt(k);
             }
             if (dec >= 0) present.RemoveRange(dec, present.Count - dec);
         }
@@ -330,13 +374,14 @@ namespace Solar.Vessels
 
             var stats = new List<StageStat>();
             bool remainderDone = false;   // the never-dropped fuel is burned by exactly one (final) stage
+            int lastDropAttributed = -1;  // a dropped group's fuel is credited to exactly one emitted stage
             for (int s = 0; s <= maxStage; s++)
             {
                 // actions occurring at stage s (evaluated before its drops are applied)
                 bool axialDec = ActionAt(present, s, PartKind.Decoupler);
                 bool radialDrop = SepRadialAt(present, s);
                 bool dropsThis = axialDec || radialDrop;
-                bool chuteThis = ActionAt(present, s, PartKind.Parachute);
+                bool chuteThis = ChuteAt(present, s);
                 var dropNow = dropsThis ? DropSet(present, s) : null;   // the parts THIS stage jettisons (for the label)
 
                 ApplyDrops(present, s);
@@ -356,25 +401,6 @@ namespace Solar.Vessels
                             agg.AddEngine(r);
                 }
 
-                // fuel this stage burns = fuel of the next group it drops; if nothing drops later, the engines
-                // burn the remaining fuel (attributed once, at the first thrust-bearing final stage)
-                int nd = NextDropStage(present, s, maxStage);
-                bool finalHere = false;
-                double fuel = 0, fuelCap = 0;
-                if (nd >= 0)
-                {
-                    var g = DropSet(present, nd);
-                    fuel = FuelOf(g); foreach (var p in g) fuelCap += p.Def.FuelCapacity;
-                }
-                else if (!remainderDone && agg.Thrust > 0)
-                {
-                    var ff = FlattenFuel(present);
-                    fuel = FuelOf(ff); foreach (var p in ff) fuelCap += p.Def.FuelCapacity;
-                    finalHere = true;
-                }
-
-                if (agg.Thrust <= 0 && !dropsThis && !chuteThis) continue;   // nothing to show this stage
-
                 // parts that newly ignite THIS stage (axial Stage == s, radials FireStage == s) -> the ignite list
                 var igniteNow = new List<Part>();
                 for (int i = 0; i < present.Count; i++)
@@ -383,6 +409,31 @@ namespace Solar.Vessels
                     if ((p.Def.Kind == PartKind.Engine || p.Def.Kind == PartKind.SolidBooster) && p.Stage == s) igniteNow.Add(p);
                     foreach (var r in p.Radials)
                         if ((r.Def.Kind == PartKind.Engine || r.Def.Kind == PartKind.SolidBooster) && r.FireStage == s) igniteNow.Add(r);
+                }
+
+                // Events-only stage list (KSP-style): a row exists only when something activates this stage
+                // -- an engine/booster ignites, a decoupler/strap-on drops, or a parachute deploys. A pure
+                // burn-continuation gets no "Burn" row; its dV is folded into the igniting stage (below).
+                if (igniteNow.Count == 0 && !dropsThis && !chuteThis) continue;
+
+                // Fuel this stage burns = fuel of the next group it drops, credited to exactly ONE emitted
+                // stage (the first event at/after the previous drop) so a second event before the same drop
+                // -- e.g. a chute deploying mid-burn -- can't double-count it. If nothing drops later, the
+                // engines burn the remaining fuel, attributed once at the first thrust-bearing final stage.
+                int nd = NextDropStage(present, s, maxStage);
+                bool finalHere = false;
+                double fuel = 0, fuelCap = 0;
+                if (nd >= 0 && nd != lastDropAttributed)
+                {
+                    var g = DropSet(present, nd);
+                    fuel = FuelOf(g); foreach (var p in g) fuelCap += p.Def.FuelCapacity;
+                    lastDropAttributed = nd;
+                }
+                else if (nd < 0 && !remainderDone && agg.Thrust > 0)
+                {
+                    var ff = FlattenFuel(present);
+                    fuel = FuelOf(ff); foreach (var p in ff) fuelCap += p.Def.FuelCapacity;
+                    finalHere = true;
                 }
 
                 string label = agg.Engines.Count > 0 ? string.Join("+", agg.Engines)
@@ -394,7 +445,7 @@ namespace Solar.Vessels
                     RadialEvent = radialDrop, AxialDecouple = axialDec, Chute = chuteThis,
                     Ignites = GroupCount(igniteNow),
                     Drops = dropNow != null ? GroupCount(dropNow) : new List<string>(),
-                    Action = DeriveAction(s, igniteNow.Count > 0, radialDrop, axialDec, chuteThis, agg.Thrust > 0),
+                    Action = DeriveAction(s, igniteNow.Count > 0, radialDrop, axialDec, chuteThis),
                 };
                 if (agg.Thrust > 0 && fuel > 0 && m0 > fuel)
                 {
@@ -428,14 +479,15 @@ namespace Solar.Vessels
 
         /// <summary>Short verb for what a stage does, leading with the separation event (KSP-style): a strap-on
         /// jettison reads "Drop boosters", an axial decoupler "Decouple", an ignition "Liftoff" (stage 0) or
-        /// "Ignite", a chute "Parachute"; a stage that only continues an existing burn is "Burn".</summary>
-        private static string DeriveAction(int stage, bool ignites, bool radialDrop, bool axialDec, bool chute, bool thrust)
+        /// "Ignite", a chute "Parachute". Only event stages are emitted (see <see cref="ComputeStages"/>), so
+        /// the trailing "Stage" is just a defensive default.</summary>
+        private static string DeriveAction(int stage, bool ignites, bool radialDrop, bool axialDec, bool chute)
         {
             if (radialDrop) return "Drop boosters";
             if (axialDec) return "Decouple";
             if (ignites) return stage == 0 ? "Liftoff" : "Ignite";
             if (chute) return "Parachute";
-            return thrust ? "Burn" : "Stage";
+            return "Stage";
         }
 
         private static bool ActionAt(List<Part> present, int stage, PartKind kind)
@@ -446,7 +498,21 @@ namespace Solar.Vessels
 
         private static bool SepRadialAt(List<Part> present, int stage)
         {
-            foreach (var p in present) foreach (var r in p.Radials) if (r.RadialSeparate && r.Stage == stage) return true;
+            foreach (var p in present) foreach (var r in p.Radials)
+                if (r.RadialSeparate && r.Def.Kind != PartKind.Parachute && r.Stage == stage) return true;
+            return false;
+        }
+
+        /// <summary>Whether a parachute deploys at stage <paramref name="stage"/>: an axial chute at its
+        /// <see cref="Part.Stage"/>, or a radial chute at its <see cref="Part.FireStage"/>.</summary>
+        private static bool ChuteAt(List<Part> present, int stage)
+        {
+            foreach (var p in present)
+            {
+                if (p.Def.Kind == PartKind.Parachute && p.Stage == stage) return true;
+                foreach (var r in p.Radials)
+                    if (r.Def.Kind == PartKind.Parachute && r.FireStage == stage) return true;
+            }
             return false;
         }
 

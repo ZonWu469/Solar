@@ -39,10 +39,11 @@ namespace Solar.Rendering
             // Draw a deployed-parachute canopy texture hanging from the part top (anchor). The image's
             // bottom-center is the cables-attachment node, pinned at the anchor; the canopy (image top)
             // extends out along the zenith (vertS), and the art's aspect ratio is preserved.
-            void DrawOpenChute(Microsoft.Xna.Framework.Graphics.Texture2D open, Vector2 anchor)
+            void DrawOpenChute(Microsoft.Xna.Framework.Graphics.Texture2D open, Vector2 anchor, Solar.Parts.PartDef cd)
             {
-                float hM = OpenChuteWidthM * (float)open.Height / open.Width;
-                float halfW = (OpenChuteWidthM * 0.5f) * pxPerM, hPxLen = hM * pxPerM;
+                float wM = cd.ParachuteWidth > 0 ? (float)cd.ParachuteWidth : OpenChuteWidthM;
+                float hM = cd.ParachuteHeight > 0 ? (float)cd.ParachuteHeight : wM * (float)open.Height / open.Width;
+                float halfW = (wM * 0.5f) * pxPerM, hPxLen = hM * pxPerM;
                 Vector2 topL = anchor + vertS * hPxLen - vperpS * halfW;
                 Vector2 topR = anchor + vertS * hPxLen + vperpS * halfW;
                 Vector2 botL = anchor - vperpS * halfW;
@@ -215,16 +216,18 @@ namespace Solar.Rendering
                 if (d.Kind == PartKind.Parachute && p.Deployed)
                 {
                     var open = tex?.Part(d.Id + "-open");
-                    if (open != null) DrawOpenChute(open, P(0, y + h));
+                    if (open != null) DrawOpenChute(open, P(0, y + h), d);
                     else
                     {
+                        float wM = d.ParachuteWidth > 0 ? (float)d.ParachuteWidth : OpenChuteWidthM;
+                        float hM = d.ParachuteHeight > 0 ? (float)d.ParachuteHeight : wM;
                         var top = P(0, y + h);
-                        var canopy = top + vertS * (7f * pxPerM);
-                        var lTop = top + vertS * (6f * pxPerM) - vperpS * (4.4f * pxPerM);
-                        var rTop = top + vertS * (6f * pxPerM) + vperpS * (4.4f * pxPerM);
+                        var canopy = top + vertS * (hM * pxPerM);
+                        var lTop = top + vertS * (hM * 0.85f * pxPerM) - vperpS * (wM * 0.4f * pxPerM);
+                        var rTop = top + vertS * (hM * 0.85f * pxPerM) + vperpS * (wM * 0.4f * pxPerM);
                         pb.Line(P(-w * 0.4f, y + h), lTop, Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
                         pb.Line(P(w * 0.4f, y + h), rTop, Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
-                        pb.FillCircle(canopy, 5.5f * pxPerM, new Color(235, 130, 60), PlanetRenderer.Darken(new Color(235, 130, 60), 0.3f));
+                        pb.FillCircle(canopy, wM * 0.5f * pxPerM, new Color(235, 130, 60), PlanetRenderer.Darken(new Color(235, 130, 60), 0.3f));
                     }
                 }
                 // landing gear deploy: strut+pad extending downward from the bottom-third of the axial part
@@ -424,16 +427,18 @@ namespace Solar.Rendering
                     if (rd.Kind == PartKind.Parachute && r.Deployed)
                     {
                         var open = tex?.Part(rd.Id + "-open");
-                        if (open != null) DrawOpenChute(open, P(xc, yb + rh));
+                        if (open != null) DrawOpenChute(open, P(xc, yb + rh), rd);
                         else
                         {
+                            float wM = rd.ParachuteWidth > 0 ? (float)rd.ParachuteWidth : OpenChuteWidthM;
+                            float hM = rd.ParachuteHeight > 0 ? (float)rd.ParachuteHeight : wM;
                             var top = P(xc, yb + rh);
-                            var canopy = top + vertS * (7f * pxPerM);
-                            var lTop = top + vertS * (6f * pxPerM) - vperpS * (4.4f * pxPerM);
-                            var rTop = top + vertS * (6f * pxPerM) + vperpS * (4.4f * pxPerM);
+                            var canopy = top + vertS * (hM * pxPerM);
+                            var lTop = top + vertS * (hM * 0.85f * pxPerM) - vperpS * (wM * 0.4f * pxPerM);
+                            var rTop = top + vertS * (hM * 0.85f * pxPerM) + vperpS * (wM * 0.4f * pxPerM);
                             pb.Line(P(xc - rw * 0.4f, yb + rh), lTop, Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
                             pb.Line(P(xc + rw * 0.4f, yb + rh), rTop, Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
-                            pb.FillCircle(canopy, 5.5f * pxPerM, new Color(235, 130, 60), PlanetRenderer.Darken(new Color(235, 130, 60), 0.3f));
+                            pb.FillCircle(canopy, wM * 0.5f * pxPerM, new Color(235, 130, 60), PlanetRenderer.Darken(new Color(235, 130, 60), 0.3f));
                         }
                     }
                     // deployed radial landing gear: when no texture is authored, draw a procedural

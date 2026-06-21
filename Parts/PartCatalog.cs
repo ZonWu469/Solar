@@ -84,6 +84,8 @@ namespace Solar.Parts
         public double Height { get; set; }
         public double CdA { get; set; }
         public double DeployedCdA { get; set; }
+        public double ParachuteWidth { get; set; }   // open canopy width (m); 0 = legacy default
+        public double ParachuteHeight { get; set; }  // open canopy height (m); 0 = derive from art aspect
         public double ControlAuthority { get; set; }
         public bool Sas { get; set; }
         public double ImpactTolerance { get; set; }
@@ -106,7 +108,8 @@ namespace Solar.Parts
         {
             Name = p.Name, Id = p.Id, Kind = p.Kind, DryMass = p.DryMass, FuelCapacity = p.FuelCapacity,
             Thrust = p.Thrust, ThrustAngle = p.ThrustAngle, Isp = p.Isp, Width = p.Width, Height = p.Height, CdA = p.CdA,
-            DeployedCdA = p.DeployedCdA, ControlAuthority = p.ControlAuthority, Sas = p.Sas, ImpactTolerance = p.ImpactTolerance,
+            DeployedCdA = p.DeployedCdA, ParachuteWidth = p.ParachuteWidth, ParachuteHeight = p.ParachuteHeight,
+            ControlAuthority = p.ControlAuthority, Sas = p.Sas, ImpactTolerance = p.ImpactTolerance,
             Slots = p.Slots,
             TintR = p.Tint.R, TintG = p.Tint.G, TintB = p.Tint.B,
             ExhaustR = p.ExhaustColor.R, ExhaustG = p.ExhaustColor.G, ExhaustB = p.ExhaustColor.B,
@@ -122,6 +125,8 @@ namespace Solar.Parts
             Thrust = Thrust, ThrustAngle = ThrustAngle, Isp = Isp, Width = Width, Height = Height, CdA = CdA,
             // migration-safe fallbacks so older parts.json (missing these fields) still behaves:
             DeployedCdA = DeployedCdA > 0 ? DeployedCdA : (Kind == PartKind.Parachute ? PartCatalog.ChuteDeployedCdA : 0),
+            // open-canopy size (m): 0 keeps the legacy look (11 m wide, height from art aspect, applied in VesselRenderer)
+            ParachuteWidth = ParachuteWidth, ParachuteHeight = ParachuteHeight,
             ControlAuthority = ControlAuthority > 0 ? ControlAuthority : (Kind == PartKind.Pod ? DefaultPodAuthority(DryMass) : 0),
             Sas = Sas || Kind == PartKind.Pod,   // command pods/probe cores carry SAS unless JSON says otherwise
             ImpactTolerance = ImpactTolerance > 0 ? ImpactTolerance : (Kind == PartKind.LandingGear ? DefaultGearTolerance(DryMass) : 0),

@@ -369,16 +369,20 @@ namespace Solar.UI
             }
 
             // ---- stage list (bottom left) ----
-            if (!v.Destroyed && v.Parts.Count > 0)
+            // Only stages not yet fired are shown; the first is the active (next-to-fire) row, kept in
+            // lock-step with Staging.FireNext via Vessel.CurrentStage (one row per real staging event).
+            var upcoming = new List<StageStat>();
+            if (stages != null) foreach (var st0 in stages) if (st0.Number >= v.CurrentStage) upcoming.Add(st0);
+            if (!v.Destroyed && v.Parts.Count > 0 && upcoming.Count > 0)
             {
-                int rows = Math.Min(stages.Count, 6);
+                int rows = Math.Min(upcoming.Count, 6);
                 var sp = new Rectangle(10, h - 30 - rows * 38 - 28 - 30, 300, rows * 38 + 36 + 30);
                 UiDraw.TexPanel(pb, ctx, "gameplay_vessel_panel", sp);
                 sb.DrawString(f, $"STAGES  dV {totalDV:0} m/s  [Space]/click fire", new Vector2(sp.X + 8, sp.Y + 6), UiDraw.TextDim);
                 float sy = sp.Y + 58;
                 for (int i = 0; i < rows; i++)
                 {
-                    var st = stages[i];
+                    var st = upcoming[i];
                     // the active (next-to-fire) row is clickable: clicking it fires the next stage, like [Space]
                     var rowRect = new Rectangle(sp.X + 4, (int)sy - 4, sp.Width - 8, 34);
                     bool active = i == 0;

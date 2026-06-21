@@ -70,6 +70,7 @@ namespace Solar.Scenes
         private Vector2 _popupPos;
         private Rectangle _popupCloseRect, _popupDecoupleRect;
         private Rectangle _popupEngineToggleRect, _popupPowerRect;   // engine on/off + power slider
+        private Rectangle _popupIgniteRect, _popupChuteRect;          // ignite an engine / deploy-cut a chute
         private bool _powerDragging;
         private Vector2 _menuPos;
         private double _flightZoom = 0.35;   // m per pixel
@@ -1429,7 +1430,14 @@ namespace Solar.Scenes
                 if (_popupCloseRect.Contains((int)m.X, (int)m.Y)) { _popupPart = null; return true; }
                 if (_popupPart.Def.Kind == PartKind.Decoupler && _popupDecoupleRect.Contains((int)m.X, (int)m.Y))
                 { DecoupleSelected(ut); return true; }
-                if (_popupPart.Def.Kind == PartKind.Engine)
+                // parachute: force deploy or cut/repack on demand, independent of staging
+                if (_popupPart.Def.Kind == PartKind.Parachute && _popupChuteRect.Contains((int)m.X, (int)m.Y))
+                { _popupPart.Deployed = !_popupPart.Deployed; return true; }
+                bool thruster = _popupPart.Def.Kind == PartKind.Engine || _popupPart.Def.Kind == PartKind.SolidBooster;
+                // ignite this engine/booster now, without waiting for its stage to come up
+                if (thruster && !_popupPart.Ignited && _popupIgniteRect.Contains((int)m.X, (int)m.Y))
+                { _popupPart.Ignited = true; _vessel.EnginesIgnited = true; return true; }
+                if (_popupPart.Def.Kind == PartKind.Engine && _popupPart.Ignited)
                 {
                     if (_popupEngineToggleRect.Contains((int)m.X, (int)m.Y)) { _popupPart.EngineOn = !_popupPart.EngineOn; return true; }
                     if (_popupPowerRect.Contains((int)m.X, (int)m.Y)) return true;   // slider drag owned by HSlider in DrawPartPopup
@@ -1507,7 +1515,11 @@ namespace Solar.Scenes
             detail.Add(d.FuelCapacity > 0 ? $"Mass: {p.Mass / 1000:0.00} t  (dry {dry / 1000:0.00} t)"
                                           : $"Mass: {dry / 1000:0.00} t");
             if (d.Kind == PartKind.Engine || d.Kind == PartKind.SolidBooster)
+            {
                 detail.Add($"Thrust: {d.Thrust / 1000:0} kN   Isp: {d.Isp:0} s");
+                detail.Add(p.Ignited ? "Status: ignited" : "Status: not ignited");
+            }
+            if (d.Kind == PartKind.Parachute) detail.Add(p.Deployed ? "Status: deployed" : "Status: stowed");
             if (d.FuelCapacity > 0) detail.Add($"Fuel: {p.Fuel:0} / {d.FuelCapacity:0} kg");
             detail.Add($"Size: {d.Width:0.0} x {d.Height:0.0} m");
             if (p.Modules.Count > 0)
@@ -1518,16 +1530,20 @@ namespace Solar.Scenes
             }
 
             bool decoupler = d.Kind == PartKind.Decoupler;
-            bool engine = d.Kind == PartKind.Engine;     // liquid engine: on/off + power limiter
+            bool thruster = d.Kind == PartKind.Engine || d.Kind == PartKind.SolidBooster;
+            bool igniteBtn = thruster && !p.Ignited;     // not yet lit: offer an Ignite button
+            bool engineCtl = d.Kind == PartKind.Engine && p.Ignited;  // lit liquid engine: on/off + power limiter
+            bool chuteBtn = d.Kind == PartKind.Parachute;
             float lhTitle = f.MeasureString("X").Y + 2;
             float lhSmall = f.MeasureString("X").Y * small + 2;
             float tw = f.MeasureString(d.Name).X + 22;   // leave room for the close glyph
             foreach (var ln in detail) tw = Math.Max(tw, f.MeasureString(ln).X * small);
-            if (engine) tw = Math.Max(tw, 140);          // keep the slider usably wide
+            if (engineCtl) tw = Math.Max(tw, 140);       // keep the slider usably wide
             const int btnH = 26;
-            int engineH = engine ? btnH + 6 + (int)lhSmall + 12 + 4 : 0;
+            int engineH = engineCtl ? btnH + 6 + (int)lhSmall + 12 + 4 : 0;
+            int btnRowH = (decoupler || igniteBtn || chuteBtn) ? btnH + 6 : 0;   // one bottom-anchored action button
             int bw = (int)tw + 18;
-            int bh = (int)(lhTitle + detail.Count * lhSmall) + 12 + (decoupler ? btnH + 6 : 0) + engineH;
+            int bh = (int)(lhTitle + detail.Count * lhSmall) + 12 + btnRowH + engineH;
             int bx = (int)Math.Clamp(_popupPos.X, 4, Math.Max(4, Ctx.W - bw - 4));
             int by = (int)Math.Clamp(_popupPos.Y, 4, Math.Max(4, Ctx.H - bh - 4));
 
@@ -1548,14 +1564,26 @@ namespace Solar.Scenes
                 ty += lhSmall;
             }
 
+            // one bottom-anchored action button per part kind (clicks handled in UpdatePartPopup)
+            _popupDecoupleRect = Rectangle.Empty; _popupIgniteRect = Rectangle.Empty; _popupChuteRect = Rectangle.Empty;
+            int btnY = by + bh - btnH - 6;
             if (decoupler)
             {
-                _popupDecoupleRect = new Rectangle(bx + 9, by + bh - btnH - 6, bw - 18, btnH);
-                UiDraw.Button(pb, sb, f, _popupDecoupleRect, "Decouple", inp);   // click handled in UpdatePartPopup
+                _popupDecoupleRect = new Rectangle(bx + 9, btnY, bw - 18, btnH);
+                UiDraw.Button(pb, sb, f, _popupDecoupleRect, "Decouple", inp);
             }
-            else _popupDecoupleRect = Rectangle.Empty;
+            else if (igniteBtn)
+            {
+                _popupIgniteRect = new Rectangle(bx + 9, btnY, bw - 18, btnH);
+                UiDraw.Button(pb, sb, f, _popupIgniteRect, "Ignite", inp);
+            }
+            else if (chuteBtn)
+            {
+                _popupChuteRect = new Rectangle(bx + 9, btnY, bw - 18, btnH);
+                UiDraw.Button(pb, sb, f, _popupChuteRect, p.Deployed ? "Cut / Repack" : "Deploy", inp);
+            }
 
-            if (engine)
+            if (engineCtl)
             {
                 // on/off toggle (click handled in UpdatePartPopup) + power-limiter slider (HSlider drives itself)
                 ty += 2;

@@ -1088,18 +1088,22 @@ namespace Solar.Tests
                 Check("explicit staging order", stages && lit0 && decoupled);
             }
 
-            // 30c. re-tagging a part's stage changes when it fires: move the bottom engine to stage 1 and it
-            //      no longer ignites on the first stage.
+            // 30c. re-tagging a part's stage changes when it fires: two inline engines default to the same
+            //      stage 0, but re-tagging the upper one to stage 1 holds it back -- the first press lights only
+            //      the bottom engine, the second press lights the re-tagged one. (Staging snaps to real events,
+            //      so an empty stage never costs a press.)
             {
                 var vd = new Vessels.VesselDesign();
                 vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Pod Mk1")));
                 vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Tank T400")));
                 var eng = new Vessels.StackEntry(Parts.PartCatalog.Get("Terrier")) { Stage = 1 };  // explicit, not 0
                 vd.Stack.Add(eng);
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Tank T800")));
+                vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get("Swivel")));   // bottom engine, default stage 0
                 var v = vd.Instantiate();
-                Vessels.Staging.FireNext(v);                       // stage 0
-                bool notLit = !v.Parts[2].Ignited;
-                Vessels.Staging.FireNext(v);                       // stage 1
+                Vessels.Staging.FireNext(v);                       // stage 0: bottom engine only
+                bool notLit = !v.Parts[2].Ignited && v.Parts[4].Ignited;
+                Vessels.Staging.FireNext(v);                       // stage 1: the re-tagged engine
                 bool litNow = v.Parts[2].Ignited;
                 Check("stage re-tag", v.Parts[2].Stage == 1 && notLit && litNow);
             }
@@ -1955,6 +1959,94 @@ namespace Solar.Tests
                 bool silent = v.ThrustVector.Length < 1e-6;
 
                 Check("lateral thruster launch flow", welded && offBefore && litWithEngine && oneStage && fires && silent);
+            }
+
+            // 30. events-only stage list: a pod+chute+tank+engine stack lists exactly an ignition then a
+            //     "Parachute" event (never a "Burn" row), and the chute stage is a deploy, not a drop.
+            {
+                var stack = new System.Collections.Generic.List<Parts.PartDef>
+                {
+                    Parts.PartCatalog.Get("Pod Mk1"), Parts.PartCatalog.Get("Parachute"),
+                    Parts.PartCatalog.Get("Tank T400"), Parts.PartCatalog.Get("Terrier"),
+                };
+                var stages = Vessels.Staging.ComputeStages(stack);
+                bool noBurn = true, hasChute = false;
+                foreach (var st in stages)
+                {
+                    if (st.Action == "Burn") noBurn = false;
+                    if (st.Action == "Parachute") { hasChute = true; if (!st.Chute || st.Decouples) hasChute = false; }
+                }
+                bool order = stages.Count == 2 && stages[0].Action == "Liftoff" && stages[1].Action == "Parachute";
+                Check("events-only stage list", noBurn && hasChute && order);
+            }
+
+            // 31. per-stage dV is credited exactly once (no double-count): for a two-stage rocket the summed
+            //     stage dV equals the lower + upper rocket-equation dV, and only the two thrust stages carry it.
+            {
+                var pod = Parts.PartCatalog.Get("Pod Mk1"); var t400 = Parts.PartCatalog.Get("Tank T400");
+                var terrier = Parts.PartCatalog.Get("Terrier"); var dec = Parts.PartCatalog.Get("Decoupler");
+                var t800 = Parts.PartCatalog.Get("Tank T800"); var swivel = Parts.PartCatalog.Get("Swivel");
+                var stack = new System.Collections.Generic.List<Parts.PartDef> { pod, t400, terrier, dec, t800, swivel };
+
+                const double g = 9.81;
+                double mUpper = pod.DryMass + t400.DryMass + t400.FuelCapacity + terrier.DryMass;
+                double dvUpper = terrier.Isp * g * Math.Log(mUpper / (mUpper - t400.FuelCapacity));
+                double mFull = mUpper + dec.DryMass + t800.DryMass + t800.FuelCapacity + swivel.DryMass;
+                double dvLower = swivel.Isp * g * Math.Log(mFull / (mFull - t800.FuelCapacity));
+                double expect = dvUpper + dvLower;
+
+                var stages = Vessels.Staging.ComputeStages(stack);
+                double totalDv = 0; int dvStages = 0;
+                foreach (var st in stages) { totalDv += st.DeltaV; if (st.DeltaV > 0) dvStages++; }
+                Check("stage dV credited once", dvStages == 2 && Math.Abs(totalDv - expect) < 1.0);
+            }
+
+            // 32. FireNext walks the displayed events in order: ignite -> decouple+ignite -> parachute, then
+            //     stops. The engine lights, the chute deploys, the spent stage is gone, CurrentStage ends past
+            //     the last event, and a further press is a no-op.
+            {
+                var v = new Vessels.Vessel();
+                var pod = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
+                var chute = new Parts.Part(Parts.PartCatalog.Get("Parachute"));
+                var t400 = new Parts.Part(Parts.PartCatalog.Get("Tank T400"));
+                var terrier = new Parts.Part(Parts.PartCatalog.Get("Terrier"));
+                var deco = new Parts.Part(Parts.PartCatalog.Get("Decoupler"));
+                var t800 = new Parts.Part(Parts.PartCatalog.Get("Tank T800"));
+                var swivel = new Parts.Part(Parts.PartCatalog.Get("Swivel"));
+                foreach (var p in new[] { pod, chute, t400, terrier, deco, t800, swivel }) v.Parts.Add(p);
+
+                Vessels.Staging.FireNext(v);                         // S0 liftoff
+                bool s0 = swivel.Ignited && !terrier.Ignited && !chute.Deployed;
+                Vessels.Staging.FireNext(v);                         // S1 decouple + ignite upper
+                bool s1 = terrier.Ignited && !v.Parts.Contains(swivel);
+                Vessels.Staging.FireNext(v);                         // S2 parachute
+                bool s2 = chute.Deployed;
+                int stageAfter = v.CurrentStage;
+                Vessels.Staging.FireNext(v);                         // nothing left -> no-op
+                Check("FireNext walks events in order", s0 && s1 && s2 && stageAfter > 2 && v.CurrentStage == stageAfter);
+            }
+
+            // 33. a radial parachute deploys (it is never jettisoned as a strap-on) and stays attached to its
+            //     host, and shows up as a "Parachute" event rather than "Drop boosters".
+            {
+                var v = new Vessels.Vessel();
+                v.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                var core = new Parts.Part(Parts.PartCatalog.Get("Tank T400"));
+                var radChute = new Parts.Part(Parts.PartCatalog.Get("Radial Parachute"));   // RadialSeparate defaults true
+                core.Radials.Add(radChute);
+                v.Parts.Add(core);
+
+                bool chuteEvent = false, noDrop = true;
+                foreach (var st in Vessels.Staging.ComputeStages(v.Parts))
+                {
+                    if (st.Action == "Parachute" && st.Chute) chuteEvent = true;
+                    if (st.Action == "Drop boosters") noDrop = false;
+                }
+
+                Vessels.Vessel debris = null;
+                for (int k = 0; k < 6 && !radChute.Deployed; k++) { var d = Vessels.Staging.FireNext(v); if (d != null) debris = d; }
+                bool deployedAttached = radChute.Deployed && core.Radials.Contains(radChute) && debris == null;
+                Check("radial parachute deploys not drops", chuteEvent && noDrop && deployedAttached);
             }
 
             string res = $"Physics self-test: {pass}/{total} PASS";
