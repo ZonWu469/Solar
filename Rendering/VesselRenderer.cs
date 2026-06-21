@@ -213,6 +213,14 @@ namespace Solar.Rendering
                     float flameLen = h * (0.9f + 2.0f * (float)v.Throttle) * flick;
                     DrawPlume(0, y, w * 0.30f, flameLen, (float)v.Throttle, d, flick);
                 }
+                // axial solid booster: full-thrust plume while ignited and fuelled (throttle-independent),
+                // mirroring the radial-solid flame; the engine block above handles liquid engines.
+                if (d.Kind == PartKind.SolidBooster && flaming && p.Ignited && p.Fuel > 0)
+                {
+                    float flick = 1f + 0.12f * (float)Math.Sin(anim * 37 + i * 2.1);
+                    float flameLen = h * (0.9f + 2.0f * 1f) * flick;   // solids run at full
+                    DrawPlume(0, y, w * 0.30f, flameLen, 1f, d, flick);
+                }
                 if (d.Kind == PartKind.Parachute && p.Deployed)
                 {
                     var open = tex?.Part(d.Id + "-open");
