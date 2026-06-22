@@ -305,10 +305,14 @@ namespace Solar.Scenes
         private static readonly Comparison<Maneuver> ByUT = (a, b) => a.UT.CompareTo(b.UT);
 
         // The planned-trajectory projection is needed several times per frame (node refresh, closest
-        // approach, hit-testing, drawing). It is expensive for long-horizon orbits, so build it once per
-        // frame and reuse. Invalidated (stamp reset) whenever a node is added/dragged.
+        // approach, hit-testing, drawing) and is expensive for long-horizon orbits (each rebuild runs
+        // TrajectoryPredictor.Predict per patch). It only depends on the live conic, its body, the node set,
+        // and whether we are thrusting — none of which change while coasting on rails. So cache by a content
+        // signature and rebuild only when that signature changes, or when time-warp carries us past the next
+        // pending burn / SOI transition. _projSig == NaN forces a rebuild (set when an edit changes nodes).
         private List<ProjSegment> _projSegs = new List<ProjSegment>();
-        private double _projStamp = double.NaN;
+        private double _projSig = double.NaN;
+        private double _projNextEventUT = double.PositiveInfinity;
 
         /// <summary>Nodes sorted by time. Returns a shared scratch list — iterate it immediately; do not
         /// retain it across another Sorted()/BuildProjection call.</summary>
@@ -391,13 +395,33 @@ namespace Solar.Scenes
         /// <summary>The planned-trajectory projection for this frame, built once and reused. The first
         /// build of the frame (from UpdateManeuverInput) passes refreshNodes:true to re-chain pending
         /// nodes across SOI transitions and reassign each node's frozen Source; later consumers reuse
-        /// the cache. The cache is invalidated by resetting <see cref="_projStamp"/> when nodes change.</summary>
+        /// the cache. The cache is invalidated by resetting <see cref="_projSig"/> when nodes change.</summary>
         private List<ProjSegment> Projection(double ut, bool refreshNodes)
         {
-            if (_projStamp == ut) return _projSegs;
+            double sig = ProjectionSig(ut);
+            if (!double.IsNaN(_projSig) && sig == _projSig && ut < _projNextEventUT) return _projSegs;
             _projSegs = BuildProjection(ut, refreshNodes);
-            _projStamp = ut;
+            _projSig = sig;
+            // Earliest segment end (a node burn or SOI transition) still ahead: rebuild once warp passes it.
+            _projNextEventUT = double.PositiveInfinity;
+            foreach (var s in _projSegs)
+                if (s.EndUT > ut && s.EndUT < _projNextEventUT) _projNextEventUT = s.EndUT;
             return _projSegs;
+        }
+
+        /// <summary>Content signature of everything the projection depends on: the live conic, its body, the
+        /// node set, and the thrusting flag. While coasting on rails this is stable frame to frame, so the
+        /// (expensive) projection is built once and reused.</summary>
+        private double ProjectionSig(double ut)
+        {
+            double s = NodeSignature();
+            if (LiveOrbit(ut, out var live, out var body, out _))
+            {
+                s += live.A * 1.0 + live.E * 31.0 + live.ArgPe * 131.0 + live.Dir * 7.0;
+                if (body != null) s += body.GetHashCode() * 1e-3;
+            }
+            if (_vessel != null && _vessel.CurrentThrust > 0) s += 1e9;   // thrusting flips refreshNodes
+            return s;
         }
 
         /// <summary>The route's SOI encounters (descents into a child body's SOI): the body entered, the
@@ -1495,8 +1519,7 @@ namespace Solar.Scenes
             if (part == null || _vessel == null || _vessel.Destroyed) return;
             bool wasOnRails = _vessel.OnRails;
             if (wasOnRails) _vessel.GoOffRails(ut);
-            var debris = Staging.DecoupleAt(_vessel, part);
-            if (debris != null)
+            foreach (var debris in Staging.DecoupleAt(_vessel, part))
             {
                 _debris.Add(debris);
                 if (_debris.Count > MaxDebris) _debris.RemoveAt(0);
@@ -1718,11 +1741,14 @@ namespace Solar.Scenes
             bool wasOnRails = _vessel.OnRails;
             if (wasOnRails) _vessel.GoOffRails(ut);
             double thrustAtFire = _vessel.CurrentThrust;
-            var debris = Staging.FireNext(_vessel);
-            if (debris != null)
+            var dropped = Staging.FireNext(_vessel);
+            if (dropped.Count > 0)
             {
-                _debris.Add(debris);
-                if (_debris.Count > MaxDebris) _debris.RemoveAt(0);
+                foreach (var debris in dropped)
+                {
+                    _debris.Add(debris);
+                    if (_debris.Count > MaxDebris) _debris.RemoveAt(0);
+                }
                 // B4: staging punch — a brief camera shake and a smoke puff at the jettison point.
                 _shake = Math.Clamp(thrustAtFire / 1e5, 1.0, 8.0);
                 _stagePuffUt = ut;
@@ -2030,7 +2056,6 @@ namespace Solar.Scenes
             // re-chains pending nodes across SOI transitions and reassigns each node's frozen Source while
             // coasting; during a burn it is held frozen so the planned (orange) orbit stays put.
             bool thrusting = _vessel.CurrentThrust > 0;
-            _projStamp = double.NaN;
             Projection(ut, refreshNodes: !thrusting);
             double nodeSig0 = NodeSignature();   // invalidate the cache below if any edit changes the nodes
 
@@ -2170,7 +2195,7 @@ namespace Solar.Scenes
 
             // a node was added/removed/tuned/dragged this frame: drop the cached projection so the rest of
             // the frame (closest approach, drawing) rebuilds against the edited nodes.
-            if (NodeSignature() != nodeSig0) _projStamp = double.NaN;
+            if (NodeSignature() != nodeSig0) _projSig = double.NaN;   // an edit changed the nodes: rebuild
         }
 
         /// <summary>A cheap value that changes whenever the set of nodes or any node's time/components

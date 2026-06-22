@@ -1061,9 +1061,9 @@ namespace Solar.Tests
                 v.Parts.Add(host);
 
                 var first = Vessels.Staging.FireNext(v);                  // stage 0: ignite all radials, drop nothing
-                bool ignitedNoDrop = first == null && host.Radials.Count == 4 && host.Radials.TrueForAll(r => r.Ignited);
+                bool ignitedNoDrop = first.Count == 0 && host.Radials.Count == 4 && host.Radials.TrueForAll(r => r.Ignited);
                 var debris = Vessels.Staging.FireNext(v);                 // stage 1: jettison the separate radials
-                bool droppedSeparate = debris != null && debris.Parts.Count == 2;
+                bool droppedSeparate = debris.Count == 2 && debris.TrueForAll(d => d.Parts.Count == 1); // each its own piece
                 bool keptIncluded = host.Radials.Count == 2 && host.Radials.TrueForAll(r => !r.RadialSeparate);
                 Check("radial staging", ignitedNoDrop && droppedSeparate && keptIncluded);
             }
@@ -1082,10 +1082,24 @@ namespace Solar.Tests
                 Vessels.Staging.FireNext(v);                       // stage 0: light the bottom engine only
                 bool lit0 = bottomEng.Ignited && !topEng.Ignited && v.Parts.Count == 6;
                 var debris = Vessels.Staging.FireNext(v);          // stage 1: decouple bottom, light upper engine
-                bool decoupled = debris != null && debris.Parts.Exists(p => p.Def.Name == "Swivel")
+                bool decoupled = debris.Exists(d => d.Parts.Exists(p => p.Def.Name == "Swivel"))
                                  && v.Parts.Exists(p => p.Def.Name == "Terrier" && p.Ignited)
                                  && !v.Parts.Exists(p => p.Def.Name == "Swivel");
                 Check("explicit staging order", stages && lit0 && decoupled);
+            }
+
+            // 30b-bis. decoupling splits the dropped stack at EACH decoupler: two decouplers below the kept
+            //      stack produce two independent debris pieces (one per segment), not one rigid clump.
+            {
+                var vd = new Vessels.VesselDesign();
+                foreach (var n in new[] { "Pod Mk1", "Tank T400", "Decoupler", "Tank T800", "Decoupler", "Swivel" })
+                    vd.Stack.Add(new Vessels.StackEntry(Parts.PartCatalog.Get(n)));
+                var v = vd.Instantiate();
+                var pieces = Vessels.Staging.DecoupleAt(v, v.Parts[2]);   // drop from the upper decoupler
+                bool twoPieces = pieces.Count == 2
+                                 && pieces[0].Parts.Count == 2 && pieces[1].Parts.Count == 2; // [dec+T800], [dec+Swivel]
+                bool kept = v.Parts.Count == 2 && v.Parts[0].Def.Kind == Parts.PartKind.Pod;   // pod + T400 survive
+                Check("decouple splits per segment", twoPieces && kept);
             }
 
             // 30c. re-tagging a part's stage changes when it fires: two inline engines default to the same
@@ -1121,11 +1135,11 @@ namespace Solar.Tests
                               && dec.Def.Name == "Decoupler" && dec.Stage == 1 && eng.Stage == 1;
 
                 var debris0 = Vessels.Staging.FireNext(v);         // stage 0: light the SRB only
-                bool lit0 = srb.Ignited && !eng.Ignited && debris0 == null && v.Parts.Count == 5;
+                bool lit0 = srb.Ignited && !eng.Ignited && debris0.Count == 0 && v.Parts.Count == 5;
                 bool lifts = v.CurrentThrust > v.TotalMass * Vessels.Staging.G0;   // SRB first stage TWR > 1
 
                 var debris1 = Vessels.Staging.FireNext(v);         // stage 1: decouple SRB, light the engine
-                bool decoupled = debris1 != null && debris1.Parts.Exists(p => p.Def.Name == "Thumper SRB")
+                bool decoupled = debris1.Exists(d => d.Parts.Exists(p => p.Def.Name == "Thumper SRB"))
                                  && !v.Parts.Exists(p => p.Def.Name == "Thumper SRB")
                                  && v.Parts.Exists(p => p.Def.Name == "Terrier" && p.Ignited);
                 Check("axial SRB lower stage", stages && lit0 && lifts && decoupled);
@@ -1245,13 +1259,13 @@ namespace Solar.Tests
                                 && dec.Stage == 2;
 
                 var d0 = Vessels.Staging.FireNext(v);   // stage 0: ignite engine + boosters, drop nothing
-                bool s0 = d0 == null && tank.Radials.Count == 2 && eng.Ignited;
+                bool s0 = d0.Count == 0 && tank.Radials.Count == 2 && eng.Ignited;
                 var d1 = Vessels.Staging.FireNext(v);   // stage 1: drop ONLY the boosters
-                bool s1 = d1 != null && tank.Radials.Count == 0
+                bool s1 = d1.Count > 0 && tank.Radials.Count == 0
                           && v.Parts.Exists(p => p.Def.Name == "Tank T400")   // core tank survives
-                          && d1.Parts.TrueForAll(p => p.Def.Name == "Thumper-R");
+                          && d1.TrueForAll(d => d.Parts.TrueForAll(p => p.Def.Name == "Thumper-R"));
                 var d2 = Vessels.Staging.FireNext(v);   // stage 2: decouple the core, leaving the pod
-                bool s2 = d2 != null && d2.Parts.Exists(p => p.Def.Name == "Tank T400")
+                bool s2 = d2.Exists(d => d.Parts.Exists(p => p.Def.Name == "Tank T400"))
                           && v.Parts.Count == 1 && v.Parts[0].Def.Kind == Parts.PartKind.Pod;
                 Check("strap-ons drop on own stage", stagesOk && s0 && s1 && s2);
             }
@@ -1274,7 +1288,7 @@ namespace Solar.Tests
                 bool firesEarly = srb.FireStage == 0;        // at liftoff, not inheriting the late host
 
                 var d0 = Vessels.Staging.FireNext(v);        // stage 0: ignite the boosters, drop nothing
-                bool s0 = d0 == null && tank.Radials.Count == 2 && srb.Ignited && v.SolidThrust > 0;
+                bool s0 = d0.Count == 0 && tank.Radials.Count == 2 && srb.Ignited && v.SolidThrust > 0;
                 Check("radial booster ignites before it drops", ordered && firesEarly && s0);
             }
 
@@ -1320,7 +1334,7 @@ namespace Solar.Tests
                 bool s0Exists = st0 != null && st0.Ignites.Contains("4x Thumper SRB") && st0.Ignites.Contains("Swivel");
 
                 var d0 = Vessels.Staging.FireNext(v);   // S0: ignite Swivel + boosters, drop nothing
-                bool fired = d0 == null && tank.Radials.Count == 8 && anySrb.Ignited && v.SolidThrust > 0;
+                bool fired = d0.Count == 0 && tank.Radials.Count == 8 && anySrb.Ignited && v.SolidThrust > 0;
 
                 Check("on-pad booster stack keeps S0", present && stagesOk && notMutated && s0Exists && fired);
             }
@@ -2057,9 +2071,9 @@ namespace Solar.Tests
                     if (st.Action == "Drop boosters") noDrop = false;
                 }
 
-                Vessels.Vessel debris = null;
-                for (int k = 0; k < 6 && !radChute.Deployed; k++) { var d = Vessels.Staging.FireNext(v); if (d != null) debris = d; }
-                bool deployedAttached = radChute.Deployed && core.Radials.Contains(radChute) && debris == null;
+                bool anyDrop = false;
+                for (int k = 0; k < 6 && !radChute.Deployed; k++) { var d = Vessels.Staging.FireNext(v); if (d.Count > 0) anyDrop = true; }
+                bool deployedAttached = radChute.Deployed && core.Radials.Contains(radChute) && !anyDrop;
                 Check("radial parachute deploys not drops", chuteEvent && noDrop && deployedAttached);
             }
 

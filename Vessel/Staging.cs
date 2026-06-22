@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Solar.Core;
 using Solar.Parts;
 
 namespace Solar.Vessels
@@ -110,8 +111,9 @@ namespace Solar.Vessels
         /// <summary>Fire the vessel's current stage: ignite engines/boosters tagged with it (axial, plus the
         /// radials of any axial part igniting now), deploy its parachutes, jettison its separate radials, and
         /// separate its decouplers (dropping everything below the lowest firing decoupler). Advances
-        /// <see cref="Vessel.CurrentStage"/> and returns the jettisoned debris (or null).</summary>
-        public static Vessel FireNext(Vessel v)
+        /// <see cref="Vessel.CurrentStage"/> and returns the jettisoned debris — one vessel per decoupler
+        /// segment and one per freed strap-on (empty if nothing dropped).</summary>
+        public static List<Vessel> FireNext(Vessel v)
         {
             // Snap to the next stage that actually does something (NextEventStage assigns default stages),
             // so [Space]/click always fires the stage the HUD highlights and never wastes a press on a gap.
@@ -135,48 +137,75 @@ namespace Solar.Vessels
             }
             if (ignitedAny) v.EnginesIgnited = true;
 
-            // ---- jettisons ----
-            var freed = new List<Part>();      // standalone parts (separate radials dropped from a kept host)
+            var debrisList = new List<Vessel>();
+
+            // ---- jettisons: each separate (non-parachute) strap-on becomes its own debris vessel ----
             for (int i = 0; i < v.Parts.Count; i++)
             {
                 var host = v.Parts[i];
                 for (int k = host.Radials.Count - 1; k >= 0; k--)
+                {
+                    var r = host.Radials[k];
                     // parachutes deploy (above) and are never jettisoned as a strap-on
-                    if (host.Radials[k].RadialSeparate && host.Radials[k].Def.Kind != PartKind.Parachute && host.Radials[k].Stage == s)
-                    { freed.Add(host.Radials[k]); host.Radials.RemoveAt(k); }
+                    if (!(r.RadialSeparate && r.Def.Kind != PartKind.Parachute && r.Stage == s)) continue;
+                    Vec2d c = v.PartLocalCenter(host);     // strap-on sits at its host's station
+                    var d = MakeDebris(v, v.Position + v.Right * c.X + v.Up * c.Y,
+                                       v.Velocity + new Vec2d(-v.Up.Y, v.Up.X) * 3.0); // sideways push
+                    d.Parts.Add(r);
+                    host.Radials.RemoveAt(k);
+                    debrisList.Add(d);
+                }
             }
 
-            double jh = 0;
-            List<Part> decGroup = null;
+            // ---- axial decouplers: split everything below the lowest firing decoupler into one debris
+            // vessel per decoupler segment ----
             int firstDec = -1;
             for (int i = 0; i < v.Parts.Count; i++)
                 if (v.Parts[i].Def.Kind == PartKind.Decoupler && v.Parts[i].Stage == s) { firstDec = i; break; }
-            if (firstDec >= 0)
-            {
-                decGroup = v.Parts.GetRange(firstDec, v.Parts.Count - firstDec);
-                v.Parts.RemoveRange(firstDec, v.Parts.Count - firstDec);
-                foreach (var p in decGroup) jh += p.Def.Height;
-            }
+            if (firstDec >= 0) DropFrom(v, firstDec, debrisList);
 
-            if (freed.Count == 0 && decGroup == null) return null;
+            return debrisList;
+        }
 
-            var debris = new Vessel
+        /// <summary>Build one empty debris vessel inheriting <paramref name="src"/>'s body/heading, placed at
+        /// <paramref name="basePos"/> with velocity <paramref name="vel"/>. The caller adds its parts.</summary>
+        private static Vessel MakeDebris(Vessel src, Vec2d basePos, Vec2d vel)
+            => new Vessel
             {
-                Body = v.Body, IsDebris = true, Heading = v.Heading, EnginesIgnited = true,
-                Position = v.Position, OnRails = false,
+                Body = src.Body, IsDebris = true, Heading = src.Heading, EnginesIgnited = true,
+                Position = basePos, Velocity = vel, OnRails = false,
             };
-            if (decGroup != null)
+
+        /// <summary>Split everything from <paramref name="firstDec"/> to the end of <paramref name="v"/>'s
+        /// stack into one debris vessel per decoupler segment — a decoupler stays at the top of its own
+        /// segment, so contiguous parts with no decoupler between them fall together. Each piece is placed
+        /// where it sat on the stack (offset up by the height of everything below it), then the kept stack's
+        /// base rises by the total dropped height. Appends the created debris to <paramref name="outDebris"/>.</summary>
+        private static void DropFrom(Vessel v, int firstDec, List<Vessel> outDebris)
+        {
+            int count = v.Parts.Count;
+            // segment boundaries: a new segment begins at firstDec and at each later decoupler
+            var starts = new List<int>();
+            for (int i = firstDec; i < count; i++)
+                if (i == firstDec || v.Parts[i].Def.Kind == PartKind.Decoupler) starts.Add(i);
+
+            double totalH = 0;
+            for (int i = firstDec; i < count; i++) totalH += v.Parts[i].Def.Height;
+
+            double mid = (starts.Count - 1) * 0.5;         // center the sideways spread around 0
+            for (int k = 0; k < starts.Count; k++)
             {
-                debris.Parts.AddRange(decGroup);           // axial parts keep their own radials
-                v.Position += v.Up * jh;                   // remaining stack's base moves up
-                debris.Velocity = v.Velocity - v.Up * 2.0; // gentle separation push
+                int a = starts[k];
+                int b = (k + 1 < starts.Count) ? starts[k + 1] - 1 : count - 1;
+                double offsetBelow = 0;
+                for (int i = b + 1; i < count; i++) offsetBelow += v.Parts[i].Def.Height;
+                Vec2d spread = v.Right * ((k - mid) * 0.5);
+                var debris = MakeDebris(v, v.Position + v.Up * offsetBelow, v.Velocity - v.Up * 2.0 + spread);
+                for (int i = a; i <= b; i++) debris.Parts.Add(v.Parts[i]); // parts keep their own radials
+                outDebris.Add(debris);
             }
-            else
-            {
-                debris.Velocity = v.Velocity + new Solar.Core.Vec2d(-v.Up.Y, v.Up.X) * 3.0; // sideways for strap-ons
-            }
-            foreach (var r in freed) debris.Parts.Add(r);  // freed radials become standalone debris parts
-            return debris;
+            v.Parts.RemoveRange(firstDec, count - firstDec);
+            v.Position += v.Up * totalH;                    // remaining stack's base moves up
         }
 
         /// <summary>The next stage index (&gt;= the vessel's <see cref="Vessel.CurrentStage"/>) that actually
@@ -216,29 +245,17 @@ namespace Solar.Vessels
         /// <summary>Fire one specific decoupler regardless of the current stage pointer (the in-flight part
         /// popup's "Decouple" action). Drops that decoupler and everything below it in the stack as debris,
         /// pushing the kept stack up by the jettisoned height — the same separation the decoupler branch of
-        /// <see cref="FireNext"/> performs. Returns the debris vessel, or null if <paramref name="decoupler"/>
-        /// isn't an attached axial decoupler. The live stage list is derived by <see cref="ComputeStages"/>
+        /// <see cref="FireNext"/> performs — one debris vessel per decoupler segment. Returns an empty list
+        /// if <paramref name="decoupler"/> isn't an attached axial decoupler. The live stage list is derived by <see cref="ComputeStages"/>
         /// from the remaining parts, so the dropped stage disappears on its own.</summary>
-        public static Vessel DecoupleAt(Vessel v, Part decoupler)
+        public static List<Vessel> DecoupleAt(Vessel v, Part decoupler)
         {
-            if (decoupler == null || decoupler.Def.Kind != PartKind.Decoupler) return null;
+            var outDebris = new List<Vessel>();
+            if (decoupler == null || decoupler.Def.Kind != PartKind.Decoupler) return outDebris;
             int idx = v.Parts.IndexOf(decoupler);
-            if (idx < 0) return null;
-
-            var decGroup = v.Parts.GetRange(idx, v.Parts.Count - idx);
-            v.Parts.RemoveRange(idx, v.Parts.Count - idx);
-            double jh = 0;
-            foreach (var p in decGroup) jh += p.Def.Height;
-
-            var debris = new Vessel
-            {
-                Body = v.Body, IsDebris = true, Heading = v.Heading, EnginesIgnited = true,
-                Position = v.Position, OnRails = false,
-            };
-            debris.Parts.AddRange(decGroup);           // axial parts keep their own radials
-            v.Position += v.Up * jh;                    // remaining stack's base moves up
-            debris.Velocity = v.Velocity - v.Up * 2.0; // gentle separation push
-            return debris;
+            if (idx < 0) return outDebris;
+            DropFrom(v, idx, outDebris);               // split into one piece per decoupler segment
+            return outDebris;
         }
 
         /// <summary>Estimated time (s) to burn <paramref name="dv"/> m/s, walking stages in fire order;
