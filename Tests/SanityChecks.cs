@@ -1517,6 +1517,20 @@ namespace Solar.Tests
                 Check("tech tree coverage", catalogOk && layoutOk);
             }
 
+            // 31b. save migration: an old save that unlocked the (now-split) "ultra-heavy" node must,
+            //      after MigrateSave, still have the Imperator SRB / T16000 (moved to "imperator-heavy").
+            {
+                var old = new GameState { UnlockedTech = new System.Collections.Generic.List<string> { "ultra-heavy" } };
+                bool beforeLocked = !Progression.TechTree.PartAvailable(old, "tank-t16000")
+                                    && !Progression.TechTree.PartAvailable(old, "imperator-srb");
+                Progression.TechTree.MigrateSave(old);
+                bool afterUnlocked = Progression.TechTree.PartAvailable(old, "tank-t16000")
+                                     && Progression.TechTree.PartAvailable(old, "imperator-srb");
+                Progression.TechTree.MigrateSave(old);   // idempotent: no duplicate entry
+                bool idempotent = old.UnlockedTech.FindAll(x => x == "imperator-heavy").Count == 1;
+                Check("save tech migration", beforeLocked && afterUnlocked && idempotent);
+            }
+
             // 32. off-rails orbit stays in sync: while a vessel coasts/maneuvers off rails its stored
             //     conic must track the live state, so a save / GoOffRails / reload re-derives the *current*
             //     position, never an old one. Regression guard for the rendezvous "RCS nudge reverts" bug:

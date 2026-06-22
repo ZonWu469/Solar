@@ -56,7 +56,11 @@ namespace Solar.Core
             {
                 var path = PathFor(name);
                 if (File.Exists(path))
-                    return JsonSerializer.Deserialize<GameState>(File.ReadAllText(path), JsonOpts);
+                {
+                    var gs = JsonSerializer.Deserialize<GameState>(File.ReadAllText(path), JsonOpts);
+                    Solar.Progression.TechTree.MigrateSave(gs);
+                    return gs;
+                }
             }
             catch { /* corrupt save: fall through to null */ }
             return null;

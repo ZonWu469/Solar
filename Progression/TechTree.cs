@@ -326,6 +326,17 @@ namespace Solar.Progression
             return list;
         }
 
+        /// <summary>Migrate an old save's unlocked-node ids to the current tree. The combined
+        /// "ultra-heavy" node was split into "ultra-heavy" + "imperator-heavy"; a save that earned the
+        /// old node (which granted both sets of parts) keeps both, so the Imperator SRB / T16000 stay
+        /// unlocked. Idempotent and harmless for sandbox/new saves.</summary>
+        public static void MigrateSave(GameState gs)
+        {
+            if (gs?.UnlockedTech == null) return;
+            if (gs.UnlockedTech.Contains("ultra-heavy") && !gs.UnlockedTech.Contains("imperator-heavy"))
+                gs.UnlockedTech.Add("imperator-heavy");
+        }
+
         /// <summary>The node a part id belongs to (defaults to the always-unlocked start node).</summary>
         public static string TechForPart(string partId)
         {
