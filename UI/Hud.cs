@@ -45,7 +45,7 @@ namespace Solar.UI
     {
         public static HudResult Draw(GameContext ctx, Vessel v, Prediction pred, bool mapMode, string focusName,
                                 Maneuver node = null, double burnDirAngle = double.NaN, double burnSpent = 0, int nodeCount = 0,
-                                NavMarkers nav = default)
+                                NavMarkers nav = default, OrbitalElements? flybyEl = null, CelestialBody flybyBody = null)
         {
             var result = new HudResult();
             var pb = ctx.Pb; var sb = ctx.Sb; var f = ctx.Font;
@@ -424,7 +424,7 @@ namespace Solar.UI
                 bool enough = node.DeltaV <= avail + 1e-6;
                 double bt = Staging.BurnTime(v, node.DeltaV);
                 bool burning = burnSpent > 0;
-                var mp = new Rectangle(rColX, (int)rColY, rColW, 190);
+                var mp = new Rectangle(rColX, (int)rColY, rColW, 248);
                 UiDraw.TexPanel(pb, ctx, "gameplay_modules_panel", mp);
                 float my = mp.Y + 8;
                 void MRow(string label, string value, Color c)
@@ -446,13 +446,34 @@ namespace Solar.UI
                 double burnIn = node.UT - (enough && bt > 0 ? bt / 2 : 0) - now;
                 MRow("burn in", enough && bt > 0 ? UiDraw.Time(Math.Max(0, burnIn)) : "-",
                      burnIn < 0 ? new Color(255, 110, 100) : new Color(255, 210, 140));
+                // resulting orbit of this burn (apsides above the body surface), so the consequence is
+                // visible numerically while tuning the node -- not only as map chevrons.
+                if (node.HasSource && node.Body != null)
+                {
+                    var res = node.ResultOrbit(node.Source, node.Body.Mu);
+                    if (!double.IsNaN(res.A))
+                    {
+                        if (!res.Hyperbolic)
+                            MRow("result Ap", UiDraw.Dist(res.Apoapsis - node.Body.Radius), new Color(255, 210, 140));
+                        MRow("result Pe", UiDraw.Dist(res.Periapsis - node.Body.Radius), new Color(255, 210, 140));
+                    }
+                }
+                // flyby periapsis + danger if the planned route then drops into a body's SOI: the headline
+                // "will this bring me too close?" answered before the burn is even executed.
+                if (flybyEl.HasValue && flybyBody != null)
+                {
+                    var (fc, _) = FlybyRow(flybyEl.Value, flybyBody, out string fval);
+                    MRow($"Pe @ {flybyBody.Name}", fval, fc);
+                }
                 if (burning)
                     MRow("remaining", $"{Math.Max(0, node.DeltaV - burnSpent):0} m/s", UiDraw.Accent);
                 else
                 {
-                    // ignition is half the burn before the node; warp to 2 minutes before that
-                    double ignition = node.UT - (enough && bt > 0 ? bt : 0);
-                    double warpTarget = ignition - 120;
+                    // the burn is centred on the node, so ignition is half a burn before it; stop the warp a
+                    // comfortable lead earlier (room to rotate to the burn vector and settle), not right on it
+                    double burnStart = node.UT - (enough && bt > 0 ? bt / 2 : 0);
+                    const double WarpLead = 300;   // s of coast left before ignition
+                    double warpTarget = burnStart - WarpLead;
                     bool canWarp = warpTarget > now + 1;
                     var br = new Rectangle(mp.X + 10, mp.Bottom - 30, mp.Width - 20, 22);
                     if (UiDraw.Button(pb, sb, f, br, "Warp to maneuver", ctx.Input, canWarp))
@@ -623,6 +644,21 @@ namespace Solar.UI
 
             result.RightColumnBottom = (int)rColY;
             return result;
+        }
+
+        /// <summary>Colour + formatted value ("&lt;alt&gt; IMPACT/ENTRY" or just the altitude) for a flyby
+        /// periapsis readout, from <see cref="TrajectoryPredictor.ClassifyFlyby"/>. ASCII only.</summary>
+        private static (Color col, string tag) FlybyRow(in OrbitalElements el, CelestialBody body, out string value)
+        {
+            var outcome = TrajectoryPredictor.ClassifyFlyby(el, body, out double peAlt);
+            (Color col, string tag) r = outcome switch
+            {
+                FlybyOutcome.Impact => (new Color(255, 90, 80), "IMPACT"),
+                FlybyOutcome.AtmoEntry => (new Color(255, 170, 90), "ENTRY"),
+                _ => (new Color(140, 230, 160), ""),
+            };
+            value = r.tag.Length > 0 ? $"{UiDraw.Dist(peAlt)} {r.tag}" : UiDraw.Dist(peAlt);
+            return r;
         }
 
         /// <summary>" (in MM:SS)" until the orbit next reaches true anomaly nu, or "" if not applicable.</summary>

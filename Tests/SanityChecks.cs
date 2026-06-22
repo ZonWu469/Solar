@@ -107,6 +107,20 @@ namespace Solar.Tests
             }
             Check("radius crossing", rcOk);
 
+            // 4b. flyby/encounter danger classification: impact below the surface, atmosphere skim, clear flyby
+            {
+                var fb = new CelestialBody { Radius = 6.0e5, Atmo = new Atmosphere(1.2, 8000, 7.0e4) };
+                OrbitalElements Conic(double pe) =>
+                    new OrbitalElements { A = 1e7, E = 1 - pe / 1e7, ArgPe = 0, M0 = 0, Epoch = 0, Mu = mu, Dir = 1 };
+                var impact = TrajectoryPredictor.ClassifyFlyby(Conic(5.0e5), fb, out double altImpact);
+                var entry = TrajectoryPredictor.ClassifyFlyby(Conic(6.5e5), fb, out _);
+                var clear = TrajectoryPredictor.ClassifyFlyby(Conic(8.0e5), fb, out double altClear);
+                Check("flyby-outcome", impact == FlybyOutcome.Impact && entry == FlybyOutcome.AtmoEntry
+                    && clear == FlybyOutcome.Flyby
+                    && Math.Abs(altImpact - (5.0e5 - 6.0e5)) < 1.0
+                    && Math.Abs(altClear - (8.0e5 - 6.0e5)) < 1.0);
+            }
+
             // 5. circular orbit quarter-period rotation
             {
                 var el = new OrbitalElements { A = 1e6, E = 0, ArgPe = 0, M0 = 0, Epoch = 0, Mu = mu, Dir = 1 };

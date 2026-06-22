@@ -5,6 +5,11 @@ namespace Solar.Physics
 {
     public enum TransitionType { None, Escape, Encounter, AtmoEntry }
 
+    /// <summary>How a coast conic clears (or doesn't clear) a body it falls toward: a clean flyby, a
+    /// skim through the atmosphere, or a surface impact. Used to warn about a flyby/encounter periapsis
+    /// before the player commits to it.</summary>
+    public enum FlybyOutcome { Flyby, AtmoEntry, Impact }
+
     /// <summary>One predicted trajectory: the current conic plus (at most) one SOI transition.</summary>
     public sealed class Prediction
     {
@@ -30,6 +35,19 @@ namespace Solar.Physics
         private const int SubDiv = 16;           // refinement fan-out per subdivision level
         private const int MaxDepth = 6;          // bounded recursion depth for hidden passages
         private const double VrelMargin = 1.25;  // safety margin on the per-interval relative-speed bound
+
+        /// <summary>Classify a conic's periapsis against a body it falls toward: surface impact, an
+        /// atmosphere skim, or a clean flyby. <paramref name="peAltitude"/> is the periapsis height above
+        /// the body surface (negative when the periapsis is below the surface). Mirrors the radius
+        /// thresholds <see cref="Predict"/> uses (surface radius, atmosphere top).</summary>
+        public static FlybyOutcome ClassifyFlyby(in OrbitalElements el, CelestialBody body, out double peAltitude)
+        {
+            double pe = el.Periapsis;
+            peAltitude = pe - body.Radius;
+            if (pe <= body.Radius) return FlybyOutcome.Impact;
+            if (body.Atmo != null && pe <= body.Radius + body.Atmo.Top) return FlybyOutcome.AtmoEntry;
+            return FlybyOutcome.Flyby;
+        }
 
         public static Prediction Predict(in OrbitalElements el, CelestialBody primary, double utNow)
         {

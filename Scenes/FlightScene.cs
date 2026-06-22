@@ -439,6 +439,19 @@ namespace Solar.Scenes
             }
         }
 
+        /// <summary>The earliest route encounter (descent into a child SOI) as its flyby conic + body, or
+        /// false. Covers both the live predicted encounter and any planned-node encounter (both appear as
+        /// SOI transitions in the projection). Feeds the HUD's flyby-periapsis danger readout.</summary>
+        private bool RouteFlyby(double ut, out OrbitalElements el, out CelestialBody body)
+        {
+            el = default; body = null;
+            var segs = Projection(ut, refreshNodes: false);
+            for (int i = 0; i + 1 < segs.Count; i++)
+                if (segs[i + 1].Body.Parent == segs[i].Body && !double.IsNaN(segs[i + 1].El.A))
+                { el = segs[i + 1].El; body = segs[i + 1].Body; return true; }
+            return false;
+        }
+
         /// <summary>Center + zoom the map on an encounter so its inside-SOI flyby leg fills the screen.</summary>
         private void FocusEncounter(CelestialBody body, double transUT)
         {
@@ -704,15 +717,18 @@ namespace Solar.Scenes
                         ApplyTransition();
                         clock.DropToRealtime();
                     }
-                    else if (nodeStop > clock.UT && nodeStop <= target)
-                    {
-                        clock.UT = nodeStop;
-                        _warpTo = null;
-                        clock.DropToRealtime();
-                    }
+                    // "Warp to maneuver" stops a comfortable lead before the burn; honour it BEFORE the
+                    // burn-start safety stop below, or a single huge max-warp step that overshoots both would
+                    // land on the burn start (nodeStop) instead, eating the lead. warpTarget < nodeStop always.
                     else if (_warpTo.HasValue && _warpTo.Value <= target)
                     {
                         clock.UT = _warpTo.Value;
+                        _warpTo = null;
+                        clock.DropToRealtime();
+                    }
+                    else if (nodeStop > clock.UT && nodeStop <= target)
+                    {
+                        clock.UT = nodeStop;
                         _warpTo = null;
                         clock.DropToRealtime();
                     }
@@ -736,10 +752,17 @@ namespace Solar.Scenes
                 clock.UT += realDt * clock.Warp;
             }
 
-            // maneuver burn tracking: count delta-v spent against the current node. Once a node's
-            // burn time passes it is consumed (KSP-style) and removed -- the live predicted
-            // trajectory then stands in as the achieved orbit, so nothing lingers/drifts on screen.
-            _nodes.RemoveAll(n => n.HasSource && n.UT < clock.UT);
+            // maneuver burn tracking: count delta-v spent against the current node. Once a node's burn
+            // time passes it becomes a frozen reference plot (the plan the player set), NOT auto-cancelled:
+            // mark it reached and snapshot its absolute world position at its own time so the node + its
+            // orange orbit stay drawn (and correctly placed across later orbit/SOI changes) until the player
+            // deletes it. NextNode/burn tracking only look at future nodes, so a reached node never re-arms.
+            foreach (var n in _nodes)
+                if (n.HasSource && !n.Reached && n.UT < clock.UT && n.Body != null)
+                {
+                    n.Reached = true;
+                    n.ReachedAbsPos = n.Body.AbsolutePositionAt(n.UT) + Kepler.StateAtTime(n.Source, n.UT).pos;
+                }
 
             var burnTarget = NextNode(clock.UT);
             if (burnTarget == null) { _burnSpent = 0; _burnTargetUT = double.NaN; }
@@ -2040,6 +2063,15 @@ namespace Solar.Scenes
         private const float XOffX = 14f, XOffY = -14f, XHit = 9f;
         private static Vector2 XButtonPos(Vector2 nodeScreen) => nodeScreen + new Vector2(XOffX, XOffY);
 
+        /// <summary>Screen position of a reached (frozen) node, from its stored absolute world position.
+        /// Reached nodes are frozen reference plots: anchored here, not re-derived from the live orbit.</summary>
+        private Vector2 ReachedNodeScreen(Maneuver node) => _cam.WorldToScreen(node.ReachedAbsPos);
+
+        /// <summary>The frozen primary position a reached node's conic is drawn around. Derived from the
+        /// stored absolute node position (reload-safe: does not depend on the runtime-only FrameUT).</summary>
+        private Vec2d ReachedPrimaryAbs(Maneuver node) =>
+            node.ReachedAbsPos - Kepler.StateAtTime(node.Source, node.UT).pos;
+
         private void UpdateManeuverInput(double ut, bool suppressClick, out bool wheelConsumed)
         {
             wheelConsumed = false;
@@ -2083,6 +2115,12 @@ namespace Solar.Scenes
             _hoverHandle = -1; _hoverNode = -1; _hoverX = -1;
             for (int n = 0; n < _nodes.Count && _hoverHandle < 0 && _hoverX < 0; n++)
             {
+                // reached nodes are frozen reference plots: only their X (delete) is interactive
+                if (_nodes[n].Reached)
+                {
+                    if (Vector2.Distance(mouse, XButtonPos(ReachedNodeScreen(_nodes[n]))) <= XHit) { _hoverX = n; break; }
+                    continue;
+                }
                 if (!ManeuverGeometry(_nodes[n], ut, out var ns, out var pd, out var rd)) continue;
                 if (Vector2.Distance(mouse, XButtonPos(ns)) <= XHit) { _hoverX = n; break; }
                 var h = new[] { ns + pd * HandleDist, ns - pd * HandleDist, ns + rd * HandleDist, ns - rd * HandleDist };
@@ -2251,7 +2289,8 @@ namespace Solar.Scenes
             if (_map) DrawMap(pb, sb, ut);
             else DrawWorld(pb, ut);
 
-            var hud = Hud.Draw(Ctx, _vessel, _pred, _map, FocusName(), NextNode(ut), BurnDirAngle(ut), _burnSpent, _nodes.Count, BuildNavMarkers(ut));
+            OrbitalElements? flybyEl = RouteFlyby(ut, out var fEl, out var fBody) ? fEl : (OrbitalElements?)null;
+            var hud = Hud.Draw(Ctx, _vessel, _pred, _map, FocusName(), NextNode(ut), BurnDirAngle(ut), _burnSpent, _nodes.Count, BuildNavMarkers(ut), flybyEl, fBody);
             _rightColBottom = hud.RightColumnBottom;
             if (hud.WarpToUT.HasValue) _warpTo = hud.WarpToUT;
             if (hud.FireStage) FireNextStage();
@@ -2533,7 +2572,7 @@ namespace Solar.Scenes
         {
             if (!HasTarget) return;
             var f = Ctx.Font;
-            var r = new Rectangle(10, 286, 256, 188);
+            var r = new Rectangle(10, 286, 256, 210);
             UiDraw.Panel(pb, r);
             float y = r.Y + 8;
             sb.DrawString(f, "TARGET  [Tab] cycle  [T] list", new Vector2(r.X + 10, y), UiDraw.Accent); y += 20;
@@ -2583,6 +2622,14 @@ namespace Solar.Scenes
                 Row("Close App.", UiDraw.Dist(_caSep), new Color(150, 220, 150));
                 Row("  in", UiDraw.Time(_caUT - ut));
                 Row("  rel. vel.", UiDraw.Speed(_caRelSpeed));
+            }
+            // when the route drops into the targeted body's SOI, show the flyby periapsis + danger here too
+            if (alive && RouteFlyby(ut, out var fbEl, out var fbBody) && fbBody == _targetBody)
+            {
+                var outc = TrajectoryPredictor.ClassifyFlyby(fbEl, fbBody, out double peAlt);
+                Color fc = outc == FlybyOutcome.Impact ? DangerRed : outc == FlybyOutcome.AtmoEntry ? DangerAmber : SafeGreen;
+                string fword = outc == FlybyOutcome.Impact ? " IMPACT" : outc == FlybyOutcome.AtmoEntry ? " ENTRY" : "";
+                Row("Flyby Pe", UiDraw.Dist(peAlt) + fword, fc);
             }
             if (_prox.Count > 0)
             {
@@ -2809,6 +2856,12 @@ namespace Solar.Scenes
                             if (_cam.OnScreen(gs, 100))
                                 pb.CircleOutline(new Vector2((float)gs.X, (float)gs.Y),
                                     (float)Math.Max(4, _pred.NextBody.Radius / _cam.MetersPerPixel), 1.2f, c2 * 0.8f);
+                            // flyby periapsis altitude + danger (impact / atmosphere skim / clear), so the
+                            // player sees how close this encounter passes BEFORE warping to it.
+                            var (dCol, dWord) = FlybyDanger(_pred.NextOrbit, _pred.NextBody);
+                            DrawApPeMarkers(pb, sb, _pred.NextOrbit, nbAbs, _pred.NextBody.Radius, dCol, ApColor);
+                            if (dWord != null)
+                                sb.DrawString(Ctx.Font, dWord, new Vector2(ms.X + 9, ms.Y + 7), dCol);
                         }
                     }
                 }
@@ -2976,6 +3029,23 @@ namespace Solar.Scenes
         private static readonly Color PeColor = new Color(120, 220, 255);
         private static readonly Color ApColor = new Color(170, 150, 255);
 
+        // Traffic-light tints for a flyby/encounter periapsis: red impact, amber atmosphere skim, green clear.
+        private static readonly Color DangerRed = new Color(255, 90, 80);
+        private static readonly Color DangerAmber = new Color(255, 170, 90);
+        private static readonly Color SafeGreen = new Color(140, 230, 160);
+
+        /// <summary>Danger tint + short ASCII tag ("IMPACT"/"ENTRY"/null) for a conic falling toward a body,
+        /// from <see cref="TrajectoryPredictor.ClassifyFlyby"/>. Drives the flyby periapsis colouring/labels.</summary>
+        private static (Color col, string word) FlybyDanger(in OrbitalElements el, CelestialBody body)
+        {
+            switch (TrajectoryPredictor.ClassifyFlyby(el, body, out _))
+            {
+                case FlybyOutcome.Impact: return (DangerRed, "IMPACT");
+                case FlybyOutcome.AtmoEntry: return (DangerAmber, "ENTRY");
+                default: return (SafeGreen, null);
+            }
+        }
+
         /// <summary>Draws every planned node: chained orbit previews, Ap/Pe + encounter for the
         /// final patch, plus each node's marker, delta-v handles and X delete button. Nodes are
         /// consumed the moment their burn time passes, so only pending future nodes are ever drawn.</summary>
@@ -2997,7 +3067,10 @@ namespace Solar.Scenes
                 if (i == lastPlanned)
                 {
                     OrbitRenderer.DrawConicGlow(pb, _cam, sg.El, sg.PrimaryAbs, legCol, sg.Body.SoiRadius);
-                    DrawApPeMarkers(pb, sb, sg.El, sg.PrimaryAbs, sg.Body.Radius, legCol, new Color(255, 210, 140));
+                    // if this final leg is a flyby/capture inside an encountered body, colour its Pe by danger
+                    Color peCol = legCol;
+                    if (i > 0 && segs[i - 1].Body == sg.Body.Parent) peCol = FlybyDanger(sg.El, sg.Body).col;
+                    DrawApPeMarkers(pb, sb, sg.El, sg.PrimaryAbs, sg.Body.Radius, peCol, new Color(255, 210, 140));
                 }
                 else
                 {
@@ -3023,10 +3096,41 @@ namespace Solar.Scenes
                         if (soiPx >= 3) pb.CircleOutline(bs, soiPx, 1.2f, encCol * 0.7f);
                         pb.CircleOutline(bs, Math.Max(3f, (float)(next.Body.Radius / _cam.MetersPerPixel)), 1.4f, encCol);
                         sb.DrawString(Ctx.Font, next.Body.Name, ms + new Vector2(9, -7), encCol);
+                        // flyby periapsis altitude + danger tag: drawn here for every encounter leg but the
+                        // last (that one's Pe is drawn, danger-coloured, by the lastPlanned branch above), so a
+                        // too-close / impacting capture is visible before the burn is executed.
+                        var (dCol, dWord) = FlybyDanger(next.El, next.Body);
                         if (i + 1 != lastPlanned)
-                            DrawApPeMarkers(pb, sb, next.El, next.PrimaryAbs, next.Body.Radius, encCol, new Color(255, 210, 140));
+                            DrawApPeMarkers(pb, sb, next.El, next.PrimaryAbs, next.Body.Radius, dCol, new Color(255, 210, 140));
+                        if (dWord != null)
+                            sb.DrawString(Ctx.Font, dWord, ms + new Vector2(9, 7), dCol);
                     }
                 }
+            }
+
+            // Reached nodes: frozen reference plots of the burns the player set, kept (rather than
+            // auto-cancelled) until deleted. Drawn dimmer than the live plan, around the frozen primary
+            // derived from the stored absolute position; only an X to clear, no editable handles.
+            var dimOrange = new Color(200, 140, 80);
+            foreach (var node in _nodes)
+            {
+                if (!node.Reached || !node.HasSource || node.Body == null || double.IsNaN(node.Source.A)) continue;
+                Vec2d primAbs = ReachedPrimaryAbs(node);
+                var res = node.ResultOrbit(node.Source, node.Body.Mu);
+                if (!double.IsNaN(res.A))
+                {
+                    OrbitRenderer.DrawConic(pb, _cam, res, primAbs, dimOrange * 0.7f, 1.2f, node.Body.SoiRadius);
+                    DrawApPeMarkers(pb, sb, res, primAbs, node.Body.Radius, dimOrange, dimOrange * 0.8f);
+                }
+                var rns = ReachedNodeScreen(node);
+                pb.CircleOutline(rns, 7, 1.6f, dimOrange);
+                pb.FillCircle(rns, 2.5f, dimOrange);
+                var rxp = XButtonPos(rns);
+                Color rxc = _hoverX == _nodes.IndexOf(node) ? new Color(255, 120, 110) : new Color(200, 180, 180);
+                pb.FillCircle(rxp, 7, new Color(40, 20, 24, 220));
+                pb.CircleOutline(rxp, 7, 1.5f, rxc);
+                pb.Line(rxp + new Vector2(-3, -3), rxp + new Vector2(3, 3), 1.6f, rxc);
+                pb.Line(rxp + new Vector2(-3, 3), rxp + new Vector2(3, -3), 1.6f, rxc);
             }
 
             foreach (var node in Sorted(ut))
