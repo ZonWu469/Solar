@@ -27,6 +27,9 @@ namespace Solar.Physics
     {
         private const int Samples = 800;
         private const double MaxHorizon = 3.0e8; // ~9.5 game-years cap for weird orbits
+        private const int SubDiv = 16;           // refinement fan-out per subdivision level
+        private const int MaxDepth = 6;          // bounded recursion depth for hidden passages
+        private const double VrelMargin = 1.25;  // safety margin on the per-interval relative-speed bound
 
         public static Prediction Predict(in OrbitalElements el, CelestialBody primary, double utNow)
         {
@@ -94,39 +97,54 @@ namespace Solar.Physics
         {
             if (ut1 <= ut0) return null;
             OrbitalElements orbit = el; // local copy: 'in' params can't be captured by local functions
+            double soi = child.SoiRadius;
+
+            // Signed distance to the SOI boundary (<0 inside) -- used by BisectEntry to root-find the crossing.
             double Dist(double t)
             {
-                Vec2d v = Kepler.StateAtTime(orbit, t).pos - Kepler.StateAtTime(child.Orbit, t).pos;
-                return v.Length - child.SoiRadius;
+                Vec2d r = Kepler.StateAtTime(orbit, t).pos - Kepler.StateAtTime(child.Orbit, t).pos;
+                return r.Length - soi;
+            }
+            // Distance to the child centre plus the heliocentric relative speed at t. The relative distance is
+            // Lipschitz in this speed (neither body feels the child's gravity in this analytic frame), which is
+            // what lets a coarse sample pair bound the closest possible approach across the interval between.
+            void Sample(double t, out double dCenter, out double vrel)
+            {
+                var s = Kepler.StateAtTime(orbit, t);
+                var c = Kepler.StateAtTime(child.Orbit, t);
+                dCenter = (s.pos - c.pos).Length;
+                vrel = (s.vel - c.vel).Length;
+            }
+
+            // Earliest SOI entry within [a,b] (a is guaranteed outside), or null. Subdivides only intervals
+            // whose closest *possible* approach reaches the SOI -- a Lipschitz lower bound on the relative
+            // distance -- so a passage narrower than the step can't slip between samples, yet an orbit that
+            // never nears the child does a single flat pass. The bound tightens as the step shrinks, so a
+            // genuine near-miss stops recursing within a level or two.
+            double? Scan(double a, double b, int subdiv, int depth)
+            {
+                Sample(a, out double dPrev, out double vPrev);
+                double prevT = a;
+                for (int i = 1; i <= subdiv; i++)
+                {
+                    double t = a + (b - a) * i / subdiv;
+                    Sample(t, out double dCur, out double vCur);
+                    if (dCur <= soi) return BisectEntry(Dist, prevT, t);   // sample inside the SOI
+                    double vMax = Math.Max(vPrev, vCur) * VrelMargin;
+                    if (Math.Min(dPrev, dCur) - vMax * (t - prevT) < soi && depth < MaxDepth)
+                    {
+                        double? hit = Scan(prevT, t, SubDiv, depth + 1);   // a passage might hide here -- refine
+                        if (hit.HasValue) return hit;
+                    }
+                    prevT = t; dPrev = dCur; vPrev = vCur;
+                }
+                return null;
             }
 
             double start = ut0 + 1e-6;
-            double prevT = start;
-            if (Dist(prevT) < 0) return null; // already inside (boundary jitter) - ignore
-
-            double bestT = prevT, bestD = Dist(prevT);
-            for (int i = 1; i <= Samples; i++)
-            {
-                double t = ut0 + (ut1 - ut0) * i / Samples;
-                double d = Dist(t);
-                if (d < 0) return BisectEntry(Dist, prevT, t);   // grid crossed the SOI boundary
-                if (d < bestD) { bestD = d; bestT = t; }
-                prevT = t;
-            }
-
-            // No grid sample fell inside the SOI, but a passage narrower than one step can still dip below
-            // it (the closest-approach search refines and would report it). Refine around the nearest sample;
-            // if the true minimum is inside, the entry crossing lies just before it.
-            double step = (ut1 - ut0) / Samples;
-            double lo = Math.Max(start, bestT - step), hi = Math.Min(ut1, bestT + step);
-            for (int it = 0; it < 50; it++)
-            {
-                double m1 = lo + (hi - lo) / 3, m2 = hi - (hi - lo) / 3;
-                if (Dist(m1) < Dist(m2)) hi = m2; else lo = m1;
-            }
-            double tMin = 0.5 * (lo + hi);
-            if (Dist(tMin) < 0) return BisectEntry(Dist, Math.Max(start, bestT - step), tMin);
-            return null;
+            Sample(start, out double d0, out _);
+            if (d0 <= soi) return null; // already inside (boundary jitter) - ignore
+            return Scan(start, ut1, Samples, 0);
         }
 
         /// <summary>Bisect for the SOI-entry time between an outside sample (Dist &gt;= 0) and an inside

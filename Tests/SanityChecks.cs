@@ -559,6 +559,36 @@ namespace Solar.Tests
                     && Math.Abs(sep0 - sep1) < 1e3);   // closest approach stable across search-start times
             }
 
+            // 19i. fast, narrow SOI flyby (planetary-rendezvous scale). A small-SOI child is crossed near the
+            //      ship's high-speed periapsis, so the sub-SOI passage window is ~1000x narrower than the
+            //      predictor's coarse sample step: invisible to the grid alone. Detection relies on
+            //      FindEncounter's motion-bounded adaptive subdivision (a Lipschitz lower bound on the
+            //      relative distance), which refines exactly the interval the passage hides in. Predict must
+            //      report the encounter and the independent closest-approach search must agree it is sub-SOI.
+            {
+                var primary = new CelestialBody { Mu = mu, Radius = 1 };   // SoiRadius defaults to +inf: no escape
+                const double Rc = 1e7, soi = 2e4;
+                var child = new CelestialBody
+                {
+                    Mu = mu * 1e-6, Radius = 1, Parent = primary, SoiRadius = soi,
+                    Orbit = new OrbitalElements { A = Rc, E = 0, ArgPe = 0, M0 = 0, Epoch = 0, Mu = mu, Dir = 1 },
+                };
+                primary.Children.Add(child);
+
+                // eccentric ship: periapsis on the child's orbit (1e7), apoapsis far out (1e9) -> fast, brief periapsis
+                double Ra = 1e9, A = (Rc + Ra) / 2;
+                var ship = new OrbitalElements { A = A, E = (Ra - Rc) / (Ra + Rc), ArgPe = 0, M0 = 0, Epoch = 0, Mu = mu, Dir = 1 };
+                double tStar = 0.5 * ship.Period;                       // ship reaches periapsis (Rc, angle 0) here
+                ship.M0 = -2 * Math.PI * tStar / ship.Period;          // (== -pi) ship at apoapsis at t=0, periapsis at tStar
+                child.Orbit.M0 = -child.Orbit.MeanMotion * tStar;      // child at world angle 0 (the periapsis point) at tStar
+
+                Func<double, Vec2d> tpos = t => child.AbsolutePositionAt(t);
+                bool ca = Rendezvous.ClosestApproach(ship, primary, tpos, 0, ship.Period, out _, out double sep, out _);
+                var pr = TrajectoryPredictor.Predict(ship, primary, 0);
+                Check("fast narrow flyby", ca && sep < soi
+                    && pr.Type == TransitionType.Encounter && pr.NextBody == child);
+            }
+
             // 20. body catalog: the solar system builds from BodyCatalog with the parent hierarchy, the
             //     1/10 length scale, texture ids, and finite SOIs intact.
             {
