@@ -98,13 +98,13 @@ namespace Solar.Progression
             },
             new TechNode {
                 Id = "radial", Title = "Radial Construction", Cost = 30, Prereqs = new[] { "solids" },
-                Parts = new[] { "radial-tank", "stack-bi-adapter", "i-beam", "long-i-beam" },
+                Parts = new[] { "radial-tank", "i-beam", "long-i-beam" },
                 Modules = new string[0],
-                Description = "Mount tanks and equipment to the sides of your stack. Stack adapters bridge different diameters.",
+                Description = "Mount tanks and equipment to the sides of your stack.",
             },
             new TechNode {
                 Id = "heavy", Title = "Heavy Rocketry", Cost = 45, Prereqs = new[] { "start" },
-                Parts = new[] { "jumbo-t2000", "mainsail", "dart" },
+                Parts = new[] { "jumbo-t2000", "mainsail", "dart", "skipper" },
                 Modules = new string[0],
                 Description = "Bigger is better. The Mainsail and Jumbo tank lift serious payloads into orbit.",
             },
@@ -122,7 +122,7 @@ namespace Solar.Progression
             },
             new TechNode {
                 Id = "probes", Title = "Probes", Cost = 35, Prereqs = new[] { "miniaturization" },
-                Parts = new[] { "probe-core", "service-pod-mk1", "comsat-core" },
+                Parts = new[] { "probe-core", "service-pod-mk1", "comsat-core", "oscar-tank" },
                 Modules = new string[0],
                 Description = "Lightweight probe cores let you fly unmanned missions — no life support needed.",
             },
@@ -150,13 +150,13 @@ namespace Solar.Progression
             },
             new TechNode {
                 Id = "vacuum-engines", Title = "Vacuum Engines", Cost = 75, Prereqs = new[] { "gimbaled" },
-                Parts = new[] { "poodle" },
+                Parts = new[] { "poodle", "wolfhound" },
                 Modules = new string[0],
                 Description = "The Poodle is optimized for vacuum operation — efficient, reliable, and perfectly sized for upper stages.",
             },
             new TechNode {
                 Id = "megarocketry", Title = "Megarocketry", Cost = 120, Prereqs = new[] { "heavy" },
-                Parts = new[] { "tank-t4000", "rhino", "toroidal-tank-t1200", "stack-tri-adapter" },
+                Parts = new[] { "tank-t4000", "rhino", "toroidal-tank-t1200" },
                 Modules = new string[0],
                 Description = "The Rhino engine, T4000 tank, and toroidal fuel stores push into the mega-lift class — think interplanetary motherships.",
             },
@@ -168,12 +168,12 @@ namespace Solar.Progression
             },
             new TechNode {
                 Id = "ultra-heavy", Title = "Ultra-Heavy", Cost = 160, Prereqs = new[] { "megarocketry" },
-                Parts = new[] { "tank-t8000", "sledgehammer-srb" },
+                Parts = new[] { "tank-t8000", "sledgehammer-srb", "mammoth" },
                 Modules = new string[0],
                 Description = "The T8000 and massive Sledgehammer SRB — for missions that rewrite the record books.",
             },
             new TechNode {
-                Id = "ultra-heavy", Title = "Imperator-Heavy", Cost = 180, Prereqs = new[] { "megarocketry" },
+                Id = "imperator-heavy", Title = "Imperator-Heavy", Cost = 180, Prereqs = new[] { "megarocketry" },
                 Parts = new[] { "tank-t16000", "imperator-srb" },
                 Modules = new string[0],
                 Description = "The T16000 and massive Imperator SRB — for missions that rewrite the record books.",

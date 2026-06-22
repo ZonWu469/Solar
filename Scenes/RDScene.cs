@@ -51,6 +51,7 @@ namespace Solar.Scenes
             ("radial-advanced", 3, 3), ("megarocketry", 3, 4), ("ultra-heavy", 3, 5),
             ("aerospace", 3, 6), ("vacuum-engines", 3, 7), ("advanced-probes", 3, 8),
             ("monoprop", 3, 9), ("crew-systems", 3, 10), ("heavy-landing", 3, 11), ("advanced", 3, 12),
+            ("imperator-heavy", 3, 13),
             ("planetary-science", 4, 0), ("deep-space-science", 4, 1), ("nuclear-power", 4, 2),
             ("docking", 4, 8), ("resource-processing", 4, 4), ("surface-science", 4, 5), ("power-systems", 4, 6),
             // Tier 4 (col=5)

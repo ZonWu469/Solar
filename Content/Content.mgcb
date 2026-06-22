@@ -1047,6 +1047,18 @@
 /processorParam:TextureFormat=Color
 /build:Textures/parts/mainsail.png
 
+#begin Textures/parts/mammoth.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/parts/mammoth.png
+
 #begin Textures/parts/mansail.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -1130,6 +1142,18 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:Textures/parts/OLD2_service-bay-1-7m.png
+
+#begin Textures/parts/oscar-tank.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/parts/oscar-tank.png
 
 #begin Textures/parts/parachute.png
 /importer:TextureImporter
@@ -1395,6 +1419,18 @@
 /processorParam:TextureFormat=Color
 /build:Textures/parts/shielded-port.png
 
+#begin Textures/parts/skipper.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/parts/skipper.png
+
 #begin Textures/parts/sledgehammer-srb.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -1454,6 +1490,18 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:Textures/parts/tank-t1600.png
+
+#begin Textures/parts/tank-t16000.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/parts/tank-t16000.png
 
 #begin Textures/parts/tank-t200.png
 /importer:TextureImporter
@@ -1586,6 +1634,18 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:Textures/parts/vector.png
+
+#begin Textures/parts/wolfhound.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Textures/parts/wolfhound.png
 
 #begin Textures/UI/gameplay_accel_panel.png
 /importer:TextureImporter

@@ -667,7 +667,7 @@ namespace Solar.Scenes
                         pb.TexturedQuad(t, new Vector2(cx + pw / 2, my - hh), new Vector2(cx + pw / 2 + pl, my - hh),
                                            new Vector2(cx + pw / 2 + pl, my + hh), new Vector2(cx + pw / 2, my + hh), Color.White, false);
                         pb.TexturedQuad(t, new Vector2(cx - pw / 2, my - hh), new Vector2(cx - pw / 2 - pl, my - hh),
-                                           new Vector2(cx - pw / 2 - pl, my + hh), new Vector2(cx - pw / 2, my + hh), Color.White, true);
+                                           new Vector2(cx - pw / 2 - pl, my + hh), new Vector2(cx - pw / 2, my + hh), Color.White, false);
                         break;
                     }
                     case ModuleKind.Harvester:

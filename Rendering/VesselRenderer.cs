@@ -301,8 +301,10 @@ namespace Solar.Rendering
                                 float my = y + h * 0.5f;
                                 if (mtex != null)
                                 {
-                                    // two wings; the left one mirrored so the right-oriented art reads correctly
-                                    pb.TexturedQuad(mtex, P(-w / 2, my + SolarHalf), P(-w / 2 - SolarLen, my + SolarHalf), P(-w / 2 - SolarLen, my - SolarHalf), P(-w / 2, my - SolarHalf), Color.White, true);
+                                    // two wings; each quad lists the hull-side vertex first, so the art's
+                                    // attachment edge (texture U=0) lands at the hull and the panel extends
+                                    // outward on both sides without a flip
+                                    pb.TexturedQuad(mtex, P(-w / 2, my + SolarHalf), P(-w / 2 - SolarLen, my + SolarHalf), P(-w / 2 - SolarLen, my - SolarHalf), P(-w / 2, my - SolarHalf), Color.White, false);
                                     pb.TexturedQuad(mtex, P(w / 2, my + SolarHalf), P(w / 2 + SolarLen, my + SolarHalf), P(w / 2 + SolarLen, my - SolarHalf), P(w / 2, my - SolarHalf), Color.White, false);
                                 }
                                 else
