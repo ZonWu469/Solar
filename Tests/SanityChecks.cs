@@ -121,6 +121,23 @@ namespace Solar.Tests
                     && Math.Abs(altClear - (8.0e5 - 6.0e5)) < 1.0);
             }
 
+            // 4c. transfer planner: a Hohmann-style intercept seed must close the gap to a co-orbiting
+            // target. Parentless body sits at the origin, so absolute == primary-relative coordinates.
+            {
+                var body = new CelestialBody { Mu = mu, Radius = 1 };
+                var ship = new OrbitalElements { A = 1e7, E = 0, ArgPe = 0, M0 = 0, Epoch = 0, Mu = mu, Dir = 1 };
+                var tgt  = new OrbitalElements { A = 2e7, E = 0, ArgPe = 0, M0 = 1.7, Epoch = 0, Mu = mu, Dir = 1 };
+                bool planned = TransferPlanner.PlanIntercept(ship, body, 0, tgt,
+                                   out double utB, out double pro, out double rad);
+                var node = new Maneuver { UT = utB, Prograde = pro, Radial = rad, Source = ship, HasSource = true };
+                var result = node.ResultOrbit(ship, mu);
+                Func<double, Vec2d> tAbs = t => body.AbsolutePositionAt(t) + Kepler.StateAtTime(tgt, t).pos;
+                double sep = double.MaxValue;
+                bool ok = !double.IsNaN(result.A) && Rendezvous.ClosestApproach(result, body, tAbs, utB,
+                              1.5 * result.Period, out _, out sep, out _);
+                Check("transfer-intercept", planned && ok && sep < 0.05 * 2e7);
+            }
+
             // 5. circular orbit quarter-period rotation
             {
                 var el = new OrbitalElements { A = 1e6, E = 0, ArgPe = 0, M0 = 0, Epoch = 0, Mu = mu, Dir = 1 };

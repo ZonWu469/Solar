@@ -296,6 +296,19 @@ namespace Solar.Scenes
             return best;
         }
 
+        /// <summary>The node whose info the HUD panel shows: the next (future) burn target if any,
+        /// otherwise the most recently reached node so its burn time / dV / timing stay visible (in a
+        /// "done" state) until the player deletes it. Burn tracking and warp keep using <see cref="NextNode"/>.</summary>
+        private Maneuver DisplayNode(double ut)
+        {
+            var next = NextNode(ut);
+            if (next != null) return next;
+            Maneuver last = null;
+            foreach (var n in _nodes)
+                if (n.Reached && (last == null || n.UT > last.UT)) last = n;
+            return last;
+        }
+
         // Reused by Sorted()/BuildProjection so the per-frame node walk doesn't allocate. Both are only
         // ever read sequentially within one frame (no re-entrant Sorted/BuildProjection call iterates one
         // while another rebuilds it), so a shared scratch buffer is safe. Re-sorting a handful of nodes is
@@ -328,8 +341,12 @@ namespace Solar.Scenes
         private readonly struct ProjSegment
         {
             public ProjSegment(in OrbitalElements el, CelestialBody body, Vec2d primaryAbs,
-                               double startUT, double endUT, bool closed, bool planned)
-            { El = el; Body = body; PrimaryAbs = primaryAbs; StartUT = startUT; EndUT = endUT; Closed = closed; Planned = planned; }
+                               double startUT, double endUT, bool closed, bool planned, bool liveFrame)
+            { El = el; Body = body; PrimaryAbs = primaryAbs; StartUT = startUT; EndUT = endUT; Closed = closed; Planned = planned; LiveFrame = liveFrame; }
+
+            /// <summary>A copy with a new primary anchor — used to re-anchor live-frame segments to the
+            /// body's current position each frame without rebuilding the (cached) conic.</summary>
+            public ProjSegment WithPrimary(Vec2d p) => new ProjSegment(El, Body, p, StartUT, EndUT, Closed, Planned, LiveFrame);
             public readonly OrbitalElements El;
             public readonly CelestialBody Body;
             public readonly Vec2d PrimaryAbs;   // body's absolute position snapshot at StartUT
@@ -337,6 +354,7 @@ namespace Solar.Scenes
             public readonly double EndUT;        // transition / node time, or +inf if the segment is a full orbit
             public readonly bool Closed;         // a full ellipse (no transition ends it)
             public readonly bool Planned;        // lies after at least one burn (drawn as the orange plan)
+            public readonly bool LiveFrame;      // still in the live body's SOI (pre-transition): re-anchored to "now" each frame
         }
 
         /// <summary>Walk the planned trajectory through SOI transitions and pending-node burns (KSP-style
@@ -357,6 +375,7 @@ namespace Solar.Scenes
             double segStart = ut;
             double bodyRefUT = ut;   // time the current body's SOI was entered: the conic's draw origin
             bool planned = false;    // becomes true once a node burn has been applied
+            bool liveFrame = true;   // still in the live body's SOI: anchor tracks "now", flipped off after an SOI transition
             int ni = 0, guard = 0;
             while (guard++ < 16)
             {
@@ -368,7 +387,7 @@ namespace Solar.Scenes
                 if (node != null && node.UT <= transUT)
                 {
                     // a burn happens before the next SOI change: the orbit shape holds until the node
-                    segs.Add(new ProjSegment(src, body, body.AbsolutePositionAt(bodyRefUT), segStart, node.UT, false, planned));
+                    segs.Add(new ProjSegment(src, body, body.AbsolutePositionAt(bodyRefUT), segStart, node.UT, false, planned, liveFrame));
                     if (refreshNodes) { node.Source = src; node.Body = body; node.HasSource = true; node.FrameUT = bodyRefUT; }
                     // Anchor the planned orbit to the node's frozen pre-burn source so it stays exactly
                     // where the user set it. While coasting Source is refreshed each frame (== src here);
@@ -385,9 +404,10 @@ namespace Solar.Scenes
 
                 bool hasTrans = !double.IsInfinity(transUT);
                 segs.Add(new ProjSegment(src, body, body.AbsolutePositionAt(bodyRefUT), segStart,
-                                         hasTrans ? transUT : double.PositiveInfinity, !hasTrans, planned));
+                                         hasTrans ? transUT : double.PositiveInfinity, !hasTrans, planned, liveFrame));
                 if (!hasTrans) break;
                 src = pred.NextOrbit; body = pred.NextBody; segStart = pred.TransitionUT; bodyRefUT = pred.TransitionUT;
+                liveFrame = false;   // past an SOI transition: this body's anchor is its fixed transition time
             }
             return segs;
         }
@@ -399,18 +419,30 @@ namespace Solar.Scenes
         private List<ProjSegment> Projection(double ut, bool refreshNodes)
         {
             double sig = ProjectionSig(ut);
-            if (!double.IsNaN(_projSig) && sig == _projSig && ut < _projNextEventUT) return _projSegs;
-            _projSegs = BuildProjection(ut, refreshNodes);
-            _projSig = sig;
-            // Earliest segment end (a node burn or SOI transition) still ahead: rebuild once warp passes it.
-            _projNextEventUT = double.PositiveInfinity;
-            foreach (var s in _projSegs)
-                if (s.EndUT > ut && s.EndUT < _projNextEventUT) _projNextEventUT = s.EndUT;
+            if (double.IsNaN(_projSig) || sig != _projSig || ut >= _projNextEventUT)
+            {
+                _projSegs = BuildProjection(ut, refreshNodes);
+                _projSig = sig;
+                // Earliest segment end (a node burn or SOI transition) still ahead: rebuild once warp passes it.
+                _projNextEventUT = double.PositiveInfinity;
+                foreach (var s in _projSegs)
+                    if (s.EndUT > ut && s.EndUT < _projNextEventUT) _projNextEventUT = s.EndUT;
+            }
+            // Re-anchor live-frame segments to the body's CURRENT position every call. The cache holds the
+            // (rails-stable) conic shapes, but the body moves as time/warp advances and the map camera tracks
+            // it (UpdateCamera) — a baked anchor would make the planned (orange) route drift off its node
+            // marker until the node is reached. Cheap: a handful of structs, memoized AbsolutePositionAt, no
+            // TrajectoryPredictor work and no allocation (in-place struct replace).
+            for (int i = 0; i < _projSegs.Count; i++)
+            {
+                var sg = _projSegs[i];
+                if (sg.LiveFrame) _projSegs[i] = sg.WithPrimary(sg.Body.AbsolutePositionAt(ut));
+            }
             return _projSegs;
         }
 
         /// <summary>Content signature of everything the projection depends on: the live conic, its body, the
-        /// node set, and the thrusting flag. While coasting on rails this is stable frame to frame, so the
+        /// node set, and the on-rails flag. While coasting on rails this is stable frame to frame, so the
         /// (expensive) projection is built once and reused.</summary>
         private double ProjectionSig(double ut)
         {
@@ -420,7 +452,7 @@ namespace Solar.Scenes
                 s += live.A * 1.0 + live.E * 31.0 + live.ArgPe * 131.0 + live.Dir * 7.0;
                 if (body != null) s += body.GetHashCode() * 1e-3;
             }
-            if (_vessel != null && _vessel.CurrentThrust > 0) s += 1e9;   // thrusting flips refreshNodes
+            if (_vessel != null && !_vessel.OnRails) s += 1e9;   // off-rails: rebuild each frame, freeze node Source
             return s;
         }
 
@@ -457,7 +489,7 @@ namespace Solar.Scenes
         {
             _encFocusBody = body; _encFocusUT = transUT; _mapPan = default;
             double screen = Math.Max(200, Math.Min(_cam.ScreenW, _cam.ScreenH));
-            _mapZoom = Math.Clamp(2 * body.SoiRadius / (0.6 * screen), 50, 5e8);  // SOI diameter ~ 60% of view
+            _mapZoom = Math.Clamp(2 * body.SoiRadius / (0.6 * screen), 50, 2e9);  // SOI diameter ~ 60% of view
         }
 
         /// <summary>Whether the mouse is over a route encounter marker; yields the body + transition time.</summary>
@@ -529,7 +561,9 @@ namespace Solar.Scenes
             if (inp.WheelDelta != 0 && !maneuverWheel)
             {
                 double factor = Math.Pow(1.18, -inp.WheelDelta / 120.0);
-                if (_map) _mapZoom = Math.Clamp(_mapZoom * factor, 50, 5e8);
+                // max m/px (2e9) frames the whole system out to Neptune (~4.5e11 m) with margin even when
+                // the camera is focused on the vessel/an inner planet rather than the Sun
+                if (_map) _mapZoom = Math.Clamp(_mapZoom * factor, 50, 2e9);
                 // min m/px (max zoom-in) capped at ~100 px/m so part textures (~64-135 px/m native) stay crisp
                 else _flightZoom = Math.Clamp(_flightZoom * factor, 0.01, 400);
             }
@@ -2085,10 +2119,11 @@ namespace Solar.Scenes
             }
 
             // Build this frame's planned projection once, here, before any other consumer. refreshNodes
-            // re-chains pending nodes across SOI transitions and reassigns each node's frozen Source while
-            // coasting; during a burn it is held frozen so the planned (orange) orbit stays put.
-            bool thrusting = _vessel.CurrentThrust > 0;
-            Projection(ut, refreshNodes: !thrusting);
+            // re-chains pending nodes across SOI transitions and reassigns each node's frozen Source. The
+            // live conic is constant *iff* the vessel is on-rails, so we re-source only then; whenever the
+            // ship is off-rails for any reason (thrust, RCS, radial, atmosphere) the node Source is held
+            // frozen and the planned (orange) orbit stays exactly where the player set it.
+            Projection(ut, refreshNodes: _vessel.OnRails);
             double nodeSig0 = NodeSignature();   // invalidate the cache below if any edit changes the nodes
 
             // keep an active encounter focus tracking the encounter as the node is tuned; drop it once the
@@ -2290,7 +2325,7 @@ namespace Solar.Scenes
             else DrawWorld(pb, ut);
 
             OrbitalElements? flybyEl = RouteFlyby(ut, out var fEl, out var fBody) ? fEl : (OrbitalElements?)null;
-            var hud = Hud.Draw(Ctx, _vessel, _pred, _map, FocusName(), NextNode(ut), BurnDirAngle(ut), _burnSpent, _nodes.Count, BuildNavMarkers(ut), flybyEl, fBody);
+            var hud = Hud.Draw(Ctx, _vessel, _pred, _map, FocusName(), DisplayNode(ut), BurnDirAngle(ut), _burnSpent, _nodes.Count, BuildNavMarkers(ut), flybyEl, fBody);
             _rightColBottom = hud.RightColumnBottom;
             if (hud.WarpToUT.HasValue) _warpTo = hud.WarpToUT;
             if (hud.FireStage) FireNextStage();
@@ -2572,7 +2607,7 @@ namespace Solar.Scenes
         {
             if (!HasTarget) return;
             var f = Ctx.Font;
-            var r = new Rectangle(10, 286, 256, 210);
+            var r = new Rectangle(10, 286, 256, 260);
             UiDraw.Panel(pb, r);
             float y = r.Y + 8;
             sb.DrawString(f, "TARGET  [Tab] cycle  [T] list", new Vector2(r.X + 10, y), UiDraw.Accent); y += 20;
@@ -2619,7 +2654,8 @@ namespace Solar.Scenes
             }
             if (_caValid)
             {
-                Row("Close App.", UiDraw.Dist(_caSep), new Color(150, 220, 150));
+                Color qcol = RendezvousQuality(_caSep, out string verdict);
+                Row("Close App.", $"{UiDraw.Dist(_caSep)}  {verdict}", qcol);
                 Row("  in", UiDraw.Time(_caUT - ut));
                 Row("  rel. vel.", UiDraw.Speed(_caRelSpeed));
             }
@@ -2635,8 +2671,45 @@ namespace Solar.Scenes
             {
                 bool meet = false; double nearest = double.MaxValue;
                 foreach (var p in _prox) { if (p.Intersect) meet = true; if (p.Sep < nearest) nearest = p.Sep; }
-                if (meet) Row("Orbits", "intersect", new Color(255, 190, 70));
-                else Row("Orbit gap", UiDraw.Dist(nearest), new Color(140, 230, 160));
+                // geometric, timing-blind: name it so it can't be read as a rendezvous
+                if (meet) Row("Paths", "cross", new Color(210, 160, 80));
+                else Row("Path gap", UiDraw.Dist(nearest), new Color(140, 230, 160));
+            }
+
+            // Plan transfer: drops a Hohmann-style intercept node the player then fine-tunes. Enabled only
+            // when the ship and target share a primary (and the ship is coasting); else greyed with a hint.
+            CelestialBody planPrimary = null; OrbitalElements planTgt = default;
+            bool canPlan = false; string planHint = null;
+            if (alive && !_vessel.Landed)
+            {
+                if (_targetBody != null && _targetBody.Parent != null && _vessel.Body == _targetBody.Parent)
+                { planPrimary = _targetBody.Parent; planTgt = _targetBody.Orbit; canPlan = true; }
+                else if (_targetVessel != null && _vessel.Body != null && _targetVessel.Body == _vessel.Body)
+                { planPrimary = _vessel.Body; planTgt = _targetVessel.CurrentElements(ut); canPlan = true; }
+                else
+                {
+                    string need = _targetBody != null ? (_targetBody.Parent?.Name ?? "?")
+                                                      : (_targetVessel?.Body?.Name ?? "?");
+                    planHint = $"orbit {need} to plan";
+                }
+            }
+            var btnRect = new Rectangle(r.X + 10, r.Bottom - 30, r.Width - 20, 24);
+            if (planHint != null)
+                sb.DrawString(f, planHint, new Vector2(btnRect.X, btnRect.Y - 16), UiDraw.TextDim);
+            if (UiDraw.Button(pb, sb, f, btnRect, "Plan transfer", Ctx.Input, canPlan) && canPlan)
+            {
+                var shipEl = _vessel.CurrentElements(ut);
+                if (TransferPlanner.PlanIntercept(shipEl, planPrimary, ut, planTgt,
+                        out double utB, out double pro, out double rad))
+                {
+                    _nodes.RemoveAll(n => !n.Reached);
+                    _nodes.Add(new Maneuver
+                    {
+                        UT = utB, Prograde = pro, Radial = rad,
+                        Source = shipEl, Body = planPrimary, HasSource = true
+                    });
+                    _burnSpent = 0; _projSig = double.NaN;
+                }
             }
         }
 
@@ -2925,26 +2998,37 @@ namespace Solar.Scenes
                 sb.DrawString(Ctx.Font, _targetName ?? "Target", p + new Vector2(12, 8), TargetColor);
             }
 
-            // closest-approach markers -- drawn on exactly the patch the readout was measured on
+            // Closest-approach pair -- the hero of the rendezvous view. A matched you/target pair at the
+            // SAME instant: your marker (diamond) and where the target will actually be then (ring),
+            // joined by a tie coloured green/amber/red by how good the rendezvous is. This is the timing-
+            // aware approach, unlike the geometric orbit crossings below.
             if (_caValid && _caYouPrimary != null && _caTpos != null && !double.IsNaN(_caYouEl.A))
             {
                 Vec2d youCa = _caYouPrimary.AbsolutePositionAt(_caUT) + Kepler.StateAtTime(_caYouEl, _caUT).pos;
                 Vec2d tgtCa = _caTpos(_caUT);   // where the target/approach body will be at closest approach
                 var ys = _cam.WorldToScreen(youCa);
                 var tsScreen = _cam.WorldToScreen(tgtCa);
-                pb.Line(ys, tsScreen, 1f, new Color(180, 180, 200, 160));
-                pb.FillCircle(ys, 4, new Color(120, 220, 255));
-                // the target's projected position at the approach: a labelled ring so it's findable even
-                // when it sits away from the body's current (possibly focused) position.
+                Color qcol = RendezvousQuality(_caSep, out string verdict);
+
+                pb.Line(ys, tsScreen, 2f, qcol * 0.85f);                 // the tie reads the verdict colour
+                // your marker: a filled diamond so it never reads as the target's ring
+                pb.Quad(ys + new Vector2(0, -5), ys + new Vector2(5, 0), ys + new Vector2(0, 5), ys + new Vector2(-5, 0), YouCaColor);
+                // the target's projected position at the approach: a labelled ring, findable even when it
+                // sits away from the body's current (possibly focused) position.
                 pb.CircleOutline(tsScreen, 6, 2f, TargetColor);
+                pb.FillCircle(tsScreen, 2f, TargetColor);
                 sb.DrawString(Ctx.Font, _targetName ?? "target", tsScreen + new Vector2(9, 5), TargetColor);
-                var mid = (ys + tsScreen) / 2;
-                sb.DrawString(Ctx.Font, UiDraw.Dist(_caSep), mid + new Vector2(6, -6), new Color(200, 210, 230));
+                // label on your side: separation + verdict, then ETA + closing speed
+                sb.DrawString(Ctx.Font, $"{UiDraw.Dist(_caSep)}  {verdict}", ys + new Vector2(8, -16), qcol);
+                sb.DrawString(Ctx.Font, $"in {UiDraw.Time(_caUT - ut)}  @ {UiDraw.Speed(_caRelSpeed)}",
+                              ys + new Vector2(8, -2), new Color(200, 210, 230));
             }
 
-            // geometric orbit-curve proximities: intersections ("Meet") + up-to-2 closest points
-            var meet = new Color(255, 190, 70);
-            var close = new Color(140, 230, 160);
+            // Geometric orbit-curve crossings -- timing-BLIND, so deliberately secondary to the pair above.
+            // At a crossing we draw where the target actually is when the ship arrives, labelled "miss",
+            // to teach that the paths crossing in space is not a rendezvous (the target is elsewhere then).
+            var meet = new Color(210, 160, 80);     // dimmed amber: a teaching cue, not "you'll meet here"
+            var close = new Color(120, 190, 140);
             bool havePlan = _caValid && _caYouPrimary != null && _caTpos != null && !double.IsNaN(_caYouEl.A);
             foreach (var p in _prox)
             {
@@ -2955,9 +3039,6 @@ namespace Solar.Scenes
                 var yp = new Vector2((float)ys.X, (float)ys.Y);
                 if (p.Intersect)
                 {
-                    // The orbits cross here. More useful than the bare crossing: where the target will be
-                    // when the ship reaches it -- project the target to the ship's arrival time and link
-                    // the two, labelled with the miss distance and time-to-intersection.
                     if (havePlan)
                     {
                         double tArr   = Kepler.TimeAtTrueAnomaly(_caYouEl, p.NuYou, _caStart);
@@ -2965,24 +3046,24 @@ namespace Solar.Scenes
                         Vec2d tgtArr  = _caTpos(tArr);
                         var sp = _cam.WorldToScreen(shipArr);
                         var tp = _cam.WorldToScreen(tgtArr);
-                        pb.Line(sp, tp, 1f, meet * 0.7f);
-                        pb.CircleOutline(tp, 5, 1.6f, TargetColor);
+                        pb.Line(sp, tp, 1f, meet * 0.55f);
+                        pb.CircleOutline(tp, 4, 1.2f, TargetColor * 0.8f);
                         yp = sp;   // anchor the crossing mark/label on the recomputed arrival point
-                        sb.DrawString(Ctx.Font, UiDraw.Dist((shipArr - tgtArr).Length) + "  " + UiDraw.Time(tArr - ut),
+                        sb.DrawString(Ctx.Font, "miss " + UiDraw.Dist((shipArr - tgtArr).Length),
                                       yp + new Vector2(8, -8), meet);
                     }
-                    else sb.DrawString(Ctx.Font, "Meet", yp + new Vector2(8, -8), meet);
-                    pb.CircleOutline(yp, 6, 1.8f, meet);
-                    pb.Line(yp + new Vector2(-4, -4), yp + new Vector2(4, 4), 1.4f, meet);
-                    pb.Line(yp + new Vector2(-4, 4), yp + new Vector2(4, -4), 1.4f, meet);
+                    else sb.DrawString(Ctx.Font, "cross", yp + new Vector2(8, -8), meet);
+                    pb.CircleOutline(yp, 5, 1.2f, meet);
+                    pb.Line(yp + new Vector2(-3, -3), yp + new Vector2(3, 3), 1f, meet);
+                    pb.Line(yp + new Vector2(-3, 3), yp + new Vector2(3, -3), 1f, meet);
                 }
                 else
                 {
                     var ts2 = _cam.WorldToScreen(p.TgtPos);
-                    pb.Line(yp, ts2, 1f, close * 0.6f);
-                    pb.CircleOutline(yp, 5, 1.6f, close);
-                    pb.FillCircle(ts2, 3, close * 0.85f);
-                    sb.DrawString(Ctx.Font, UiDraw.Dist(p.Sep), yp + new Vector2(8, -8), close);
+                    pb.Line(yp, ts2, 1f, close * 0.45f);
+                    pb.CircleOutline(yp, 4, 1.2f, close);
+                    pb.FillCircle(ts2, 2.5f, close * 0.8f);
+                    sb.DrawString(Ctx.Font, "gap " + UiDraw.Dist(p.Sep), yp + new Vector2(8, -8), close);
                 }
             }
         }
@@ -3044,6 +3125,26 @@ namespace Solar.Scenes
                 case FlybyOutcome.AtmoEntry: return (DangerAmber, "ENTRY");
                 default: return (SafeGreen, null);
             }
+        }
+
+        // A ship/white tint for "you @ closest approach" so the pair reads as you-vs-target.
+        private static readonly Color YouCaColor = new Color(120, 230, 255);
+
+        /// <summary>Traffic-light quality of a closest-approach separation against the current target,
+        /// with a one-word verdict. A body is scored by its SOI (entering it = an encounter); a vessel
+        /// by a fixed metre scale. Drives the colour of the closest-approach pair and the panel readout.</summary>
+        private Color RendezvousQuality(double sep, out string verdict)
+        {
+            if (_targetBody != null)
+            {
+                double soi = _targetBody.SoiRadius;
+                if (sep <= soi) { verdict = "encounter"; return SafeGreen; }
+                if (sep <= 3 * soi) { verdict = "close"; return DangerAmber; }
+                verdict = "far"; return DangerRed;
+            }
+            if (sep < 2000) { verdict = "close"; return SafeGreen; }
+            if (sep < 50000) { verdict = "near"; return DangerAmber; }
+            verdict = "far"; return DangerRed;
         }
 
         /// <summary>Draws every planned node: chained orbit previews, Ap/Pe + encounter for the

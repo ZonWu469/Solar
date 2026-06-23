@@ -421,6 +421,7 @@ namespace Solar.UI
             {
                 double now = ctx.Clock.UT;
                 double avail = totalDV;
+                bool done = node.Reached;   // burn time has passed: show the executed plan, no live cues
                 bool enough = node.DeltaV <= avail + 1e-6;
                 double bt = Staging.BurnTime(v, node.DeltaV);
                 bool burning = burnSpent > 0;
@@ -433,19 +434,28 @@ namespace Solar.UI
                     sb.DrawString(f, value, new Vector2(mp.X + 104, my), c);
                     my += 18;
                 }
-                string mTitle = nodeCount > 1 ? $"MANEUVER (next of {nodeCount})  [Del]" : "MANEUVER  [Del] / X to clear";
-                sb.DrawString(f, mTitle, new Vector2(mp.X + 10, my), UiDraw.Accent);
+                string mTitle = done ? "MANEUVER (done)  X to clear"
+                    : nodeCount > 1 ? $"MANEUVER (next of {nodeCount})  [Del]" : "MANEUVER  [Del] / X to clear";
+                sb.DrawString(f, mTitle, new Vector2(mp.X + 10, my), done ? new Color(200, 140, 80) : UiDraw.Accent);
                 my += 22;
                 MRow("dV req", $"{node.DeltaV:0} m/s", enough ? Color.White : new Color(255, 110, 100));
                 MRow("pro/rad", $"{node.Prograde:+0.###;-0.###} / {node.Radial:+0.###;-0.###}", UiDraw.TextDim);
                 MRow("dV avail", $"{avail:0} m/s", enough ? new Color(150, 220, 150) : new Color(255, 110, 100));
                 MRow("burn time", enough && bt > 0 ? UiDraw.Time(bt) : "-", Color.White);
-                double toNode = node.UT - now;
-                MRow("node in", UiDraw.Time(Math.Max(0, toNode)), toNode < 0 ? new Color(255, 170, 90) : Color.White);
-                // ignition is when the (node-centred) burn should start: node - half the burn
-                double burnIn = node.UT - (enough && bt > 0 ? bt / 2 : 0) - now;
-                MRow("burn in", enough && bt > 0 ? UiDraw.Time(Math.Max(0, burnIn)) : "-",
-                     burnIn < 0 ? new Color(255, 110, 100) : new Color(255, 210, 140));
+                if (done)
+                {
+                    // executed node: T+ since the burn time, no upcoming-burn/warp cues
+                    MRow("executed", $"T+ {UiDraw.Time(now - node.UT)}", new Color(200, 140, 80));
+                }
+                else
+                {
+                    double toNode = node.UT - now;
+                    MRow("node in", UiDraw.Time(Math.Max(0, toNode)), toNode < 0 ? new Color(255, 170, 90) : Color.White);
+                    // ignition is when the (node-centred) burn should start: node - half the burn
+                    double burnIn = node.UT - (enough && bt > 0 ? bt / 2 : 0) - now;
+                    MRow("burn in", enough && bt > 0 ? UiDraw.Time(Math.Max(0, burnIn)) : "-",
+                         burnIn < 0 ? new Color(255, 110, 100) : new Color(255, 210, 140));
+                }
                 // resulting orbit of this burn (apsides above the body surface), so the consequence is
                 // visible numerically while tuning the node -- not only as map chevrons.
                 if (node.HasSource && node.Body != null)
@@ -467,7 +477,7 @@ namespace Solar.UI
                 }
                 if (burning)
                     MRow("remaining", $"{Math.Max(0, node.DeltaV - burnSpent):0} m/s", UiDraw.Accent);
-                else
+                else if (!done)
                 {
                     // the burn is centred on the node, so ignition is half a burn before it; stop the warp a
                     // comfortable lead earlier (room to rotate to the burn vector and settle), not right on it
