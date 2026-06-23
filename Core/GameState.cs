@@ -48,7 +48,7 @@ namespace Solar.Core
                 UnlockedTech = sandbox ? Solar.Progression.TechTree.AllNodeIds()
                                        : Solar.Progression.TechTree.StartingNodes(),
                 Science = sandbox ? 1_000_000 : 0,
-                Roster = StartingCrew(),
+                Roster = CrewRoster.NewPool(),
                 WeatherSeed = NewSeed(),
             };
         }
@@ -60,26 +60,24 @@ namespace Solar.Core
             return s == 0 ? 1 : s;
         }
 
-        /// <summary>The crew the player begins with: one of each role plus a couple of pilots.</summary>
-        private static List<CrewMember> StartingCrew() => new()
+        /// <summary>Names of all crew currently aboard a saved/flying ship — the "spent" set. These are
+        /// unavailable for assignment in the editor until their ship leaves the fleet (destroyed, scrapped,
+        /// or docked away). Walks each ship's part tree, including radially-mounted sub-parts.</summary>
+        public HashSet<string> DeployedCrewNames()
         {
-            new CrewMember("Jeb Kerman", CrewRole.Pilot),
-            new CrewMember("Val Kerman", CrewRole.Pilot),
-            new CrewMember("Bill Kerman", CrewRole.Engineer),
-            new CrewMember("Bob Kerman", CrewRole.Scientist),
-            new CrewMember("Val Kerman", CrewRole.Pilot),
-            new CrewMember("Bill1 Kerman", CrewRole.Engineer),
-            new CrewMember("Bob1 Kerman", CrewRole.Scientist),
-            new CrewMember("Val1 Kerman", CrewRole.Pilot),
-            new CrewMember("Bill1 Kerman", CrewRole.Engineer),
-            new CrewMember("Bob2 Kerman", CrewRole.Scientist),
-            new CrewMember("Val2 Kerman", CrewRole.Pilot),
-            new CrewMember("Bill2 Kerman", CrewRole.Engineer),
-            new CrewMember("Bob2 Kerman", CrewRole.Scientist),
-            new CrewMember("Val3 Kerman", CrewRole.Pilot),
-            new CrewMember("Bill3 Kerman", CrewRole.Engineer),
-            new CrewMember("Bob3 Kerman", CrewRole.Scientist)
-        };
+            var names = new HashSet<string>();
+            foreach (var s in Ships)
+                if (s.Parts != null)
+                    foreach (var p in s.Parts) CollectCrew(p, names);
+            return names;
+        }
+
+        private static void CollectCrew(PartState p, HashSet<string> into)
+        {
+            if (p == null) return;
+            if (p.Crew != null) foreach (var n in p.Crew) into.Add(n);
+            if (p.Radials != null) foreach (var r in p.Radials) CollectCrew(r, into);
+        }
 
         /// <summary>Insert or replace a ship by name; destroyed ships are dropped.</summary>
         public void UpsertShip(ShipState s)

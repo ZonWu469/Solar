@@ -23,6 +23,7 @@ namespace Solar.Scenes
         private bool _showModulePicker;  // "Add Module" overlay open
         private int _pickerTarget = -1;  // stack index the picker fits modules to
         private float _pickerScroll;     // module-picker scroll offset (px)
+        private float _crewScroll;       // crew-picker scroll offset (px)
         private bool _showCrewPicker;    // "Assign Crew" overlay open
         private int _crewTarget = -1;    // stack index the crew picker assigns to
         private bool _showLoadShip;      // "Load Ship" design-library overlay open
@@ -838,6 +839,10 @@ namespace Solar.Scenes
                 if (seats > 0)
                 {
                     Str($"Crew: {crewAssigned}/{seats} seats", x, y, Color.White); y += 18;
+                    int poolAvail = AvailableCrew().Count, poolActive = 0, poolLost = 0;
+                    foreach (var c in Ctx.State.Roster)
+                        if (c.Status == CrewStatus.KIA) poolLost++; else poolActive++;
+                    Str($"Crew pool: {poolAvail} avail / {poolActive} active / {poolLost} lost", x, y, UiDraw.TextDim); y += 18;
                     bool hasLs = oxCap > 0 || waCap > 0 || foCap > 0;
                     if (crewAssigned > 0 && hasLs)
                     {
@@ -955,7 +960,7 @@ namespace Solar.Scenes
                 if (entry.CrewNames.Count < entry.SeatCount && AvailableCrew().Count > 0)
                 {
                     if (Btn(new Rectangle((int)x, (int)y, StatsW - 44, 26), "+ Assign crew"))
-                    { _showCrewPicker = true; _crewTarget = _selected; }
+                    { _showCrewPicker = true; _crewTarget = _selected; _crewScroll = 0; }
                     y += 30;
                 }
             }
@@ -1249,14 +1254,15 @@ namespace Solar.Scenes
             sb.DrawString(f, footer, new Vector2(px + 20, py + ph - 24), UiDraw.TextDim);
         }
 
-        /// <summary>Living crew not yet assigned to any seat in the current design.</summary>
+        /// <summary>Living crew not assigned to any seat in the current design and not already deployed on
+        /// a saved/flying ship (deployed crew are "spent" until their ship leaves the fleet).</summary>
         private List<CrewMember> AvailableCrew()
         {
-            var assigned = new HashSet<string>();
-            foreach (var e in Stack) foreach (var n in e.CrewNames) assigned.Add(n);
+            var unavailable = Ctx.State.DeployedCrewNames();
+            foreach (var e in Stack) foreach (var n in e.CrewNames) unavailable.Add(n);
             var list = new List<CrewMember>();
             foreach (var c in Ctx.State.Roster)
-                if (c.Status == CrewStatus.Active && !assigned.Contains(c.Name)) list.Add(c);
+                if (c.Status == CrewStatus.Active && !unavailable.Contains(c.Name)) list.Add(c);
             return list;
         }
 
@@ -1277,16 +1283,21 @@ namespace Solar.Scenes
             int px = w / 2 - pw / 2, py = Math.Max(20, h / 2 - ph / 2);
             UiDraw.Panel(pb, new Rectangle(px, py, pw, ph));
             sb.DrawString(Ctx.FontBig, "ASSIGN CREW", new Vector2(px + 20, py + 12), new Color(200, 215, 235));
-            sb.DrawString(f, $"{entry.Def.Name}  ({entry.CrewNames.Count}/{entry.SeatCount})",
-                          new Vector2(px + pw - 180, py + 18), UiDraw.Accent);
+            sb.DrawString(f, $"{crew.Count} available  -  {entry.Def.Name} ({entry.CrewNames.Count}/{entry.SeatCount})",
+                          new Vector2(px + pw - 280, py + 18), UiDraw.Accent);
 
-            int bodyTop = py + headerH;
+            int bodyTop = py + headerH, bodyBot = bodyTop + bodyH;
+            int maxScroll = Math.Max(0, contentH - bodyH);
+            bool inPanel = inp.MousePos.X >= px && inp.MousePos.X <= px + pw && inp.MousePos.Y >= bodyTop && inp.MousePos.Y <= bodyBot;
+            if (inPanel) _crewScroll -= inp.WheelDelta * 0.4f;
+            _crewScroll = Math.Clamp(_crewScroll, 0, maxScroll);
+
             if (crew.Count == 0)
-                sb.DrawString(f, "No available crew (all assigned or KIA).", new Vector2(px + 20, bodyTop + 6), UiDraw.TextDim);
+                sb.DrawString(f, "No available crew (all assigned, deployed, or KIA).", new Vector2(px + 20, bodyTop + 6), UiDraw.TextDim);
             for (int i = 0; i < crew.Count; i++)
             {
-                float ry = bodyTop + i * rowH;
-                if (ry + rowH > bodyTop + bodyH) break;
+                float ry = bodyTop - _crewScroll + i * rowH;
+                if (ry + rowH <= bodyTop || ry >= bodyBot) continue;
                 var rowR = new Rectangle(px + 16, (int)ry + 2, pw - 32, rowH - 4);
                 bool hover = !full && rowR.Contains((int)inp.MousePos.X, (int)inp.MousePos.Y);
                 pb.FillRect(rowR, hover ? new Color(60, 95, 140, 235) : new Color(36, 56, 84, 230));
@@ -1295,7 +1306,8 @@ namespace Solar.Scenes
                 if (hover && inp.LeftClick) { entry.CrewNames.Add(crew[i].Name); _showCrewPicker = false; }
             }
 
-            string footer = full ? "all seats full  -  [Esc] close" : "[Esc] close";
+            string footer = full ? "all seats full  -  [Esc] close"
+                          : maxScroll > 0 ? "[Esc] close   -   scroll for more" : "[Esc] close";
             sb.DrawString(f, footer, new Vector2(px + 20, py + ph - 24), UiDraw.TextDim);
         }
 

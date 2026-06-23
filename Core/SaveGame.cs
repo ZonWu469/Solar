@@ -59,6 +59,7 @@ namespace Solar.Core
                 {
                     var gs = JsonSerializer.Deserialize<GameState>(File.ReadAllText(path), JsonOpts);
                     Solar.Progression.TechTree.MigrateSave(gs);
+                    Solar.Vessels.CrewRoster.TopUp(gs);   // bring older saves up to the 100-crew pool
                     return gs;
                 }
             }

@@ -2320,6 +2320,73 @@ namespace Solar.Tests
                 Check("eva spawn & board", spawned && canBoard && boarded);
             }
 
+            // ----- crew pool: NewPool is exactly 100 unique, role-balanced, Active crew -----
+            {
+                var pool = Vessels.CrewRoster.NewPool();
+                var names = new HashSet<string>();
+                bool unique = true, allActive = true;
+                int pilots = 0, engs = 0, scis = 0;
+                foreach (var c in pool)
+                {
+                    if (!names.Add(c.Name)) unique = false;
+                    if (c.Status != Vessels.CrewStatus.Active) allActive = false;
+                    if (c.Role == Vessels.CrewRole.Pilot) pilots++;
+                    else if (c.Role == Vessels.CrewRole.Engineer) engs++;
+                    else scis++;
+                }
+                Check("crew NewPool size 100", pool.Count == Vessels.CrewRoster.PoolSize && pool.Count == 100);
+                Check("crew NewPool unique active", unique && allActive);
+                Check("crew NewPool all roles present", pilots > 0 && engs > 0 && scis > 0);
+            }
+
+            // ----- crew pool: TopUp fills to 100, preserves existing (incl. KIA), idempotent -----
+            {
+                var gs = new GameState();
+                gs.Roster = new List<Vessels.CrewMember>
+                {
+                    new Vessels.CrewMember("Keep A", Vessels.CrewRole.Pilot),
+                    new Vessels.CrewMember("Keep B", Vessels.CrewRole.Scientist),
+                    new Vessels.CrewMember("Dead 1", Vessels.CrewRole.Engineer) { Status = Vessels.CrewStatus.KIA },
+                    new Vessels.CrewMember("Dead 2", Vessels.CrewRole.Pilot)    { Status = Vessels.CrewStatus.KIA },
+                    new Vessels.CrewMember("Dead 3", Vessels.CrewRole.Scientist){ Status = Vessels.CrewStatus.KIA },
+                };
+                int added = Vessels.CrewRoster.TopUp(gs);
+                int kia = 0; bool keptA = false, keptB = false;
+                var seen = new HashSet<string>(); bool stillUnique = true;
+                foreach (var c in gs.Roster)
+                {
+                    if (c.Status == Vessels.CrewStatus.KIA) kia++;
+                    if (c.Name == "Keep A") keptA = true;
+                    if (c.Name == "Keep B") keptB = true;
+                    if (!seen.Add(c.Name)) stillUnique = false;
+                }
+                bool topUpOk = added == 95 && gs.Roster.Count == 100 && kia == 3 && keptA && keptB && stillUnique;
+                int again = Vessels.CrewRoster.TopUp(gs);   // already full: deaths stay permanent
+                Check("crew TopUp fills to 100", topUpOk);
+                Check("crew TopUp idempotent", again == 0 && gs.Roster.Count == 100);
+            }
+
+            // ----- crew availability: deployed crew (aboard a saved ship) are excluded -----
+            {
+                var gs = new GameState();
+                var active = new Vessels.CrewMember("Free One", Vessels.CrewRole.Pilot);
+                var flying = new Vessels.CrewMember("Busy One", Vessels.CrewRole.Engineer);
+                var dead   = new Vessels.CrewMember("Gone One", Vessels.CrewRole.Scientist) { Status = Vessels.CrewStatus.KIA };
+                gs.Roster = new List<Vessels.CrewMember> { active, flying, dead };
+                gs.Ships.Add(new ShipState
+                {
+                    Name = "Orbiter",
+                    Parts = new List<PartState> { new PartState { DefName = "Pod Mk1", Crew = new List<string> { "Busy One" } } },
+                });
+                var deployed = gs.DeployedCrewNames();
+                // mirror EditorScene.AvailableCrew: Active && not deployed && not design-assigned
+                int avail = 0;
+                foreach (var c in gs.Roster)
+                    if (c.Status == Vessels.CrewStatus.Active && !deployed.Contains(c.Name)) avail++;
+                Check("crew deployed detected", deployed.Contains("Busy One") && deployed.Count == 1);
+                Check("crew availability excludes deployed/KIA", avail == 1);
+            }
+
             string res = $"Physics self-test: {pass}/{total} PASS";
             if (fails.Count > 0) res += "  FAILED: " + string.Join(", ", fails);
             return res;
