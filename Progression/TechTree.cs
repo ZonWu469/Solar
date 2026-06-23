@@ -86,9 +86,9 @@ namespace Solar.Progression
             },
             new TechNode {
                 Id = "survival", Title = "Life Support", Cost = 40, Prereqs = new[] { "electrics" },
-                Parts = new string[0],
+                Parts = new[] { "solar-shield", "solar-shield-r" },
                 Modules = new[] { "life-support", "drill", "snack-container", "storm-shelter", "radiator-panel" },
-                Description = "Life support systems keep your crew alive on long journeys. Drills refuel tanks by mining on the surface. Storm shelters and radiators harden a crew against solar storms.",
+                Description = "Life support systems keep your crew alive on long journeys. Drills refuel tanks by mining on the surface. Storm shelters, radiators, and deployable solar shields harden a crew against solar storms.",
             },
             new TechNode {
                 Id = "fuel-cells", Title = "Fuel Cells", Cost = 30, Prereqs = new[] { "electrics" },

@@ -587,6 +587,7 @@ namespace Solar.Scenes
                 if (inp.Pressed(Keys.X)) _vessel.Throttle = 0;
                 if (inp.Pressed(Keys.G)) ToggleSolar();
                 if (inp.Pressed(Keys.L)) ToggleGear();
+                if (inp.Pressed(Keys.J)) ToggleShield();
                 if (inp.Pressed(Keys.H)) CycleSas();
                 if (inp.Pressed(Keys.R)) _vessel.RcsEnabled = !_vessel.RcsEnabled;
                 // translation command: Q/E left-right (drives the off-axis lateral thrusters and RCS) is
@@ -1120,6 +1121,17 @@ namespace Solar.Scenes
                 if (p.Def.Kind == Solar.Parts.PartKind.LandingGear) p.Deployed = anyRetracted;
         }
 
+        /// <summary>Deploy all solar shields if any are stowed, otherwise stow them all (open/close like a chute).</summary>
+        private void ToggleShield()
+        {
+            if (_vessel == null) return;
+            bool anyStowed = false;
+            foreach (var p in _vessel.AllParts())
+                if (p.Def.Kind == Solar.Parts.PartKind.SolarShield && !p.Deployed) anyStowed = true;
+            foreach (var p in _vessel.AllParts())
+                if (p.Def.Kind == Solar.Parts.PartKind.SolarShield) p.Deployed = anyStowed;
+        }
+
         private void UpdateClosestApproach(double ut)
         {
             _caValid = false; _caTpos = null; _caYouPrimary = null;
@@ -1623,8 +1635,9 @@ namespace Solar.Scenes
                 if (_popupCloseRect.Contains((int)m.X, (int)m.Y)) { _popupPart = null; return true; }
                 if (_popupPart.Def.Kind == PartKind.Decoupler && _popupDecoupleRect.Contains((int)m.X, (int)m.Y))
                 { DecoupleSelected(ut); return true; }
-                // parachute: force deploy or cut/repack on demand, independent of staging
-                if (_popupPart.Def.Kind == PartKind.Parachute && _popupChuteRect.Contains((int)m.X, (int)m.Y))
+                // parachute / solar shield: open or close on demand, independent of staging
+                if ((_popupPart.Def.Kind == PartKind.Parachute || _popupPart.Def.Kind == PartKind.SolarShield)
+                    && _popupChuteRect.Contains((int)m.X, (int)m.Y))
                 { _popupPart.Deployed = !_popupPart.Deployed; return true; }
                 bool thruster = _popupPart.Def.Kind == PartKind.Engine || _popupPart.Def.Kind == PartKind.SolidBooster;
                 // ignite this engine/booster now, without waiting for its stage to come up
@@ -1712,6 +1725,11 @@ namespace Solar.Scenes
                 detail.Add(p.Ignited ? "Status: ignited" : "Status: not ignited");
             }
             if (d.Kind == PartKind.Parachute) detail.Add(p.Deployed ? "Status: deployed" : "Status: stowed");
+            if (d.Kind == PartKind.SolarShield)
+            {
+                detail.Add(p.Deployed ? "Status: deployed" : "Status: stowed");
+                detail.Add($"Storm shield: {d.ShieldFactor * 100:0}%  range {d.ShieldRange:0} m");
+            }
             if (d.FuelCapacity > 0) detail.Add($"Fuel: {p.Fuel:0} / {d.FuelCapacity:0} kg");
             detail.Add($"Size: {d.Width:0.0} x {d.Height:0.0} m");
             if (p.Modules.Count > 0)
@@ -1725,7 +1743,7 @@ namespace Solar.Scenes
             bool thruster = d.Kind == PartKind.Engine || d.Kind == PartKind.SolidBooster;
             bool igniteBtn = thruster && !p.Ignited;     // not yet lit: offer an Ignite button
             bool engineCtl = d.Kind == PartKind.Engine && p.Ignited;  // lit liquid engine: on/off + power limiter
-            bool chuteBtn = d.Kind == PartKind.Parachute;
+            bool chuteBtn = d.Kind == PartKind.Parachute || d.Kind == PartKind.SolarShield;
             float lhTitle = f.MeasureString("X").Y + 2;
             float lhSmall = f.MeasureString("X").Y * small + 2;
             float tw = f.MeasureString(d.Name).X + 22;   // leave room for the close glyph
@@ -1772,7 +1790,9 @@ namespace Solar.Scenes
             else if (chuteBtn)
             {
                 _popupChuteRect = new Rectangle(bx + 9, btnY, bw - 18, btnH);
-                UiDraw.Button(pb, sb, f, _popupChuteRect, p.Deployed ? "Cut / Repack" : "Deploy", inp);
+                string label = d.Kind == PartKind.SolarShield ? (p.Deployed ? "Stow" : "Deploy")
+                                                              : (p.Deployed ? "Cut / Repack" : "Deploy");
+                UiDraw.Button(pb, sb, f, _popupChuteRect, label, inp);
             }
 
             if (engineCtl)

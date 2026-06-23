@@ -89,6 +89,23 @@ namespace Solar.Vessels
             get { double h = 0; foreach (var p in Parts) h += p.Def.Height; return h; }
         }
 
+        /// <summary>Axial distance (m) from the nose (stack index 0) to the centre of <paramref name="target"/>,
+        /// growing down the stack. A radially-attached part inherits its host's offset. Used by the solar-shield
+        /// shadow: a part with a larger offset sits "below" (farther from the Sun when the nose is sun-aligned).
+        /// Returns the full stack height if the part isn't found.</summary>
+        public double AxialOffset(Part target)
+        {
+            double y = 0;
+            foreach (var p in Parts)
+            {
+                double centre = y + p.Def.Height * 0.5;
+                if (p == target) return centre;
+                foreach (var r in p.Radials) if (r == target) return centre;
+                y += p.Def.Height;
+            }
+            return y;
+        }
+
         public double TotalCdA
         {
             get

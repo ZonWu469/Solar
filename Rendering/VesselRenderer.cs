@@ -177,6 +177,11 @@ namespace Solar.Rendering
                         pb.Tri(P(-w / 2, y), P(w / 2, y), P(0, y + h), dark, dark, light);
                         break;
 
+                    case PartKind.SolarShield: // stowed: a thin folded disc across the part
+                        pb.Quad(P(-w * 0.5f, y + h * 0.30f), P(-w * 0.5f, y + h * 0.70f),
+                                P(w * 0.5f, y + h * 0.70f), P(w * 0.5f, y + h * 0.30f), dark, dark, light, light);
+                        break;
+
                     case PartKind.Parachute:
                         pb.Quad(P(-w / 2, y), P(-w * 0.3f, y + h), P(w * 0.3f, y + h), P(w / 2, y),
                                 dark, d.Tint, d.Tint, dark);
@@ -236,6 +241,28 @@ namespace Solar.Rendering
                         pb.Line(P(-w * 0.4f, y + h), lTop, Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
                         pb.Line(P(w * 0.4f, y + h), rTop, Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
                         pb.FillCircle(canopy, wM * 0.5f * pxPerM, new Color(235, 130, 60), PlanetRenderer.Darken(new Color(235, 130, 60), 0.3f));
+                    }
+                }
+                // solar shield deployed: a wide reflective plate fanned out toward the nose (the sunward
+                // side), spanning well past the hull so it visibly shadows the parts below it.
+                if (d.Kind == PartKind.SolarShield && p.Deployed)
+                {
+                    float halfW = Math.Max(w, 1.0f) * 1.7f;          // metres, half the plate's span
+                    float lift = 0.30f, thick = 0.40f;               // metres toward the nose / half the plate's rendered height
+                    var open = tex?.Part(d.Id + "-open");
+                    var c = P(0, y + h) + vertS * (lift * pxPerM);
+                    var a = c - vperpS * (halfW * pxPerM) + vertS * (thick * pxPerM);
+                    var b = c + vperpS * (halfW * pxPerM) + vertS * (thick * pxPerM);
+                    var bb = c + vperpS * (halfW * pxPerM) - vertS * (thick * pxPerM);
+                    var aa = c - vperpS * (halfW * pxPerM) - vertS * (thick * pxPerM);
+                    // struts from the hull edges to the plate
+                    pb.Line(P(-w * 0.45f, y + h), c - vperpS * (halfW * 0.5f * pxPerM), Math.Max(1f, 0.05f * pxPerM), new Color(170, 170, 175, 180));
+                    pb.Line(P(w * 0.45f, y + h), c + vperpS * (halfW * 0.5f * pxPerM), Math.Max(1f, 0.05f * pxPerM), new Color(170, 170, 175, 180));
+                    if (open != null) pb.TexturedQuad(open, a, b, bb, aa, Color.White);
+                    else
+                    {
+                        Color face = new Color(230, 224, 180), edge = PlanetRenderer.Darken(face, 0.4f);
+                        pb.Quad(a, b, bb, aa, face, face, edge, edge);
                     }
                 }
                 // landing gear deploy: strut+pad extending downward from the bottom-third of the axial part
@@ -456,6 +483,32 @@ namespace Solar.Rendering
                             pb.Line(P(xc - rw * 0.4f, yb + rh), lTop, Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
                             pb.Line(P(xc + rw * 0.4f, yb + rh), rTop, Math.Max(1f, 0.06f * pxPerM), new Color(180, 180, 180, 180));
                             pb.FillCircle(canopy, wM * 0.5f * pxPerM, new Color(235, 130, 60), PlanetRenderer.Darken(new Color(235, 130, 60), 0.3f));
+                        }
+                    }
+                    // deployed radial solar shield: a reflective plate that unfolds PARALLEL to the host part
+                    // (long along the part's length), projecting outboard just past its outer edge
+                    if (rd.Kind == PartKind.SolarShield && r.Deployed)
+                    {
+                        float sign = xc >= 0 ? 1f : -1f;               // outboard direction (away from the hull)
+                        float gap = 0.25f;                             // clearance past the part's outer edge
+                        float halfLen = Math.Max(rh, 1.0f) * 0.9f;     // extent along the part (local Y)
+                        float wide = Math.Max(rw, 0.9f) * 1.4f;        // outboard projection (local X)
+                        float xIn = xc + sign * (rw * 0.5f + gap);
+                        float xOut = xIn + sign * wide;
+                        float yMid = yb + rh * 0.5f, yLo = yMid - halfLen, yHi = yMid + halfLen;
+                        var open = tex?.Part(rd.Id + "-open");
+                        var a = P(xIn, yHi); var b = P(xOut, yHi); var bb = P(xOut, yLo); var aa = P(xIn, yLo);
+                        // struts from the part's outer edge to the inboard side of the plate
+                        pb.Line(P(xc + sign * rw * 0.45f, yMid - rh * 0.3f), P(xIn, yMid - rh * 0.3f), Math.Max(1f, 0.05f * pxPerM), new Color(170, 170, 175, 180));
+                        pb.Line(P(xc + sign * rw * 0.45f, yMid + rh * 0.3f), P(xIn, yMid + rh * 0.3f), Math.Max(1f, 0.05f * pxPerM), new Color(170, 170, 175, 180));
+                        // no flipX: the sign-based corner geometry already mirrors the plate for the
+                        // left-side mount (U=0 at the inboard edge, U=1 outboard on both sides), so the
+                        // texture flag would double-flip it.
+                        if (open != null) pb.TexturedQuad(open, a, b, bb, aa, Color.White, false);
+                        else
+                        {
+                            Color face = new Color(230, 224, 180), edge = PlanetRenderer.Darken(face, 0.4f);
+                            pb.Quad(a, b, bb, aa, face, face, edge, edge);
                         }
                     }
                     // deployed radial landing gear: when no texture is authored, draw a procedural

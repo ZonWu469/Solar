@@ -66,34 +66,59 @@ namespace Solar.Vessels
         // ----- 2. radiation: belts (omnidirectional) + solar storms (directional) -----
         private static void Radiation(Vessel v, double dt, double ut, Universe u)
         {
-            // belt dose is omnidirectional and cut by the strongest functioning shield (unchanged)
+            // belt dose is omnidirectional and cut by the strongest functioning shield (unchanged), applied
+            // uniformly to all crew.
             double beltDose = v.Body?.RadiationAt(v.Altitude) ?? 0;
             double shieldedBelt = beltDose * (1 - BestShield(v));
 
-            // storm dose comes from the Sun's actual direction: cut by a shield only when its face is turned
-            // sunward, by the atmosphere when flying deep in air, and falling off inverse-square with distance.
-            double stormDose = 0;
+            // storm context: dose from the Sun's actual direction, cut by the atmosphere when flying deep in
+            // air and falling off inverse-square with distance. The directional shield is resolved PER CREW
+            // PART below (whole-vessel RadShield modules vs the parts a deployed Solar Shield actually shadows).
+            bool stormActive = false;
+            double stormBase = 0;        // dose rate before any directional shield
+            double moduleShield = 0;     // whole-vessel RadShield-module storm shield
+            Vec2d sunDir = default;
             if (u != null)
             {
                 var storm = SpaceWeather.ForVessel(SpaceWeather.ActiveSeed, ut, v.AbsolutePosition(ut), u);
                 if (storm.IsActive && storm.DoseRate > 0)
-                    stormDose = storm.DoseRate * StormExposure(v, u) * (1 - BestStormShield(v, storm.SunDir));
-            }
-
-            double rate = shieldedBelt + stormDose;
-            if (rate > 0)
-            {
-                double perCrew = rate * dt;
-                foreach (var c in CrewSnapshot(v))
                 {
-                    c.RadDose += perCrew;
-                    if (c.RadDose >= RadDeathDose) v.KillCrewMember(c);   // acute dose is fatal
+                    stormActive = true;
+                    stormBase = storm.DoseRate * StormExposure(v, u);
+                    sunDir = storm.SunDir;
+                    moduleShield = BestStormShield(v, sunDir);
                 }
             }
-            else
+
+            if (shieldedBelt <= 0 && !stormActive)
             {
                 foreach (var c in v.AllCrew())
                     c.RadDose = Math.Max(0, c.RadDose - RadDecayPerSec * dt);
+                return;
+            }
+
+            // snapshot (part, crew) so a death can't mutate the collection we're iterating
+            var crewByPart = new List<(Part part, CrewMember c)>();
+            foreach (var p in v.AllParts())
+                foreach (var c in p.Crew) crewByPart.Add((p, c));
+
+            foreach (var (part, c) in crewByPart)
+            {
+                double rate = shieldedBelt;
+                if (stormActive)
+                {
+                    double eff = Math.Max(moduleShield, SolarShieldFor(v, part, sunDir));
+                    rate += stormBase * (1 - eff);
+                }
+                if (rate > 0)
+                {
+                    c.RadDose += rate * dt;
+                    if (c.RadDose >= RadDeathDose) v.KillCrewMember(c);   // acute dose is fatal
+                }
+                else
+                {
+                    c.RadDose = Math.Max(0, c.RadDose - RadDecayPerSec * dt);   // fully shielded crew recover
+                }
             }
         }
 
@@ -113,15 +138,42 @@ namespace Solar.Vessels
         /// the sun line, tapering to nothing by ~80 deg, so the player must orient to ride a storm out.</summary>
         public static double BestStormShield(Vessel v, Vec2d sunDir)
         {
-            double align = Math.Max(0, v.Up.Dot(sunDir));   // cos of the angle between the shielded face and the Sun
-            const double full = 0.906, none = 0.174;        // cos 25 deg .. cos 80 deg
-            double cone = Math.Clamp((align - none) / (full - none), 0, 1);
+            double cone = StormCone(v.Up, sunDir);
             if (cone <= 0) return 0;
             double best = 0;
             foreach (var p in v.AllParts())
                 foreach (var m in p.Modules)
                     if (m.Def.Kind == ModuleKind.RadShield && !m.Broken && m.Def.ShieldFactor > best)
                         best = m.Def.ShieldFactor;
+            return Math.Clamp(best * cone, 0, 1);
+        }
+
+        /// <summary>How much the craft's shielded face (the <see cref="Vessel.Up"/> axis) is turned toward the
+        /// Sun: 1 inside ~25 deg of the sun line, tapering to 0 by ~80 deg. Shared by the module and the
+        /// deployable-part storm shields so both depend on attitude the same way.</summary>
+        public static double StormCone(Vec2d up, Vec2d sunDir)
+        {
+            double align = Math.Max(0, up.Dot(sunDir));     // cos of the angle between the shielded face and the Sun
+            const double full = 0.906, none = 0.174;        // cos 25 deg .. cos 80 deg
+            return Math.Clamp((align - none) / (full - none), 0, 1);
+        }
+
+        /// <summary>Storm shielding (0..1) a deployed Solar Shield *part* gives to <paramref name="crewPart"/>:
+        /// the strongest deployed shield that sits up-stack of the part (toward the nose, i.e. the Sun when
+        /// aligned) and within its <see cref="Parts.PartDef.ShieldRange"/>, scaled by the sun-alignment cone.
+        /// Unlike a RadShield module this only protects the parts the shield actually shadows.</summary>
+        public static double SolarShieldFor(Vessel v, Part crewPart, Vec2d sunDir)
+        {
+            double cone = StormCone(v.Up, sunDir);
+            if (cone <= 0) return 0;
+            double partOff = v.AxialOffset(crewPart);
+            double best = 0;
+            foreach (var p in v.AllParts())
+            {
+                if (p.Def.Kind != PartKind.SolarShield || !p.Deployed || p.Def.ShieldFactor <= best) continue;
+                double d = partOff - v.AxialOffset(p);          // >= 0 means the part is at/below the shield
+                if (d >= 0 && d <= p.Def.ShieldRange) best = p.Def.ShieldFactor;
+            }
             return Math.Clamp(best * cone, 0, 1);
         }
 
@@ -154,17 +206,24 @@ namespace Solar.Vessels
             var storm = SpaceWeather.ForVessel(SpaceWeather.ActiveSeed, ut, v.AbsolutePosition(ut), u);
             if (!storm.IsActive || storm.Intensity <= 0) return;
 
-            double exposure = StormExposure(v, u) * (1 - BestStormShield(v, storm.SunDir));
-            if (exposure <= 0) return;
+            double atmo = StormExposure(v, u);
+            if (atmo <= 0) return;
+            double moduleShield = BestStormShield(v, storm.SunDir);
             double harden = BestHardening(v);
-            double baseRate = Core.Balance.StormFryPerSec * storm.Intensity * exposure * (1 - harden);
-            if (baseRate <= 0) return;
+            double rateScale = Core.Balance.StormFryPerSec * storm.Intensity * atmo * (1 - harden);
+            if (rateScale <= 0) return;
 
             foreach (var p in v.AllParts())
+            {
+                // a deployed solar shield shadowing this part also protects its electronics
+                double eff = Math.Max(moduleShield, SolarShieldFor(v, p, storm.SunDir));
+                double partRate = rateScale * (1 - eff);
+                if (partRate <= 0) continue;
                 foreach (var m in p.Modules)
                     if (!m.Broken && IsElectronics(m.Def.Kind) && v.ModuleFunctioning(m, ut, u)
-                        && Fires(rng, baseRate / (m.Def.Reliability > 0 ? m.Def.Reliability : 1), dt))
+                        && Fires(rng, partRate / (m.Def.Reliability > 0 ? m.Def.Reliability : 1), dt))
                     { m.Broken = true; v.RecentFailures.Add(m.Def.Name); }
+            }
         }
 
         /// <summary>Best storm-hardening fraction (0..1) over the vessel's functioning radiator / hardened modules.</summary>

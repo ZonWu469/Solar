@@ -63,6 +63,7 @@ namespace Solar.Scenes
             ("Structural",     new[] { PartKind.Decoupler, PartKind.RadialDecoupler, PartKind.StructuralBay }),
             ("Aero",           new[] { PartKind.Fins, PartKind.Parachute, PartKind.Aero }),
             ("Docking & Gear", new[] { PartKind.DockingPort, PartKind.LandingGear }),
+            ("Utility",        new[] { PartKind.SolarShield }),
         };
 
         /// <summary>Module picker categories in display order.</summary>

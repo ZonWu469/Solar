@@ -351,7 +351,7 @@ namespace Solar.UI
                     (4, 5),   // Radial In / Radial Out
                     (6, 7),   // Target / Anti-Target
                     (8, 9),   // Kill Relative / Maneuver
-                    (1, -1),  // Stability (single)
+                    (1, 10),  // Stability / Shield -> Sun
                 };
                 int nRows = rows.Length;
                 int gridH = nRows * isz + (nRows - 1) * gap;
@@ -366,12 +366,17 @@ namespace Solar.UI
                     return default;
                 }
 
+                int hoverIcon = -1; Rectangle hoverRect = default;   // tooltip drawn after the grid (on top)
+
                 void DrawBtn(SasIconInfo icon, Rectangle r)
                 {
                     bool clickable = nav.SasEnabled && icon.Available;
-                    bool hover = clickable && r.Contains((int)ctx.Input.MousePos.X, (int)ctx.Input.MousePos.Y);
+                    // tooltip on hover regardless of clickability, so a mode shows why it's unavailable too
+                    bool over = r.Contains((int)ctx.Input.MousePos.X, (int)ctx.Input.MousePos.Y);
+                    bool hover = clickable && over;
                     UiDraw.SasIconTex(pb, ctx, r, icon.Icon, icon.Active, clickable, hover);
                     if (hover && ctx.Input.LeftClick) result.RequestedSas = icon.Icon;
+                    if (over) { hoverIcon = icon.Icon; hoverRect = r; }
                 }
 
                 for (int row = 0; row < nRows; row++)
@@ -389,6 +394,14 @@ namespace Solar.UI
                         DrawBtn(ByIdx(spec.left), new Rectangle(gridLeft, iy, isz, isz));
                         DrawBtn(ByIdx(spec.right), new Rectangle(gridLeft + isz + colGap, iy, isz, isz));
                     }
+                }
+
+                if (hoverIcon >= 0 && hoverIcon < UiDraw.SasModeNames.Length)
+                {
+                    string name = UiDraw.SasModeNames[hoverIcon];
+                    string desc = hoverIcon < UiDraw.SasModeDescriptions.Length ? UiDraw.SasModeDescriptions[hoverIcon] : "";
+                    if (!ByIdx(hoverIcon).Available && nav.SasEnabled) desc += "  (unavailable now)";
+                    UiDraw.Tooltip(pb, sb, f, name, desc, new Vector2(hoverRect.Right, hoverRect.Top), w, h);
                 }
             }
 

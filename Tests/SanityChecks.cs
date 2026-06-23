@@ -2387,6 +2387,44 @@ namespace Solar.Tests
                 Check("crew availability excludes deployed/KIA", avail == 1);
             }
 
+            // ----- deployable Solar Shield part: axial-offset + directional, range-limited storm shadow -----
+            {
+                // stack (nose -> base): crew pod "Above", Solar Shield, crew pod "Below", t800, t800, crew pod "Far"
+                var v = new Vessels.Vessel { Heading = Math.PI / 2 };   // Up = (0,1)
+                var podA = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
+                var shield = new Parts.Part(Parts.PartCatalog.GetById("solar-shield"));
+                var podB = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
+                var t1 = new Parts.Part(Parts.PartCatalog.GetById("tank-t800"));
+                var t2 = new Parts.Part(Parts.PartCatalog.GetById("tank-t800"));
+                var podFar = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
+                v.Parts.Add(podA); v.Parts.Add(shield); v.Parts.Add(podB);
+                v.Parts.Add(t1); v.Parts.Add(t2); v.Parts.Add(podFar);
+
+                // axial offsets grow down the stack from the nose (index 0)
+                bool offsetsOrdered = v.AxialOffset(podA) < v.AxialOffset(shield)
+                                      && v.AxialOffset(shield) < v.AxialOffset(podB)
+                                      && v.AxialOffset(podB) < v.AxialOffset(podFar);
+                Check("solar shield axial offset order", offsetsOrdered && v.AxialOffset(podA) < 1.0);
+
+                var sun = new Vec2d(0, 1);   // aligned with Up
+                double shieldFactor = Parts.PartCatalog.GetById("solar-shield").ShieldFactor;
+
+                shield.Deployed = true;
+                double below = Vessels.Threats.SolarShieldFor(v, podB, sun);     // below + within range -> protected
+                double above = Vessels.Threats.SolarShieldFor(v, podA, sun);     // up-stack of the shield -> none
+                double far   = Vessels.Threats.SolarShieldFor(v, podFar, sun);   // beyond ShieldRange (6 m) -> none
+                double perp  = Vessels.Threats.SolarShieldFor(v, podB, new Vec2d(1, 0));  // shield not facing Sun -> none
+
+                shield.Deployed = false;
+                double stowed = Vessels.Threats.SolarShieldFor(v, podB, sun);    // stowed -> none
+
+                Check("solar shield protects below when deployed+aligned", Math.Abs(below - shieldFactor) < 1e-9);
+                Check("solar shield ignores parts above it", above < 1e-9);
+                Check("solar shield range-limited", far < 1e-9);
+                Check("solar shield needs sun alignment", perp < 1e-9);
+                Check("solar shield needs deploy", stowed < 1e-9);
+            }
+
             string res = $"Physics self-test: {pass}/{total} PASS";
             if (fails.Count > 0) res += "  FAILED: " + string.Join(", ", fails);
             return res;

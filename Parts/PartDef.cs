@@ -4,7 +4,7 @@ using Microsoft.Xna.Framework;
 
 namespace Solar.Parts
 {
-    public enum PartKind { Pod, Tank, Engine, Decoupler, Fins, Parachute, SolidBooster, Aero, RadialDecoupler, DockingPort, LandingGear, StructuralBay }
+    public enum PartKind { Pod, Tank, Engine, Decoupler, Fins, Parachute, SolidBooster, Aero, RadialDecoupler, DockingPort, LandingGear, StructuralBay, SolarShield }
 
     /// <summary>Immutable part definition (the catalog entry).</summary>
     public sealed class PartDef
@@ -26,6 +26,9 @@ namespace Solar.Parts
         public double ControlAuthority; // command-part minimum steering authority, rad/s^2 (0 = no control)
         public bool Sas;                // provides attitude-hold / SAS (a command part the player can engage)
         public double ImpactTolerance;  // m/s added to the safe landing speed (landing gear)
+        // SolarShield: storm-particle protection for the parts it shadows when deployed and turned sunward.
+        public double ShieldFactor;     // storm dose cut (0..1) at full sun alignment while deployed (0 = not a shield)
+        public double ShieldRange;      // axial metres of stack it shadows below itself (0 = use a default)
         public Color Tint;
 
         // Engine/booster exhaust appearance. All optional in parts.json; entries that omit them
@@ -82,6 +85,7 @@ namespace Solar.Parts
             PartKind.DockingPort => $"docking port  {DryMass:0} kg",
             PartKind.LandingGear => $"landing gear  {DryMass:0} kg",
             PartKind.StructuralBay => $"structural bay  {Slots} slots  {DryMass:0} kg",
+            PartKind.SolarShield => $"solar shield  cuts {ShieldFactor * 100:0}% storm dose (deploy + face Sun)  {DryMass:0} kg",
             _ => $"{DryMass:0} kg",
         };
 

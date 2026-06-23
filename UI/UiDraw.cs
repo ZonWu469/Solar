@@ -64,6 +64,31 @@ namespace Solar.UI
             }
         }
 
+        /// <summary>A small floating tooltip: a bold <paramref name="title"/> line over an optional dim
+        /// <paramref name="desc"/> line, anchored near <paramref name="anchor"/> and clamped on-screen.
+        /// Generic counterpart to <see cref="ModuleTooltip"/> for non-module UI (e.g. the SAS icons).</summary>
+        public static void Tooltip(PrimitiveBatch pb, SpriteBatch sb, SpriteFont f, string title, string desc,
+                                   Vector2 anchor, int w, int h)
+        {
+            const float small = 0.8f;
+            float lhTitle = f.MeasureString("X").Y + 2;
+            float lhSmall = f.MeasureString("X").Y * small + 2;
+            bool hasDesc = !string.IsNullOrEmpty(desc);
+            float tw = f.MeasureString(title ?? "").X;
+            if (hasDesc) tw = Math.Max(tw, f.MeasureString(desc).X * small);
+            int bw = (int)tw + 18, bh = (int)(lhTitle + (hasDesc ? lhSmall : 0)) + 12;
+            int bx = (int)anchor.X + 16, by = (int)anchor.Y + 14;
+            if (bx + bw > w - 4) bx = (int)anchor.X - bw - 12;
+            if (by + bh > h - 4) by = h - 4 - bh;
+            if (bx < 4) bx = 4; if (by < 4) by = 4;
+
+            Panel(pb, new Rectangle(bx, by, bw, bh));
+            float ty = by + 6;
+            sb.DrawString(f, title ?? "", new Vector2(bx + 9, ty), Color.White);
+            ty += lhTitle;
+            if (hasDesc) SmallText(sb, f, desc, new Vector2(bx + 9, ty), TextDim, small);
+        }
+
         public static void Panel(PrimitiveBatch pb, Rectangle r)
         {
             pb.FillRect(r, PanelBg);
@@ -368,6 +393,25 @@ namespace Solar.UI
             null, "icon_stability", "icon_prograde", "icon_retrograde", "icon_radialin",
             "icon_radialout", "icon_target", "icon_antitarget", "icon_relretro", "icon_maneuver",
             "icon_shieldsun",
+        };
+
+        /// <summary>Short SAS-mode names, indexed like <see cref="SasIconIds"/> (0 = Off). For tooltips.</summary>
+        public static readonly string[] SasModeNames =
+        {
+            "Off", "Stability", "Prograde", "Retrograde", "Radial In",
+            "Radial Out", "Target", "Anti-Target", "Kill Rel. Vel.", "Maneuver",
+            "Shield -> Sun",
+        };
+
+        /// <summary>One-line SAS-mode descriptions, indexed like <see cref="SasIconIds"/>. ASCII only.</summary>
+        public static readonly string[] SasModeDescriptions =
+        {
+            "", "Hold the current attitude.", "Point along your orbital velocity.",
+            "Point against your orbital velocity.", "Point toward the planet (down).",
+            "Point away from the planet (up).", "Point at the selected target.",
+            "Point away from the selected target.", "Cancel velocity relative to the target.",
+            "Point along the next maneuver node's burn.",
+            "Point the shielded face at the Sun to ride out a solar storm.",
         };
 
         /// <summary>Draw a texture centered at <paramref name="center"/> at <paramref name="size"/>x<paramref name="size"/>.</summary>

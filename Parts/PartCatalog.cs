@@ -89,6 +89,8 @@ namespace Solar.Parts
         public double ControlAuthority { get; set; }
         public bool Sas { get; set; }
         public double ImpactTolerance { get; set; }
+        public double ShieldFactor { get; set; }   // SolarShield: storm dose cut 0..1 (0 = default by kind)
+        public double ShieldRange { get; set; }     // SolarShield: axial metres shadowed (0 = default)
         public int Slots { get; set; }
         public int TintR { get; set; }
         public int TintG { get; set; }
@@ -110,6 +112,7 @@ namespace Solar.Parts
             Thrust = p.Thrust, ThrustAngle = p.ThrustAngle, Isp = p.Isp, Width = p.Width, Height = p.Height, CdA = p.CdA,
             DeployedCdA = p.DeployedCdA, ParachuteWidth = p.ParachuteWidth, ParachuteHeight = p.ParachuteHeight,
             ControlAuthority = p.ControlAuthority, Sas = p.Sas, ImpactTolerance = p.ImpactTolerance,
+            ShieldFactor = p.ShieldFactor, ShieldRange = p.ShieldRange,
             Slots = p.Slots,
             TintR = p.Tint.R, TintG = p.Tint.G, TintB = p.Tint.B,
             ExhaustR = p.ExhaustColor.R, ExhaustG = p.ExhaustColor.G, ExhaustB = p.ExhaustColor.B,
@@ -130,6 +133,8 @@ namespace Solar.Parts
             ControlAuthority = ControlAuthority > 0 ? ControlAuthority : (Kind == PartKind.Pod ? DefaultPodAuthority(DryMass) : 0),
             Sas = Sas || Kind == PartKind.Pod,   // command pods/probe cores carry SAS unless JSON says otherwise
             ImpactTolerance = ImpactTolerance > 0 ? ImpactTolerance : (Kind == PartKind.LandingGear ? DefaultGearTolerance(DryMass) : 0),
+            ShieldFactor = ShieldFactor > 0 ? ShieldFactor : (Kind == PartKind.SolarShield ? 0.9 : 0),
+            ShieldRange = ShieldRange > 0 ? ShieldRange : (Kind == PartKind.SolarShield ? 6.0 : 0),
             Slots = Slots > 0 ? Slots : PartDef.DefaultSlots(Kind),
             Tint = new Color(TintR, TintG, TintB),
             // exhaust appearance: fall back to the legacy orange plume when JSON omits the fields (all zero)
