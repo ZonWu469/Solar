@@ -15,6 +15,10 @@ namespace Solar.Rendering
         private readonly Dictionary<string, Texture2D> _modules = new();
         private readonly Dictionary<string, Texture2D> _bodies = new();
         private readonly Dictionary<string, Texture2D> _ui = new();
+        private readonly Dictionary<string, Texture2D> _player = new();
+
+        // EVA astronaut sprites by crew role (Content/Player/<role>.png). Absent = procedural fallback.
+        private static readonly string[] PlayerIds = { "pilot", "engineer", "scientist" };
 
         // UI background textures (no catalog drives these; ids match Content/Textures/UI/*.png).
         private static readonly string[] UiIds =
@@ -40,6 +44,7 @@ namespace Solar.Rendering
             foreach (var m in ModuleCatalog.All) TryLoad(content, _modules, "Textures/modules/", m.Id);
             foreach (var b in Solar.Physics.BodyCatalog.All) TryLoad(content, _bodies, "Textures/bodies/", b.Id);
             foreach (var id in UiIds) TryLoad(content, _ui, "Textures/UI/", id);
+            foreach (var id in PlayerIds) TryLoad(content, _player, "Player/", id);
         }
 
         private static void TryLoad(ContentManager content, Dictionary<string, Texture2D> map, string dir, string id)
@@ -53,5 +58,7 @@ namespace Solar.Rendering
         public Texture2D Module(string id) => id != null && _modules.TryGetValue(id, out var t) ? t : null;
         public Texture2D Body(string id) => id != null && _bodies.TryGetValue(id, out var t) ? t : null;
         public Texture2D Ui(string id) => id != null && _ui.TryGetValue(id, out var t) ? t : null;
+        /// <summary>EVA astronaut sprite for a crew role ("pilot"/"engineer"/"scientist"), or null if no art.</summary>
+        public Texture2D Player(string role) => role != null && _player.TryGetValue(role, out var t) ? t : null;
     }
 }

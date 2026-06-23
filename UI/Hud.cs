@@ -188,17 +188,26 @@ namespace Solar.UI
                 }
             }
 
-            // ---- crew hazard readout (top left): radiation belt exposure + worst crew dose/illness.
+            // space-weather state for this vessel, used by both the hazard panel and the navball sun marker
+            double hudUt = ctx.Clock.UT;
+            StormState storm = v.Destroyed ? default
+                : SpaceWeather.ForVessel(ctx.State.WeatherSeed, hudUt, v.AbsolutePosition(hudUt), ctx.Universe);
+            bool stormShow = !v.Destroyed && storm.Phase != StormPhase.None;
+
+            // ---- crew hazard readout (top left): solar storm + radiation belt exposure + worst crew dose/illness.
             // Shown only while there is something to warn about, so it stays out of the way otherwise. ----
             if (!v.Destroyed && v.HasCrew)
             {
+                double ut = hudUt;
                 double beltDose = v.Body?.RadiationAt(v.Altitude) ?? 0;
                 double worstDose = 0, worstIll = 0;
                 foreach (var c in v.AllCrew())
                 { if (c.RadDose > worstDose) worstDose = c.RadDose; if (c.Illness > worstIll) worstIll = c.Illness; }
-                if (beltDose > 0 || worstDose > 0 || worstIll > 0)
+
+                if (beltDose > 0 || worstDose > 0 || worstIll > 0 || stormShow)
                 {
-                    var hp = new Rectangle(10, 64, 196, 78);
+                    int rows = 2;
+                    var hp = new Rectangle(10, 64, 196, 30 + 24 * rows + (stormShow ? 20 : 0));
                     UiDraw.Panel(pb, hp);
                     sb.DrawString(f, "HAZARDS", new Vector2(hp.X + 10, hp.Y + 6), UiDraw.Accent);
                     if (beltDose > 0)
@@ -206,9 +215,30 @@ namespace Solar.UI
                         var bsz = f.MeasureString("RADIATION BELT");
                         sb.DrawString(f, "RADIATION BELT", new Vector2(hp.Right - bsz.X - 10, hp.Y + 6), new Color(255, 120, 90));
                     }
+
+                    int rowTop = hp.Y + 26;
+                    if (stormShow)
+                    {
+                        bool active = storm.Phase == StormPhase.Active;
+                        bool sheltered = Threats.StormExposure(v, ctx.Universe) < 0.1;
+                        double effShield = Threats.BestStormShield(v, storm.SunDir);
+                        // pulse the active-storm warning so it reads as urgent
+                        bool pulse = !active || ((int)(ut * 2) & 1) == 0;
+                        string head = active ? "SOLAR STORM" : "STORM  T-" + UiDraw.Time(storm.TimeToArrival(ut));
+                        Color hc = active ? (pulse ? new Color(255, 80, 70) : new Color(180, 60, 55)) : new Color(255, 200, 110);
+                        sb.DrawString(f, head, new Vector2(hp.X + 10, rowTop), hc);
+                        string sub = sheltered ? "SHELTERED"
+                                   : active ? (effShield > 0.5 ? "SHIELDED" : "ALIGN SHIELD -> SUN")
+                                   : "ALIGN SHIELD -> SUN";
+                        var ssz = f.MeasureString(sub);
+                        Color sc = sheltered || (active && effShield > 0.5) ? new Color(150, 220, 150) : new Color(255, 200, 110);
+                        sb.DrawString(f, sub, new Vector2(hp.Right - ssz.X - 10, rowTop), sc);
+                        rowTop += 22;
+                    }
+
                     void HRow(int i, string label, double frac, Color hot)
                     {
-                        float ry = hp.Y + 26 + i * 24;
+                        float ry = rowTop + i * 24;
                         sb.DrawString(f, label, new Vector2(hp.X + 10, ry), UiDraw.TextDim);
                         var bar = new Rectangle(hp.X + 78, (int)ry + 2, 100, 10);
                         pb.FillRect(bar, new Color(30, 38, 52));
@@ -242,6 +272,31 @@ namespace Solar.UI
                 var pd = new Vector2((float)Math.Cos(va), -(float)Math.Sin(va));
                 Mark(dial + pd * (dr - 10), "icon_prograde");        // prograde
                 Mark(dial - pd * (dr - 10), "icon_retrograde");      // retrograde
+            }
+            // solar-storm cue: mark the Sun's direction and shade the shielded cone around the Up (heading) axis,
+            // so the player can read at a glance whether the shielded face is turned toward an incoming front.
+            if (stormShow)
+            {
+                bool active = storm.Phase == StormPhase.Active;
+                double sunA = storm.SunDir.Angle();
+                var sdir = new Vector2((float)Math.Cos(sunA), -(float)Math.Sin(sunA));
+                // shielded cone (~55 deg half-angle) centred on the ship's Up axis = Heading
+                double align = Math.Max(0, Math.Cos(v.Heading - sunA));
+                bool aligned = align > 0.5;
+                Color coneCol = aligned ? new Color(120, 220, 140, 70) : new Color(255, 120, 90, 60);
+                // dial draws world angle a as screen point (cos a, -sin a), so screen angle = -a; centre on Heading
+                pb.RingArc(dial, 0, dr - 6, (float)(-v.Heading - 0.96), (float)(-v.Heading + 0.96), coneCol, coneCol, 0);
+                // Sun marker on the rim, pulsing red when the storm is live
+                Color sunCol = active ? (((int)(hudUt * 2) & 1) == 0 ? new Color(255, 90, 70) : new Color(255, 170, 90))
+                                      : new Color(255, 200, 110);
+                var sp = dial + sdir * (dr - 10);
+                pb.FillCircle(sp, 6, sunCol);
+                for (int k = 0; k < 8; k++)
+                {
+                    double a = k * Math.PI / 4;
+                    var d = new Vector2((float)Math.Cos(a), (float)Math.Sin(a));
+                    pb.Line(sp + d * 7, sp + d * 11, 1.5f, sunCol);
+                }
             }
             var hd = new Vector2((float)Math.Cos(v.Heading), -(float)Math.Sin(v.Heading));
             pb.Line(dial, dial + hd * (dr - 4), 3f, Color.White);

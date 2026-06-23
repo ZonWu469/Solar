@@ -2194,6 +2194,132 @@ namespace Solar.Tests
                 Check("part pre-fit defaults", podOk && probeOk && fit);
             }
 
+            // ----- space weather (solar storms) -----
+            {
+                const long seed = 1234567;
+                double earthDist = 1.5e10, frontSpeed = 1.0e7, interval = 1e6, duration = 7200, peak = 0.2;
+                var sun = Vec2d.Zero;
+                var atEarth = new Vec2d(earthDist, 0);                 // a vessel one Earth-radius out from the Sun
+
+                // determinism: same seed + ut + position -> identical report
+                StormState A() => SpaceWeather.ForVessel(seed, 5.0e6, atEarth, sun, earthDist, frontSpeed, interval, duration, peak);
+                var a1 = A(); var a2 = A();
+                Check("storm determinism", a1.Phase == a2.Phase && a1.DoseRate == a2.DoseRate && a1.ArrivalUt == a2.ArrivalUt);
+
+                // a storm is actually found somewhere on the timeline, and its dose only flows once Active
+                bool sawActive = false, incomingZeroDose = true;
+                for (double t = 0; t < interval * 6; t += duration / 4)
+                {
+                    var s = SpaceWeather.ForVessel(seed, t, atEarth, sun, earthDist, frontSpeed, interval, duration, peak);
+                    if (s.Phase == StormPhase.Active && s.DoseRate > 0) sawActive = true;
+                    if (s.Phase == StormPhase.Incoming && s.DoseRate != 0) incomingZeroDose = false;
+                }
+                Check("storm occurs", sawActive);
+                Check("storm incoming has no dose", incomingZeroDose);
+
+                // inverse-square falloff: a far vessel sees a much weaker storm than a near one for the SAME storm
+                double near = earthDist, far = earthDist * 5;
+                double fNear = SpaceWeather.DistanceFalloff(earthDist, near);
+                double fFar = SpaceWeather.DistanceFalloff(earthDist, far);
+                Check("storm inverse-square falloff", Math.Abs(fNear - 1.0) < 1e-9 && fFar < fNear / 20);
+
+                // warning window grows with distance: the front takes longer to reach a far vessel
+                // (find the same storm's arrival from near vs far by scanning; arrival = emit + dist/speed)
+                double travelNear = near / frontSpeed, travelFar = far / frontSpeed;
+                Check("storm warning grows with distance", travelFar > travelNear * 4);
+
+                // SunDir points from the vessel toward the Sun
+                var sd = SpaceWeather.ForVessel(seed, 0, atEarth, sun, earthDist, frontSpeed, interval, duration, peak).SunDir;
+                Check("storm sun direction", sd.X < -0.99 && Math.Abs(sd.Y) < 1e-6);
+            }
+
+            // ----- directional storm shielding & atmospheric shelter -----
+            {
+                var u = SolarSystemData.Create();
+                var moon = u["Moon"];     // airless
+                var earth = u["Earth"];   // has atmosphere
+                double shieldFactor = Parts.ModuleCatalog.Get("Radiation Shield").ShieldFactor;
+
+                var ship = new Vessels.Vessel { Body = moon, Position = new Vec2d(moon.Radius + 1e5, 0) }; // Up = (0,1)
+                ship.Parts.Add(new Parts.Part(Parts.PartCatalog.Get("Pod Mk1")));
+                ship.Parts[0].Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Radiation Shield")));
+                double aligned = Vessels.Threats.BestStormShield(ship, new Vec2d(0, 1));  // Sun along the shielded face
+                double perp = Vessels.Threats.BestStormShield(ship, new Vec2d(1, 0));     // Sun 90 deg off the face
+                Check("storm shield directional", Math.Abs(aligned - shieldFactor) < 1e-9 && perp < 1e-9);
+
+                // landed on Earth -> air column shelters (~0 exposure); airless Moon surface -> fully exposed
+                var onEarth = new Vessels.Vessel { Body = earth, Position = new Vec2d(earth.Radius, 0) };
+                var onMoon = new Vessels.Vessel { Body = moon, Position = new Vec2d(moon.Radius, 0) };
+                Check("storm atmospheric shelter",
+                      Vessels.Threats.StormExposure(onEarth, u) < 0.05
+                      && Math.Abs(Vessels.Threats.StormExposure(onMoon, u) - 1) < 1e-9);
+            }
+
+            // ----- storm-survival modules & electronics fry -----
+            {
+                var shelter = Parts.ModuleCatalog.GetById("storm-shelter");
+                var rad = Parts.ModuleCatalog.GetById("radiator-panel");
+                Check("storm modules loaded",
+                      shelter != null && shelter.Kind == Parts.ModuleKind.RadShield && shelter.ShieldFactor > 0.9
+                      && rad != null && rad.Kind == Parts.ModuleKind.Radiator && rad.StormHardening > 0.5);
+
+                var u = SolarSystemData.Create();
+                var earth = u["Earth"];
+                long seed = 777; Solar.Physics.SpaceWeather.ActiveSeed = seed;
+                var srng = new Random(1);
+
+                // a powered science instrument, well above the atmosphere (fully exposed), with no shield
+                Vessels.Vessel MakeShip(Vec2d pos) {
+                    var vv = new Vessels.Vessel { Body = earth, Position = pos, ElectricCharge = 100 };
+                    var pod = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
+                    pod.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.GetById("thermometer")) { Active = true });
+                    vv.Parts.Add(pod);
+                    return vv;
+                }
+                Parts.ModuleInstance Instr(Vessels.Vessel vv) => vv.Parts[0].Modules[vv.Parts[0].Modules.Count - 1];
+                var exposedPos = new Vec2d(earth.Radius + 2e7, 0);   // far above the atmosphere
+
+                // find a UT where a storm is actually active at this vessel
+                double activeUt = -1;
+                var probe = MakeShip(exposedPos);
+                for (double t = 0; t < Core.Balance.StormIntervalS * 8 && activeUt < 0; t += Core.Balance.StormDurationS / 4)
+                    if (Solar.Physics.SpaceWeather.ForVessel(seed, t, probe.AbsolutePosition(t), u) is { Phase: Solar.Physics.StormPhase.Active } s && s.Intensity > 0.4)
+                        activeUt = t;
+
+                // exposed + powered -> fried (huge dt makes the fry near-certain); powered off or sheltered -> safe
+                var exposed = MakeShip(exposedPos);
+                Vessels.Threats.StormDamage(exposed, 1e7, activeUt, u, srng);
+                var off = MakeShip(exposedPos); Instr(off).Active = false;
+                Vessels.Threats.StormDamage(off, 1e7, activeUt, u, srng);
+                var sheltered = MakeShip(new Vec2d(earth.Radius, 0));   // landed in atmosphere
+                Vessels.Threats.StormDamage(sheltered, 1e7, activeUt, u, srng);
+
+                Check("storm fries exposed electronics",
+                      activeUt >= 0 && Instr(exposed).Broken && !Instr(off).Broken && !Instr(sheltered).Broken);
+            }
+
+            // ----- EVA: leave a craft, then board (rescue) -----
+            {
+                var u = SolarSystemData.Create();
+                var earth = u["Earth"];
+                var ship = new Vessels.Vessel { Body = earth, Position = new Vec2d(earth.Radius + 1e6, 0), Velocity = new Vec2d(0, 2000) };
+                var pod = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
+                var jeb = new Vessels.CrewMember("Jeb", Vessels.CrewRole.Pilot);
+                pod.Crew.Add(jeb);
+                ship.Parts.Add(pod);
+                int before = ship.CrewCount;
+
+                pod.Crew.Remove(jeb);                              // pop the crew out
+                var eva = Vessels.Eva.Spawn(ship, jeb);
+                bool spawned = eva.IsEva && Vessels.Eva.Occupant(eva) == jeb
+                               && ship.CrewCount == before - 1 && eva.Monoprop > 0;
+                bool canBoard = Vessels.Eva.CanBoard(eva, ship, 0);   // spawned within board range, co-moving
+                bool boarded = Vessels.Eva.Board(eva, ship)
+                               && ship.CrewCount == before && Vessels.Eva.Occupant(eva) == null;
+
+                Check("eva spawn & board", spawned && canBoard && boarded);
+            }
+
             string res = $"Physics self-test: {pass}/{total} PASS";
             if (fails.Count > 0) res += "  FAILED: " + string.Join(", ", fails);
             return res;

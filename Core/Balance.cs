@@ -20,6 +20,13 @@ namespace Solar.Core
         public static double RadDeathDose      = 1000.0;               // accumulated dose that kills a crew member
         public static double RadDecayPerSec    = 1000.0 / (18 * 3600); // dose clears outside any belt (~18 h to fully clear)
 
+        // ----- solar storms (space weather; see Physics/SpaceWeather.cs) -----
+        public static double StormIntervalS    = 15 * 24 * 3600;       // mean time between storms (~15 days)
+        public static double StormDurationS    = 2 * 3600;             // nominal storm length at the vessel (~2 h)
+        public static double StormFrontSpeed   = 1.0e7;                // particle-front speed (m/s); sets the distance-scaled warning window
+        public static double StormPeakDose     = 0.2;                  // peak dose rate (units/s) at Earth distance, full exposure
+        public static double StormFryPerSec    = 1.0 / (1800);         // exposed powered module fry chance/s at full storm (~30 min mean)
+
         // ----- biological contagion -----
         public static double InfectBaseRate    = 1.0 / (8760 * 3600);  // base infection chance/s per healthy crew (~yearly)
         public static double IllnessGrowPerSec = 1.0 / (72 * 3600);    // untreated sickness worsens over ~72 h
@@ -56,6 +63,11 @@ namespace Solar.Core
                 if (d.WaterPerCrew is { } w && w >= 0)       WaterPerCrew = w;
                 if (d.FoodPerCrew is { } f && f >= 0)        FoodPerCrew = f;
                 if (d.LsDeathHours is { } lsh && lsh > 0)    LsDeathTime = lsh * 3600;
+                if (d.StormIntervalHours is { } sih && sih > 0)  StormIntervalS = sih * 3600;
+                if (d.StormDurationHours is { } sdh && sdh > 0)  StormDurationS = sdh * 3600;
+                if (d.StormFrontSpeed is { } sfs && sfs > 0)     StormFrontSpeed = sfs;
+                if (d.StormPeakDose is { } spd && spd > 0)       StormPeakDose = spd;
+                if (d.StormFryHours is { } sfh && sfh > 0)       StormFryPerSec = 1.0 / (sfh * 3600);
             }
             catch { /* unreadable/corrupt balance.json: keep the in-code defaults */ }
         }
@@ -75,6 +87,11 @@ namespace Solar.Core
             public double? WaterPerCrew { get; set; }
             public double? FoodPerCrew { get; set; }
             public double? LsDeathHours { get; set; }
+            public double? StormIntervalHours { get; set; }
+            public double? StormDurationHours { get; set; }
+            public double? StormFrontSpeed { get; set; }
+            public double? StormPeakDose { get; set; }
+            public double? StormFryHours { get; set; }
         }
     }
 }

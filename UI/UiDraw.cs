@@ -306,6 +306,7 @@ namespace Solar.UI
                 6 or 7 => new Color(235, 130, 235), // target / anti-target
                 8 => new Color(255, 170, 235),    // kill relative
                 9 => new Color(120, 210, 255),    // maneuver
+                10 => new Color(255, 210, 120),   // shield-to-sun
                 _ => Accent,                       // stability
             };
             Color fg = !available ? new Color(70, 80, 95) : modeCol;
@@ -349,6 +350,15 @@ namespace Solar.UI
                     pb.CircleOutline(new Vector2(cx, cy), w * 0.3f, 1.5f, fg);
                     pb.FillCircle(new Vector2(cx, cy), w * 0.16f, fg);
                     break;
+                case 10: // Shield to Sun: a sun disc with rays
+                    pb.FillCircle(new Vector2(cx, cy), w * 0.16f, fg);
+                    for (int k = 0; k < 8; k++)
+                    {
+                        float a = k * MathHelper.PiOver4;
+                        var d = new Vector2((float)Math.Cos(a), (float)Math.Sin(a));
+                        pb.Line(new Vector2(cx, cy) + d * (w * 0.24f), new Vector2(cx, cy) + d * (w * 0.36f), 1.5f, fg);
+                    }
+                    break;
             }
         }
 
@@ -357,6 +367,7 @@ namespace Solar.UI
         {
             null, "icon_stability", "icon_prograde", "icon_retrograde", "icon_radialin",
             "icon_radialout", "icon_target", "icon_antitarget", "icon_relretro", "icon_maneuver",
+            "icon_shieldsun",
         };
 
         /// <summary>Draw a texture centered at <paramref name="center"/> at <paramref name="size"/>x<paramref name="size"/>.</summary>

@@ -106,9 +106,10 @@ namespace Solar.Scenes
         private double _proxTimer;
 
         // ----- attitude hold (SAS) -----
-        private enum SasMode { Off, Stability, Prograde, Retrograde, RadialIn, RadialOut, Target, AntiTarget, RelRetro, Maneuver }
-        private const int SasModeCount = 10;
+        private enum SasMode { Off, Stability, Prograde, Retrograde, RadialIn, RadialOut, Target, AntiTarget, RelRetro, Maneuver, ShieldSun }
+        private const int SasModeCount = 11;
         private SasMode _sas = SasMode.Off;
+        private Solar.Physics.StormState _storm;   // this frame's space-weather report for the focused vessel
         private double _sasHold;            // captured world heading for Stability mode
 
         private Prediction _pred;
@@ -232,7 +233,7 @@ namespace Solar.Scenes
         /// <summary>Snapshot the active ship into the savegame (dropping it if destroyed).</summary>
         private void PersistShip()
         {
-            if (_vessel == null) return;
+            if (_vessel == null || _vessel.IsEva) return;   // EVA kerbals are transient and never saved
             double ut = Ctx.Clock.UT;
             // Mirror PersistOthers: a vessel held off rails only by close-proximity physics (KSP-style)
             // has a stale Orbit; re-derive it from the live state so the save is self-consistent and
@@ -261,6 +262,7 @@ namespace Solar.Scenes
             {
                 var v = ts.V;
                 if (v.Destroyed) { Ctx.State.RemoveShip(ts.Name); continue; }
+                if (v.IsEva) continue;   // EVA kerbals are transient and never saved
                 if (!v.Landed && v.Body != null)
                 {
                     if (!v.OnRails) v.GoOnRails(Ctx.Clock.UT);
@@ -571,8 +573,13 @@ namespace Solar.Scenes
             if (inp.Pressed(Keys.OemPeriod)) { clock.WarpUp(); _warpTo = null; }
             if (NextNode(clock.UT) == null) _warpTo = null; // no pending node -> nothing to warp to
 
+            // EVA: V sends a crew member out (or boards a nearby craft when already on EVA)
+            if (inp.Pressed(Keys.V) && _vessel != null && !_vessel.Destroyed)
+            { if (_vessel.IsEva) TryBoard(); else TryGoEva(); }
+
             bool alive = _vessel != null && !_vessel.Destroyed;
-            if (alive)
+            if (alive && _vessel.IsEva) HandleEvaControl(realDt, inp);
+            else if (alive)
             {
                 if (inp.Down(Keys.LeftShift) || inp.Down(Keys.RightShift)) _vessel.Throttle = Math.Min(1, _vessel.Throttle + 0.7 * realDt);
                 if (inp.Down(Keys.LeftControl) || inp.Down(Keys.RightControl)) _vessel.Throttle = Math.Max(0, _vessel.Throttle - 0.7 * realDt);
@@ -661,16 +668,22 @@ namespace Solar.Scenes
                 var body = _vessel.Body;
                 bool inAtmo = body.Atmo != null && _vessel.Altitude < body.Atmo.Top + 500;
                 bool thrusting = _vessel.CurrentThrust > 0;
+
+                // space weather: evaluate this frame's solar-storm state for the focused vessel
+                Solar.Physics.SpaceWeather.ActiveSeed = Ctx.State.WeatherSeed;
+                _storm = Solar.Physics.SpaceWeather.ForVessel(Ctx.State.WeatherSeed, clock.UT, _vessel.AbsolutePosition(clock.UT), Ctx.Universe);
                 // A ship in close proximity is RK4-integrated; integrate the focused vessel the same
                 // way so the pair stays rigidly co-located (matching an analytic conic against RK4
                 // makes them slowly drift and jump across rails round-trips at pause/scene boundaries).
-                bool needsPhysics = !_vessel.Landed && (thrusting || inAtmo || _vessel.RcsActive || _vessel.RadialThrusting || AnyOtherNear());
+                bool needsPhysics = !_vessel.Landed && (thrusting || inAtmo || _vessel.RcsActive || _vessel.RadialThrusting || AnyOtherNear() || _vessel.IsEva);
 
                 clock.MaxWarpIndex = _vessel.Landed
                     ? (thrusting ? SimClock.PhysicsMaxIndex : SimClock.Levels.Length - 1)
                     : needsPhysics ? SimClock.PhysicsMaxIndex : SimClock.Levels.Length - 1;
                 // a tracked ship in close proximity is simulated under physics: cap warp so it stays exact
                 if (AnyOtherNear()) clock.MaxWarpIndex = Math.Min(clock.MaxWarpIndex, SimClock.PhysicsMaxIndex);
+                // during an active storm, hold warp down so the player can orient the shield and power systems off
+                if (_storm.IsActive) clock.MaxWarpIndex = Math.Min(clock.MaxWarpIndex, SimClock.PhysicsMaxIndex);
 
                 // "warp to maneuver": force max warp while coasting toward the target, else cancel
                 if (_warpTo.HasValue)
@@ -680,6 +693,10 @@ namespace Solar.Scenes
                 }
 
                 double sdt = realDt * clock.Warp;
+
+                // never let a single warp step jump over the onset of a solar storm (KSP-style "warp stops here")
+                double nextStorm = Solar.Physics.SpaceWeather.NextArrivalUt(Ctx.State.WeatherSeed, clock.UT, _vessel.AbsolutePosition(clock.UT), Ctx.Universe);
+                if (nextStorm > clock.UT && nextStorm - clock.UT < sdt) sdt = nextStorm - clock.UT;
 
                 if (_vessel.Landed)
                 {
@@ -775,6 +792,7 @@ namespace Solar.Scenes
 
                 _vessel.UpdateResources(sdt, clock.UT, Ctx.Universe);
                 Threats.Tick(_vessel, sdt, clock.UT, Ctx.Universe, _rng);
+                Threats.StormDamage(_vessel, sdt, clock.UT, Ctx.Universe, _rng);   // storm can fry exposed powered electronics
                 if (_vessel.IsColony && _vessel.Landed && Colony.TryGrowCrew(_vessel, Ctx.State, sdt) > 0)
                 { _toast = "A colonist was born at the base"; _toastT = 5; }
                 _lastBody = _vessel.Body;
@@ -1417,6 +1435,96 @@ namespace Solar.Scenes
             _toast = $"Now controlling {_shipName}"; _toastT = 4;
         }
 
+        // ----- EVA: leave a craft as a jetpack kerbal, fly around, board another craft (rescue) -----
+
+        /// <summary>Direct jetpack control for an EVA kerbal: WASD / arrows translate in world axes, spending
+        /// the kerbal's small monopropellant budget; the kerbal otherwise free-falls under gravity (it's
+        /// integrated like any off-rails craft). No throttle / staging / SAS — it's a person, not a rocket.</summary>
+        private void HandleEvaControl(double realDt, InputState inp)
+        {
+            var v = _vessel;
+            double ax = 0, ay = 0;
+            if (inp.Down(Keys.D) || inp.Down(Keys.Right)) ax += 1;
+            if (inp.Down(Keys.A) || inp.Down(Keys.Left)) ax -= 1;
+            if (inp.Down(Keys.W) || inp.Down(Keys.Up)) ay += 1;
+            if (inp.Down(Keys.S) || inp.Down(Keys.Down)) ay -= 1;
+            var cmd = new Vec2d(ax, ay);
+            if (cmd.LengthSquared > 0 && v.Monoprop > 0)
+            {
+                var d = cmd.Normalized();
+                v.Velocity += d * (Eva.JetpackAccel * realDt);
+                v.Monoprop = Math.Max(0, v.Monoprop - Eva.JetpackFlow * realDt);
+                v.Heading = d.Angle();           // face travel direction (drives the sprite's left/right flip)
+            }
+        }
+
+        /// <summary>Send a crew member out on EVA: pick a kerbal (a pilot if available), pop them out of the
+        /// craft, spawn the jetpack "vessel", demote the craft to a tracked co-orbiter and take control of the
+        /// kerbal. The craft is left intact (its remaining crew, or none, stay aboard).</summary>
+        private void TryGoEva()
+        {
+            var v = _vessel;
+            if (v == null || v.Destroyed || v.IsEva) return;
+            if (_map) { _toast = "Switch to flight view to go EVA"; _toastT = 3; return; }
+
+            CrewMember chosen = null; Part fromPart = null;
+            foreach (var p in v.AllParts())
+                foreach (var c in p.Crew)
+                {
+                    if (chosen == null) { chosen = c; fromPart = p; }
+                    if (c.Role == CrewRole.Pilot) { chosen = c; fromPart = p; }   // prefer a pilot
+                }
+            if (chosen == null) { _toast = "No crew aboard to send on EVA"; _toastT = 3; return; }
+
+            double ut = Ctx.Clock.UT;
+            if (v.OnRails) v.GoOffRails(ut);
+            fromPart.Crew.Remove(chosen);
+            var eva = Eva.Spawn(v, chosen);
+
+            _others.Add(new TrackedShip { Name = _shipName, V = v });
+            _vessel = eva;
+            _shipName = chosen.Name;
+            _nodes.Clear(); _burnSpent = 0; _burnTargetUT = double.NaN;
+            _sas = SasMode.Off;
+            _lastBody = eva.Body; _lastCamRel = eva.Position;
+            ClearTarget();
+
+            if (!Ctx.State.CompletedMilestones.Contains("first-eva"))
+            {
+                Ctx.State.CompletedMilestones.Add("first-eva");
+                Ctx.State.Science += 10;
+                _toast = $"{chosen.Name} stepped into the void!  First EVA  +10 science"; _toastT = 6;
+            }
+            else { _toast = $"{chosen.Name} is on EVA   (WASD jetpack, V to board)"; _toastT = 5; }
+        }
+
+        /// <summary>Board the nearest in-range craft with a free seat (the rescue mechanic), moving the kerbal
+        /// inside and taking control of that craft; the EVA vessel is discarded.</summary>
+        private void TryBoard()
+        {
+            var eva = _vessel;
+            if (eva == null || !eva.IsEva) return;
+            double ut = Ctx.Clock.UT;
+
+            TrackedShip best = null; double bestD = double.MaxValue;
+            foreach (var ts in _others)
+            {
+                if (!Eva.CanBoard(eva, ts.V, ut)) continue;
+                double d = (eva.AbsolutePosition(ut) - ts.V.AbsolutePosition(ut)).Length;
+                if (d < bestD) { bestD = d; best = ts; }
+            }
+            if (best == null) { _toast = "No craft in range to board (get closer / slower)"; _toastT = 3; return; }
+            if (!Eva.Board(eva, best.V)) { _toast = "That craft has no free seat"; _toastT = 3; return; }
+
+            _vessel = best.V; _shipName = best.Name; _others.Remove(best);
+            _nodes.Clear(); _burnSpent = 0; _burnTargetUT = double.NaN; _sas = SasMode.Off;
+            if (_vessel.OnRails) _vessel.UpdateFromRails(ut);
+            _lastBody = _vessel.Body; _lastCamRel = _vessel.Position;
+            if (!_vessel.Landed && !_vessel.Destroyed) RefreshPrediction(ut);
+            ClearTarget();
+            _toast = $"Boarded {_shipName}"; _toastT = 4;
+        }
+
         // ----- map-view ship popup (click a ship icon -> Switch / Set as target) -----
         private const int MenuW = 156, MenuTitleH = 18, MenuBtnH = 18, MenuPad = 6, MenuGap = 3;
         private int MenuBtnCount => _menuControllable ? 2 : 1;
@@ -1775,6 +1883,10 @@ namespace Solar.Scenes
                 case SasMode.Maneuver:
                     double bd = BurnDirAngle(ut);
                     return double.IsNaN(bd) ? (double?)null : bd;
+                case SasMode.ShieldSun:
+                    // point the shielded Up face at the Sun (Up = FromAngle(Heading), so hold Heading = sun angle)
+                    Vec2d toSun = (Ctx.Universe?.Root?.AbsolutePositionAt(ut) ?? Vec2d.Zero) - _vessel.AbsolutePosition(ut);
+                    return toSun.Length > 1 ? toSun.Angle() : (double?)null;
                 default: return null;
             }
         }
@@ -1784,7 +1896,7 @@ namespace Solar.Scenes
             SasMode.Stability => "STAB", SasMode.Prograde => "PRO", SasMode.Retrograde => "RETRO",
             SasMode.RadialIn => "RAD-IN", SasMode.RadialOut => "RAD-OUT",
             SasMode.Target => "TGT", SasMode.AntiTarget => "ANTI-TGT",
-            SasMode.RelRetro => "KILL REL", SasMode.Maneuver => "MNVR", _ => "",
+            SasMode.RelRetro => "KILL REL", SasMode.Maneuver => "MNVR", SasMode.ShieldSun => "SHIELD", _ => "",
         };
 
         /// <summary>Bottom-left readout telling the player what the fitted instruments can collect here and
@@ -2310,6 +2422,37 @@ namespace Solar.Scenes
             }
         }
 
+        /// <summary>Flight-view solar-storm overlay: a faint reddish wash plus charged-particle streaks
+        /// scrolling across the screen FROM the Sun's on-screen direction, so an active storm reads as a
+        /// directional event. Screen-space only (no camera math): the Sun direction comes from the storm
+        /// report, mapped world (dx,dy) -> screen (dx,-dy).</summary>
+        private void DrawStormOverlay(PrimitiveBatch pb, double ut)
+        {
+            if (!_storm.IsActive) return;
+            float k = (float)Math.Clamp(_storm.Intensity, 0, 1);
+            if (k <= 0.01f) return;
+            int w = Ctx.W, h = Ctx.H;
+            var sun = new Vector2((float)_storm.SunDir.X, -(float)_storm.SunDir.Y);
+            if (sun.LengthSquared() < 1e-6f) return;
+            sun.Normalize();
+            var perp = new Vector2(-sun.Y, sun.X);
+            var center = new Vector2(w / 2f, h / 2f);
+            float diag = (float)Math.Sqrt(w * (double)w + h * (double)h);
+
+            pb.FillRect(0, 0, w, h, new Color(180, 60, 50, (int)(34 * k)));   // sunward wash
+
+            const int n = 54;
+            double scroll = ut * (260 + 520 * k);
+            for (int i = 0; i < n; i++)
+            {
+                float across = (float)((((i + 0.5) / n) - 0.5) * diag * 1.5);
+                float along = (float)(((i * 91.7 + scroll) % diag) - diag / 2);   // scroll along the sun axis
+                var p = center + perp * across - sun * along;
+                var seg = sun * (12f + 30f * k);
+                pb.Line(p, p + seg, 1.4f, new Color(255, 210, 175, (int)(110 * k)));
+            }
+        }
+
         // =====================================================================  draw
 
         public override void Draw()
@@ -2322,7 +2465,7 @@ namespace Solar.Scenes
             Ctx.Stars.Draw(pb, Ctx.W, Ctx.H, _cam.Center);
 
             if (_map) DrawMap(pb, sb, ut);
-            else DrawWorld(pb, ut);
+            else { DrawWorld(pb, ut); DrawStormOverlay(pb, ut); }
 
             OrbitalElements? flybyEl = RouteFlyby(ut, out var fEl, out var fBody) ? fEl : (OrbitalElements?)null;
             var hud = Hud.Draw(Ctx, _vessel, _pred, _map, FocusName(), DisplayNode(ut), BurnDirAngle(ut), _burnSpent, _nodes.Count, BuildNavMarkers(ut), flybyEl, fBody);
@@ -2330,6 +2473,18 @@ namespace Solar.Scenes
             if (hud.WarpToUT.HasValue) _warpTo = hud.WarpToUT;
             if (hud.FireStage) FireNextStage();
             if (hud.RequestedSas.HasValue) SetSas((SasMode)hud.RequestedSas.Value);
+
+            if (_vessel != null && _vessel.IsEva && !_map)
+            {
+                bool inRange = false;
+                foreach (var ts in _others) if (Eva.CanBoard(_vessel, ts.V, ut)) { inRange = true; break; }
+                string hint = inRange ? $"EVA   WASD jetpack    [V] BOARD    monoprop {_vessel.Monoprop:0} kg"
+                                      : $"EVA   WASD jetpack    monoprop {_vessel.Monoprop:0} kg";
+                var sz = Ctx.Font.MeasureString(hint);
+                var pos = new Vector2(Ctx.W / 2f - sz.X / 2f, Ctx.H - 196);
+                pb.FillRect((int)pos.X - 10, (int)pos.Y - 4, (int)sz.X + 20, (int)sz.Y + 8, new Color(20, 26, 38, 200));
+                sb.DrawString(Ctx.Font, hint, pos, inRange ? new Color(150, 230, 150) : new Color(220, 220, 140));
+            }
 
             DrawTargetPanel(pb, sb, ut);
             DrawTargetWindow(pb, sb);
@@ -2787,12 +2942,14 @@ namespace Solar.Scenes
                 VesselRenderer.Draw(pb, _cam, d, ut, _anim, tex: Ctx.Textures);
 
             foreach (var ts in _others)
-                VesselRenderer.Draw(pb, _cam, ts.V, ut, _anim, tex: Ctx.Textures);
+                if (ts.V.IsEva) EvaRenderer.Draw(pb, _cam, ts.V, ut, Ctx.Textures);
+                else VesselRenderer.Draw(pb, _cam, ts.V, ut, _anim, tex: Ctx.Textures);
 
             if (_vessel != null && !_vessel.Destroyed)
             {
                 _partHits.Clear();
-                VesselRenderer.Draw(pb, _cam, _vessel, ut, _anim, tex: Ctx.Textures, pickHits: _partHits);
+                if (_vessel.IsEva) EvaRenderer.Draw(pb, _cam, _vessel, ut, Ctx.Textures);
+                else VesselRenderer.Draw(pb, _cam, _vessel, ut, _anim, tex: Ctx.Textures, pickHits: _partHits);
             }
 
             if (HasTarget && _vessel != null && !_vessel.Destroyed)

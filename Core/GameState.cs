@@ -1,3 +1,4 @@
+﻿using System;
 using System.Collections.Generic;
 using Solar.Parts;
 using Solar.Physics;
@@ -25,6 +26,9 @@ namespace Solar.Core
         // ----- crew -----
         public List<CrewMember> Roster = new();           // all crew (Active + KIA), shared by reference
 
+        // ----- space weather -----
+        public long WeatherSeed;                          // seeds the deterministic solar-storm timeline (SpaceWeather)
+
         /// <summary>Sandbox cheat: a game whose name begins with this prefix starts with the whole tech
         /// tree unlocked, so every part and module is available from the first launch.</summary>
         public const string SandboxPrefix = "Internal_";
@@ -45,7 +49,15 @@ namespace Solar.Core
                                        : Solar.Progression.TechTree.StartingNodes(),
                 Science = sandbox ? 1_000_000 : 0,
                 Roster = StartingCrew(),
+                WeatherSeed = NewSeed(),
             };
+        }
+
+        /// <summary>A fresh, non-zero seed for this save's solar-storm timeline (unique per new game).</summary>
+        private static long NewSeed()
+        {
+            long s = unchecked(DateTime.UtcNow.Ticks ^ ((long)Guid.NewGuid().GetHashCode() << 32));
+            return s == 0 ? 1 : s;
         }
 
         /// <summary>The crew the player begins with: one of each role plus a couple of pilots.</summary>
@@ -55,6 +67,18 @@ namespace Solar.Core
             new CrewMember("Val Kerman", CrewRole.Pilot),
             new CrewMember("Bill Kerman", CrewRole.Engineer),
             new CrewMember("Bob Kerman", CrewRole.Scientist),
+            new CrewMember("Val Kerman", CrewRole.Pilot),
+            new CrewMember("Bill1 Kerman", CrewRole.Engineer),
+            new CrewMember("Bob1 Kerman", CrewRole.Scientist),
+            new CrewMember("Val1 Kerman", CrewRole.Pilot),
+            new CrewMember("Bill1 Kerman", CrewRole.Engineer),
+            new CrewMember("Bob2 Kerman", CrewRole.Scientist),
+            new CrewMember("Val2 Kerman", CrewRole.Pilot),
+            new CrewMember("Bill2 Kerman", CrewRole.Engineer),
+            new CrewMember("Bob2 Kerman", CrewRole.Scientist),
+            new CrewMember("Val3 Kerman", CrewRole.Pilot),
+            new CrewMember("Bill3 Kerman", CrewRole.Engineer),
+            new CrewMember("Bob3 Kerman", CrewRole.Scientist)
         };
 
         /// <summary>Insert or replace a ship by name; destroyed ships are dropped.</summary>

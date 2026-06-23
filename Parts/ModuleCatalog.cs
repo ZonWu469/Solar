@@ -82,6 +82,7 @@ namespace Solar.Parts
         public double Reliability { get; set; }
         public double ShieldFactor { get; set; }
         public double CureRate { get; set; }
+        public double StormHardening { get; set; }
         public double FuelProduce { get; set; }
         public double FuelDraw { get; set; }
         public double FuelCapacity { get; set; }
@@ -102,6 +103,7 @@ namespace Solar.Parts
             CrewCapacity = m.CrewCapacity, Range = m.Range, Relay = m.Relay,
             ScienceValue = m.ScienceValue, Torque = m.Torque, RcsThrust = m.RcsThrust, RcsIsp = m.RcsIsp,
             Reliability = m.Reliability, ShieldFactor = m.ShieldFactor, CureRate = m.CureRate,
+            StormHardening = m.StormHardening,
             FuelProduce = m.FuelProduce, FuelDraw = m.FuelDraw,
             FuelCapacity = m.FuelCapacity,
             OreProduce = m.OreProduce, OreDraw = m.OreDraw, OreCapacity = m.OreCapacity,
@@ -125,6 +127,7 @@ namespace Solar.Parts
             Reliability = Reliability > 0 ? Reliability : DefaultReliability(Kind),
             ShieldFactor = ShieldFactor,   // 0 unless authored (only meaningful for RadShield)
             CureRate = CureRate > 0 ? CureRate : (Kind == ModuleKind.Medbay ? 0.02 : 0),
+            StormHardening = StormHardening > 0 ? StormHardening : (Kind == ModuleKind.Radiator ? 0.6 : 0),
             FuelProduce = FuelProduce, FuelDraw = FuelDraw,
             FuelCapacity = FuelCapacity,
             // migration-safe fallback: a drill authored before ore existed inherits its old FuelProduce

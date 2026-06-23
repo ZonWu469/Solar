@@ -73,6 +73,7 @@ namespace Solar.Scenes
             ("Comms",         new[] { ModuleKind.Antenna }),
             ("Resource",      new[] { ModuleKind.Harvester, ModuleKind.IsruConverter, ModuleKind.OreScanner, ModuleKind.Tank }),
             ("Control",       new[] { ModuleKind.ReactionWheel, ModuleKind.RCS }),
+            ("Survival",      new[] { ModuleKind.RadShield, ModuleKind.Radiator, ModuleKind.Medbay }),
             ("Storage",       new[] { ModuleKind.Storage }),
             ("Utility",       new[] { ModuleKind.LandingLeg, ModuleKind.Light }),
         };

@@ -28,6 +28,8 @@ namespace Solar.Vessels
         public bool EnginesIgnited;  // first stage has been fired
         public int CurrentStage;     // next stage index to fire (0 = first); advanced by Staging.FireNext
         public bool IsDebris;
+        public bool IsEva;            // a kerbal on EVA: a one-crew jetpack "vessel" (see Eva); always off-rails
+        public CrewRole EvaRole;      // the role of the kerbal aboard, for the EVA sprite
         // Mission can be cancelled (flight scrapped, design reopened in the editor) from launch until the
         // ship first touches another object (lands/crashes after liftoff) or docks. HasLeftLaunchSite guards
         // the touch test against pad jitter so resting on the launch pad never locks cancel.
