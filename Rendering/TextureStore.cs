@@ -24,6 +24,10 @@ namespace Solar.Rendering
             "quad_button",
             "icon_stability", "icon_prograde", "icon_retrograde", "icon_radialin",
             "icon_radialout", "icon_target", "icon_antitarget", "icon_relretro", "icon_maneuver",
+            // map-view orbit-planner markers (procedural fallback when a PNG is absent)
+            "marker_periapsis", "marker_apoapsis", "marker_soi_exit", "marker_soi_entry",
+            "marker_impact", "marker_atmospheric_entry", "marker_closest_approach",
+            "marker_you_closest_approach", "marker_target_closest_approach", "marker_target",
         };
 
         public TextureStore(ContentManager content)

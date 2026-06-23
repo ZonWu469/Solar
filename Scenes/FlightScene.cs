@@ -2902,7 +2902,13 @@ namespace Solar.Scenes
                     Vec2d mPos = primaryAbs + Kepler.StateAtTime(el, _pred.TransitionUT).pos;
                     var ms = _cam.WorldToScreen(mPos);
                     Color mkCol = _pred.NextBody != null ? _pred.NextBody.BodyColor : new Color(255, 200, 110);
-                    pb.CircleOutline(ms, 6, 1.5f, mkCol);
+                    DrawTransitionIcon(pb, ms, _pred.Type switch
+                    {
+                        TransitionType.Encounter => "marker_soi_entry",
+                        TransitionType.Escape => "marker_soi_exit",
+                        TransitionType.AtmoEntry => "marker_atmospheric_entry",
+                        _ => "marker_soi_exit",
+                    }, mkCol);
                     string mkLabel = _pred.Type switch
                     {
                         TransitionType.Encounter => _pred.NextBody != null ? "enc " + _pred.NextBody.Name : "encounter",
@@ -2932,7 +2938,8 @@ namespace Solar.Scenes
                             // flyby periapsis altitude + danger (impact / atmosphere skim / clear), so the
                             // player sees how close this encounter passes BEFORE warping to it.
                             var (dCol, dWord) = FlybyDanger(_pred.NextOrbit, _pred.NextBody);
-                            DrawApPeMarkers(pb, sb, _pred.NextOrbit, nbAbs, _pred.NextBody.Radius, dCol, ApColor);
+                            DrawApPeMarkers(pb, sb, _pred.NextOrbit, nbAbs, _pred.NextBody.Radius, dCol, ApColor,
+                                            FlybyPeIcon(_pred.NextOrbit, _pred.NextBody));
                             if (dWord != null)
                                 sb.DrawString(Ctx.Font, dWord, new Vector2(ms.X + 9, ms.Y + 7), dCol);
                         }
@@ -2992,9 +2999,13 @@ namespace Solar.Scenes
             if (_cam.OnScreen(tNow, 30))
             {
                 var p = new Vector2((float)tNow.X, (float)tNow.Y);
-                pb.CircleOutline(p, 9, 1.6f, TargetColor);
-                pb.Line(p + new Vector2(-12, 0), p + new Vector2(12, 0), 1f, TargetColor * 0.7f);
-                pb.Line(p + new Vector2(0, -12), p + new Vector2(0, 12), 1f, TargetColor * 0.7f);
+                if (Ctx.Textures?.Ui("marker_target") is { } ttex) UiDraw.Icon(pb, ttex, p, MarkerPx, TargetColor);
+                else
+                {
+                    pb.CircleOutline(p, 9, 1.6f, TargetColor);
+                    pb.Line(p + new Vector2(-12, 0), p + new Vector2(12, 0), 1f, TargetColor * 0.7f);
+                    pb.Line(p + new Vector2(0, -12), p + new Vector2(0, 12), 1f, TargetColor * 0.7f);
+                }
                 sb.DrawString(Ctx.Font, _targetName ?? "Target", p + new Vector2(12, 8), TargetColor);
             }
 
@@ -3012,11 +3023,19 @@ namespace Solar.Scenes
 
                 pb.Line(ys, tsScreen, 2f, qcol * 0.85f);                 // the tie reads the verdict colour
                 // your marker: a filled diamond so it never reads as the target's ring
-                pb.Quad(ys + new Vector2(0, -5), ys + new Vector2(5, 0), ys + new Vector2(0, 5), ys + new Vector2(-5, 0), YouCaColor);
+                if (Ctx.Textures?.Ui("marker_you_closest_approach") is { } youTex)
+                    UiDraw.Icon(pb, youTex, ys, MarkerPx, YouCaColor);
+                else
+                    pb.Quad(ys + new Vector2(0, -5), ys + new Vector2(5, 0), ys + new Vector2(0, 5), ys + new Vector2(-5, 0), YouCaColor);
                 // the target's projected position at the approach: a labelled ring, findable even when it
                 // sits away from the body's current (possibly focused) position.
-                pb.CircleOutline(tsScreen, 6, 2f, TargetColor);
-                pb.FillCircle(tsScreen, 2f, TargetColor);
+                if (Ctx.Textures?.Ui("marker_target_closest_approach") is { } tgtTex)
+                    UiDraw.Icon(pb, tgtTex, tsScreen, MarkerPx, TargetColor);
+                else
+                {
+                    pb.CircleOutline(tsScreen, 6, 2f, TargetColor);
+                    pb.FillCircle(tsScreen, 2f, TargetColor);
+                }
                 sb.DrawString(Ctx.Font, _targetName ?? "target", tsScreen + new Vector2(9, 5), TargetColor);
                 // label on your side: separation + verdict, then ETA + closing speed
                 sb.DrawString(Ctx.Font, $"{UiDraw.Dist(_caSep)}  {verdict}", ys + new Vector2(8, -16), qcol);
@@ -3069,7 +3088,8 @@ namespace Solar.Scenes
         }
 
         private void DrawApPeMarkers(PrimitiveBatch pb, Microsoft.Xna.Framework.Graphics.SpriteBatch sb,
-                                     in OrbitalElements el, Vec2d primaryAbs, double bodyRadius, Color peCol, Color apCol)
+                                     in OrbitalElements el, Vec2d primaryAbs, double bodyRadius, Color peCol, Color apCol,
+                                     string peIcon = "marker_periapsis", string apIcon = "marker_apoapsis")
         {
             var peW = OrbitRenderer.PeriapsisPoint(el, primaryAbs);
             var apW = OrbitRenderer.ApoapsisPoint(el, primaryAbs);
@@ -3082,29 +3102,55 @@ namespace Solar.Scenes
             var peS = _cam.WorldToScreenD(peW);
             if (_cam.OnScreen(peS, 50))
                 DrawApsisMarker(pb, sb, new Vector2((float)peS.X, (float)peS.Y), priS,
-                                $"Pe {UiDraw.Dist(el.Periapsis - bodyRadius)}", peCol);
+                                $"Pe {UiDraw.Dist(el.Periapsis - bodyRadius)}", peCol, peIcon);
             if (!el.Hyperbolic)
             {
                 var apS = _cam.WorldToScreenD(apW);
                 if (_cam.OnScreen(apS, 50))
                     DrawApsisMarker(pb, sb, new Vector2((float)apS.X, (float)apS.Y), priS,
-                                    $"Ap {UiDraw.Dist(el.Apoapsis - bodyRadius)}", apCol);
+                                    $"Ap {UiDraw.Dist(el.Apoapsis - bodyRadius)}", apCol, apIcon);
             }
         }
 
-        /// <summary>C2: an apsis marker drawn as a chevron pointing radially outward (away from the primary)
-        /// with the label offset along that direction by a short leader, so it clears the orbit line.</summary>
+        /// <summary>C2: an apsis marker — icon art (<paramref name="iconId"/>, tinted) when present, else a
+        /// chevron pointing radially outward (away from the primary) — with the label offset along that
+        /// direction by a short leader so it clears the orbit line.</summary>
         private void DrawApsisMarker(PrimitiveBatch pb, Microsoft.Xna.Framework.Graphics.SpriteBatch sb,
-                                     Vector2 p, Vector2 primaryScreen, string label, Color col)
+                                     Vector2 p, Vector2 primaryScreen, string label, Color col, string iconId)
         {
             Vector2 ro = p - primaryScreen;
             ro = ro.LengthSquared() > 1e-3f ? Vector2.Normalize(ro) : new Vector2(0, -1);
-            Vector2 perp = new Vector2(-ro.Y, ro.X);
-            Vector2 tip = p + ro * 8;
-            pb.Line(p - perp * 5, tip, 1.8f, col);
-            pb.Line(p + perp * 5, tip, 1.8f, col);
-            pb.FillCircle(p, 2.5f, col);
+            if (Ctx.Textures?.Ui(iconId) is { } tex)
+                UiDraw.Icon(pb, tex, p, MarkerPx, col);
+            else
+            {
+                Vector2 perp = new Vector2(-ro.Y, ro.X);
+                Vector2 tip = p + ro * 8;
+                pb.Line(p - perp * 5, tip, 1.8f, col);
+                pb.Line(p + perp * 5, tip, 1.8f, col);
+                pb.FillCircle(p, 2.5f, col);
+            }
             sb.DrawString(Ctx.Font, label, p + ro * 12 + new Vector2(3, -6), col);
+        }
+
+        // Map-view planner marker icon size (px); navball cues use 26 for reference.
+        private const int MarkerPx = 18;
+
+        /// <summary>The flyby-periapsis marker id for an encounter leg, by predicted outcome: a "nearest
+        /// pass" glyph when clear, danger glyphs for an atmosphere skim / surface impact.</summary>
+        private static string FlybyPeIcon(in OrbitalElements el, CelestialBody body)
+            => TrajectoryPredictor.ClassifyFlyby(el, body, out _) switch
+            {
+                FlybyOutcome.Impact => "marker_impact",
+                FlybyOutcome.AtmoEntry => "marker_atmospheric_entry",
+                _ => "marker_closest_approach",
+            };
+
+        /// <summary>An SOI transition marker — icon art (tinted) when present, else the procedural ring.</summary>
+        private void DrawTransitionIcon(PrimitiveBatch pb, Vector2 ms, string iconId, Color col)
+        {
+            if (Ctx.Textures?.Ui(iconId) is { } tex) UiDraw.Icon(pb, tex, ms, MarkerPx, col);
+            else pb.CircleOutline(ms, 6, 1.5f, col);
         }
 
         private static readonly Color PeColor = new Color(120, 220, 255);
@@ -3170,8 +3216,10 @@ namespace Solar.Scenes
                     OrbitRenderer.DrawConicGlow(pb, _cam, sg.El, sg.PrimaryAbs, legCol, sg.Body.SoiRadius);
                     // if this final leg is a flyby/capture inside an encountered body, colour its Pe by danger
                     Color peCol = legCol;
-                    if (i > 0 && segs[i - 1].Body == sg.Body.Parent) peCol = FlybyDanger(sg.El, sg.Body).col;
-                    DrawApPeMarkers(pb, sb, sg.El, sg.PrimaryAbs, sg.Body.Radius, peCol, new Color(255, 210, 140));
+                    bool flyby = i > 0 && segs[i - 1].Body == sg.Body.Parent;
+                    if (flyby) peCol = FlybyDanger(sg.El, sg.Body).col;
+                    DrawApPeMarkers(pb, sb, sg.El, sg.PrimaryAbs, sg.Body.Radius, peCol, new Color(255, 210, 140),
+                                    flyby ? FlybyPeIcon(sg.El, sg.Body) : "marker_periapsis");
                 }
                 else
                 {
@@ -3183,7 +3231,7 @@ namespace Solar.Scenes
                     var next = segs[i + 1];
                     Vec2d mPos = sg.PrimaryAbs + Kepler.StateAtTime(sg.El, sg.EndUT).pos;
                     var ms = _cam.WorldToScreen(mPos);
-                    pb.CircleOutline(ms, 6, 1.5f, orange);
+                    DrawTransitionIcon(pb, ms, next.Body.Parent == sg.Body ? "marker_soi_entry" : "marker_soi_exit", orange);
 
                     // Encounter (descent into a child SOI): draw the encountered body + its SOI ring at the
                     // encounter time, and a closest-approach (Pe) marker on the flyby leg, so the "passage
@@ -3202,7 +3250,8 @@ namespace Solar.Scenes
                         // too-close / impacting capture is visible before the burn is executed.
                         var (dCol, dWord) = FlybyDanger(next.El, next.Body);
                         if (i + 1 != lastPlanned)
-                            DrawApPeMarkers(pb, sb, next.El, next.PrimaryAbs, next.Body.Radius, dCol, new Color(255, 210, 140));
+                            DrawApPeMarkers(pb, sb, next.El, next.PrimaryAbs, next.Body.Radius, dCol, new Color(255, 210, 140),
+                                            FlybyPeIcon(next.El, next.Body));
                         if (dWord != null)
                             sb.DrawString(Ctx.Font, dWord, ms + new Vector2(9, 7), dCol);
                     }
