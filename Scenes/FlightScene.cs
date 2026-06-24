@@ -89,6 +89,11 @@ namespace Solar.Scenes
         private string _targetName;
         private bool _showTargetWindow;
         private bool _showCrew;              // in-flight crew roster / transfer panel
+        private float _crewScroll;           // crew-panel vertical scroll offset
+        private bool _crewDrag;              // crew-panel scrollbar thumb is being dragged
+        private bool _showHelp;              // help overlay (keys + icons reference)
+        private bool _modulesCollapsed;      // MODULES right-column panel collapsed to its title bar
+        private bool _scienceCollapsed;      // SCIENCE right-column panel collapsed to its title bar
         private int _rightColBottom;         // screen-Y below the HUD's right-column stack (set each Draw)
         private bool _showColony;            // colony / surface-base management panel (landed only)
         private bool _showAddModule;         // colony "add module" sub-list
@@ -525,7 +530,7 @@ namespace Solar.Scenes
                 Ctx.Scenes.SwitchTo(new EditorScene(Ctx));
                 return;
             }
-            if (inp.Pressed(Keys.Escape)) { if (_popupPart != null) _popupPart = null; else _showExitDialog = !_showExitDialog; }
+            if (inp.Pressed(Keys.Escape)) { if (_showHelp) _showHelp = false; else if (_popupPart != null) _popupPart = null; else _showExitDialog = !_showExitDialog; }
             if (_showExitDialog) return;
             if (inp.Pressed(Keys.M)) { _map = !_map; _mapPan = default; }   // recenter on view switch
             if (inp.Pressed(Keys.N)) _slopeView = !_slopeView;   // toggle the slope (landing-spot) overlay
@@ -535,6 +540,7 @@ namespace Solar.Scenes
             if (inp.Pressed(Keys.U)) Undock();
             if (inp.Pressed(Keys.P)) ConfirmDock(clock.UT);      // confirm an orbital dock or surface connection (P = Port; K is RCS)
             if (inp.Pressed(Keys.C)) _showCrew = !_showCrew;
+            if (inp.Pressed(Keys.H)) _showHelp = !_showHelp;   // keys/icons reference overlay
             // colony / base management, available while landed
             if (inp.Pressed(Keys.B) && _vessel != null && _vessel.Landed && !_vessel.Destroyed)
             { _showColony = !_showColony; if (!_showColony) _showAddModule = false; }
@@ -588,7 +594,7 @@ namespace Solar.Scenes
                 if (inp.Pressed(Keys.G)) ToggleSolar();
                 if (inp.Pressed(Keys.L)) ToggleGear();
                 if (inp.Pressed(Keys.J)) ToggleShield();
-                if (inp.Pressed(Keys.H)) CycleSas();
+                if (inp.Pressed(Keys.Y)) CycleSas();
                 if (inp.Pressed(Keys.R)) _vessel.RcsEnabled = !_vessel.RcsEnabled;
                 // translation command: Q/E left-right (drives the off-axis lateral thrusters and RCS) is
                 // read even while landed so the thruster responds the instant the craft lifts off; the I/K
@@ -1840,7 +1846,7 @@ namespace Solar.Scenes
             SetSas(m);
         }
 
-        /// <summary>Engage a SAS mode (from the H key or an icon click): ignored without power, toggles off
+        /// <summary>Engage a SAS mode (from the Y key or an icon click): ignored without power, toggles off
         /// when re-selecting the active mode, and captures the current heading for Stability.</summary>
         private void SetSas(SasMode m)
         {
@@ -2488,11 +2494,14 @@ namespace Solar.Scenes
             else { DrawWorld(pb, ut); DrawStormOverlay(pb, ut); }
 
             OrbitalElements? flybyEl = RouteFlyby(ut, out var fEl, out var fBody) ? fEl : (OrbitalElements?)null;
-            var hud = Hud.Draw(Ctx, _vessel, _pred, _map, FocusName(), DisplayNode(ut), BurnDirAngle(ut), _burnSpent, _nodes.Count, BuildNavMarkers(ut), flybyEl, fBody);
+            var hud = Hud.Draw(Ctx, _vessel, _pred, _map, FocusName(), DisplayNode(ut), BurnDirAngle(ut), _burnSpent, _nodes.Count, BuildNavMarkers(ut), flybyEl, fBody, _modulesCollapsed, _scienceCollapsed);
             _rightColBottom = hud.RightColumnBottom;
             if (hud.WarpToUT.HasValue) _warpTo = hud.WarpToUT;
             if (hud.FireStage) FireNextStage();
             if (hud.RequestedSas.HasValue) SetSas((SasMode)hud.RequestedSas.Value);
+            if (hud.ToggleModules) _modulesCollapsed = !_modulesCollapsed;
+            if (hud.ToggleScience) _scienceCollapsed = !_scienceCollapsed;
+            if (hud.ToggleHelp) _showHelp = !_showHelp;
 
             if (_vessel != null && _vessel.IsEva && !_map)
             {
@@ -2537,6 +2546,7 @@ namespace Solar.Scenes
                 sb.DrawString(f, dockMsg, pos, new Color(150, 230, 150));
             }
 
+            DrawHelpPanel(pb, sb);
             DrawExitDialog(pb, sb);
 
             pb.End();
@@ -2604,8 +2614,17 @@ namespace Solar.Scenes
             int crew = v?.CrewCount ?? 0;
             int wWin = 230, rows = 0;   // match the HUD right-column width (rColW)
             foreach (var p in seated) rows += 1 + p.Crew.Count;
+
+            // fixed header region (title + life-support line); the per-part crew list below it scrolls
+            const int rowH = 20, headH = 52, padBot = 8;
+            int contentH = Math.Max(1, rows) * rowH;
+            int maxH = Math.Max(headH + rowH + padBot, Ctx.H - _rightColBottom - 16);   // clamp to screen
+            int panelH = Math.Min(headH + contentH + padBot, maxH);
+            int viewH = panelH - headH - padBot;
+            bool needScroll = contentH > viewH;
+
             // sit below the right-column stack (systems/modules/science) so it no longer overlaps them
-            var r = new Rectangle(Ctx.W - wWin - 10, _rightColBottom, wWin, 78 + Math.Max(1, rows) * 20);
+            var r = new Rectangle(Ctx.W - wWin - 10, _rightColBottom, wWin, panelH);
             UiDraw.TexPanel(pb, Ctx, "gameplay_modules_panel", r);
             float y = r.Y + 8;
             sb.DrawString(f, "CREW  [C] close", new Vector2(r.X + 10, y), UiDraw.Accent); y += 22;
@@ -2629,31 +2648,149 @@ namespace Solar.Scenes
                 sb.DrawString(f, ls, new Vector2(r.X + 10, y), ok ? new Color(150, 220, 150) : new Color(255, 100, 90));
             }
             else sb.DrawString(f, "No crew aboard", new Vector2(r.X + 10, y), UiDraw.TextDim);
-            y += 22;
 
             if (seated.Count == 0)
-            { sb.DrawString(f, "No crew-capable parts", new Vector2(r.X + 10, y), UiDraw.TextDim); return; }
+            { sb.DrawString(f, "No crew-capable parts", new Vector2(r.X + 10, r.Y + headH), UiDraw.TextDim); return; }
+
+            // scrollable crew list: wheel over the body scrolls, rows outside the viewport are culled
+            int bodyTop = r.Y + headH, bodyBot = bodyTop + viewH;
+            bool overBody = inp.MousePos.X >= r.X && inp.MousePos.X <= r.Right
+                            && inp.MousePos.Y >= bodyTop && inp.MousePos.Y <= bodyBot;
+            if (overBody) _crewScroll -= inp.WheelDelta * 0.4f;
+            _crewScroll = Math.Clamp(_crewScroll, 0, Math.Max(0, contentH - viewH));
+            int rightEdge = r.Right - (needScroll ? 18 : 4);   // leave room for the scrollbar gutter
 
             Color crewCol = (v != null && !v.LifeSupportOk) ? new Color(255, 100, 90) : Color.White;
             Solar.Parts.Part moveFrom = null, moveTo = null;
+            y = bodyTop - _crewScroll;
             for (int k = 0; k < seated.Count; k++)
             {
                 var p = seated[k];
-                sb.DrawString(f, $"{p.Def.Name}  ({p.Crew.Count}/{p.SeatCount})", new Vector2(r.X + 10, y), crewCol);
-                if (p.Crew.Count > 0)
+                if (y + rowH > bodyTop && y < bodyBot)   // part row in view
                 {
-                    if (k > 0 && seated[k - 1].Crew.Count < seated[k - 1].SeatCount
-                        && UiDraw.Button(pb, sb, f, new Rectangle(r.Right - 72, (int)y - 2, 30, 20), "Up", inp))
-                    { moveFrom = p; moveTo = seated[k - 1]; }
-                    if (k < seated.Count - 1 && seated[k + 1].Crew.Count < seated[k + 1].SeatCount
-                        && UiDraw.Button(pb, sb, f, new Rectangle(r.Right - 38, (int)y - 2, 30, 20), "Dn", inp))
-                    { moveFrom = p; moveTo = seated[k + 1]; }
+                    sb.DrawString(f, $"{p.Def.Name}  ({p.Crew.Count}/{p.SeatCount})", new Vector2(r.X + 10, y), crewCol);
+                    if (p.Crew.Count > 0)
+                    {
+                        if (k > 0 && seated[k - 1].Crew.Count < seated[k - 1].SeatCount
+                            && UiDraw.Button(pb, sb, f, new Rectangle(rightEdge - 64, (int)y - 2, 30, 20), "Up", inp))
+                        { moveFrom = p; moveTo = seated[k - 1]; }
+                        if (k < seated.Count - 1 && seated[k + 1].Crew.Count < seated[k + 1].SeatCount
+                            && UiDraw.Button(pb, sb, f, new Rectangle(rightEdge - 30, (int)y - 2, 30, 20), "Dn", inp))
+                        { moveFrom = p; moveTo = seated[k + 1]; }
+                    }
                 }
-                y += 20;
+                y += rowH;
                 foreach (var c in p.Crew)
-                { sb.DrawString(f, $"  - {c.Name} ({c.Role})", new Vector2(r.X + 10, y), UiDraw.TextDim); y += 20; }
+                {
+                    if (y + rowH > bodyTop && y < bodyBot)
+                        sb.DrawString(f, $"  - {c.Name} ({c.Role})", new Vector2(r.X + 10, y), UiDraw.TextDim);
+                    y += rowH;
+                }
+            }
+            if (needScroll)
+            {
+                var track = new Rectangle(r.Right - 14, bodyTop, 10, viewH);
+                _crewScroll = UiDraw.VScrollbar(pb, track, _crewScroll, viewH, contentH, inp, ref _crewDrag);
             }
             if (moveFrom != null && moveTo != null) v.TransferCrew(moveFrom, moveTo);
+        }
+
+        /// <summary>Centered modal help overlay (toggled with [H] or the button left of the time panel):
+        /// a two-column reference of the flight/map keyboard shortcuts and the navball / module icons.</summary>
+        private void DrawHelpPanel(PrimitiveBatch pb, Microsoft.Xna.Framework.Graphics.SpriteBatch sb)
+        {
+            if (!_showHelp) return;
+            var f = Ctx.Font;
+            var inp = Ctx.Input;
+            pb.FillRect(0, 0, Ctx.W, Ctx.H, new Color(0, 0, 0, 150));   // dim the world behind
+
+            int w = 720, h = 512;
+            var r = new Rectangle(Ctx.W / 2 - w / 2, Ctx.H / 2 - h / 2, w, h);
+            UiDraw.Panel(pb, r);
+            sb.DrawString(f, "FLIGHT CONTROLS", new Vector2(r.X + 24, r.Y + 16), UiDraw.Accent);
+            if (UiDraw.Button(pb, sb, f, new Rectangle(r.Right - 90, r.Y + 12, 66, 26), "Close", inp))
+                _showHelp = false;
+
+            // ---- left column: keyboard shortcuts ----
+            var keys = new (string key, string desc)[]
+            {
+                ("Esc", "Pause / menu"),
+                ("M", "Toggle map view"),
+                ("N", "Slope (landing) overlay"),
+                ("F", "Cycle map focus body"),
+                ("Arrows", "Pan map view"),
+                ("Tab", "Cycle target (Shift = back)"),
+                ("T", "Target window"),
+                ("V", "Take control / EVA"),
+                ("U", "Undock"),
+                ("P", "Dock / connect"),
+                ("C", "Crew panel"),
+                ("B", "Base panel (landed)"),
+                ("G", "Toggle solar panels"),
+                ("L", "Toggle landing gear"),
+                ("J", "Toggle heat shield"),
+                ("Y", "Cycle SAS mode"),
+                ("R", "Toggle RCS"),
+                ("Z / X", "Throttle max / zero"),
+                ("Shift / Ctrl", "Throttle up / down"),
+                (", / .", "Warp down / up"),
+                ("A / D", "Rotate"),
+                ("Q/E  I/K", "RCS translate"),
+                ("Space", "Fire next stage"),
+                ("H", "Show / hide this help"),
+            };
+            int lx = r.X + 24, ly = r.Y + 52;
+            sb.DrawString(f, "KEYS", new Vector2(lx, ly), new Color(150, 180, 220)); ly += 22;
+            foreach (var (key, desc) in keys)
+            {
+                UiDraw.SmallText(sb, f, key, new Vector2(lx, ly), Color.White, 0.85f);
+                UiDraw.SmallText(sb, f, desc, new Vector2(lx + 120, ly), UiDraw.TextDim, 0.85f);
+                ly += 17;
+            }
+
+            // ---- right column: navball cue icons + module status legend ----
+            var icons = new (string id, string label)[]
+            {
+                ("icon_prograde", "Prograde"),
+                ("icon_retrograde", "Retrograde"),
+                ("icon_maneuver", "Maneuver burn"),
+                ("icon_target", "Target"),
+                ("icon_antitarget", "Anti-target"),
+                ("icon_relretro", "Rel. retrograde"),
+            };
+            int rx = r.X + 400, ry = r.Y + 52;
+            sb.DrawString(f, "NAVBALL ICONS", new Vector2(rx, ry), new Color(150, 180, 220)); ry += 26;
+            foreach (var (id, label) in icons)
+            {
+                UiDraw.Icon(pb, Ctx.Textures?.Ui(id), new Rectangle(rx, ry, 24, 24), Color.White, false);
+                sb.DrawString(f, label, new Vector2(rx + 34, ry + 3), UiDraw.TextDim);
+                ry += 30;
+            }
+
+            ry += 8;
+            sb.DrawString(f, "MODULE TILES", new Vector2(rx, ry), new Color(150, 180, 220)); ry += 26;
+            void Legend(Color border, bool broken, string label)
+            {
+                var tr = new Rectangle(rx, ry, 24, 24);
+                pb.FillRect(tr, new Color(18, 26, 40, 230));
+                pb.RectOutline(tr, 2, border);
+                if (broken) pb.Line(new Vector2(tr.X + 4, tr.Y + 4), new Vector2(tr.Right - 4, tr.Bottom - 4), 2, border);
+                sb.DrawString(f, label, new Vector2(rx + 34, ry + 3), UiDraw.TextDim);
+                ry += 30;
+            }
+            Legend(UiDraw.StatusOn, false, "Functioning");
+            Legend(UiDraw.StatusOff, false, "Off");
+            Legend(new Color(255, 90, 60), true, "Broken (engineer repairs)");
+            // repair-countdown sample
+            var sr = new Rectangle(rx, ry, 24, 24);
+            pb.FillRect(sr, new Color(18, 26, 40, 230));
+            pb.RectOutline(sr, 2, new Color(255, 90, 60));
+            pb.FillRect(sr.X, sr.Bottom - 11, sr.Width, 11, new Color(0, 0, 0, 200));
+            UiDraw.SmallText(sb, f, "0:30", new Vector2(sr.X + 2, sr.Bottom - 11), new Color(255, 200, 120), 0.7f);
+            sb.DrawString(f, "Repair countdown", new Vector2(rx + 34, ry + 3), UiDraw.TextDim);
+
+            sb.DrawString(f, "Click MODULES / SCIENCE titles to collapse.",
+                          new Vector2(r.X + 24, r.Bottom - 28), new Color(120, 140, 170));
         }
 
         /// <summary>Free module slots on a part (its capacity minus what fitted modules already consume).</summary>

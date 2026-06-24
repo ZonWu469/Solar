@@ -16,6 +16,9 @@ namespace Solar.UI
         public bool FireStage;     // set when the player clicked the stage list to fire the next stage
         public int? RequestedSas;  // set to a SasMode index when an SAS icon was clicked
         public int RightColumnBottom; // screen-Y below the last right-column panel (for overlay panels)
+        public bool ToggleModules; // set when the MODULES panel title bar was clicked (collapse/expand)
+        public bool ToggleScience; // set when the SCIENCE panel title bar was clicked (collapse/expand)
+        public bool ToggleHelp;    // set when the "H" help button (left of the time panel) was clicked
     }
 
     /// <summary>One SAS-mode icon's render state, computed by the flight scene.</summary>
@@ -45,7 +48,8 @@ namespace Solar.UI
     {
         public static HudResult Draw(GameContext ctx, Vessel v, Prediction pred, bool mapMode, string focusName,
                                 Maneuver node = null, double burnDirAngle = double.NaN, double burnSpent = 0, int nodeCount = 0,
-                                NavMarkers nav = default, OrbitalElements? flybyEl = null, CelestialBody flybyBody = null)
+                                NavMarkers nav = default, OrbitalElements? flybyEl = null, CelestialBody flybyBody = null,
+                                bool modulesCollapsed = false, bool scienceCollapsed = false)
         {
             var result = new HudResult();
             var pb = ctx.Pb; var sb = ctx.Sb; var f = ctx.Font;
@@ -116,6 +120,9 @@ namespace Solar.UI
                 bool limited = ctx.Clock.WarpIndex > ctx.Clock.EffectiveIndex;
                 var twp = new Rectangle(rColX, (int)rColY, rColW, 64);
                 UiDraw.TexPanel(pb, ctx, "gameplay_warp_panel", twp);
+                // help-panel button, just left of the time panel
+                var hb = new Rectangle(rColX - 30, (int)rColY, 26, 26);
+                if (UiDraw.Button(pb, sb, f, hb, "H", ctx.Input)) result.ToggleHelp = true;
                 string timeText = "T+ " + UiDraw.Time(ctx.Clock.UT);
                 sb.DrawString(f, timeText, new Vector2(twp.X + twp.Width / 2 - f.MeasureString(timeText).X / 2, twp.Y + 10), Color.White);
                 string warpText = $"WARP {warp:N0}x" + (limited ? " (limited)" : "");
@@ -676,47 +683,67 @@ namespace Solar.UI
                 int Rows(int n) => n == 0 ? 0 : (n + cols - 1) / cols;
                 ModuleInstance tip = null;   // hovered module, tooltip painted after both grids
 
-                // Draws a titled icon grid at rColX/rColY and advances rColY. clickable = toggles on click.
-                void Panel(string title, List<ModuleInstance> mods)
+                // an engineer with power repairs broken modules; used to show the live repair countdown
+                double engineer = v.CrewSkill(CrewRole.Engineer);
+                bool canRepair = engineer > 1 && v.ElectricCharge > 0;
+                double repairRate = Core.Balance.RepairPerSec * engineer;   // wear drained per second
+
+                // Draws a titled icon grid at rColX/rColY and advances rColY. When collapsed only the title
+                // bar is drawn. Returns true when the title bar was clicked this frame (collapse/expand).
+                bool Panel(string title, List<ModuleInstance> mods, bool collapsed)
                 {
-                    if (mods.Count == 0) return;
-                    int bodyH = 6 + labelH + Rows(mods.Count) * (tile + gap) + 30;
+                    if (mods.Count == 0) return false;
+                    int bodyH = collapsed ? labelH + 12 : 6 + labelH + Rows(mods.Count) * (tile + gap) + 30;
                     var rp = new Rectangle(rColX, (int)rColY, rColW, bodyH);
                     UiDraw.TexPanel(pb, ctx, "gameplay_modules_panel", rp);
-                    sb.DrawString(f, title, new Vector2(rp.X + pad, rp.Y + 6), UiDraw.Accent);
-                    int gy = rp.Y + 6 + labelH;
-                    for (int i = 0; i < mods.Count; i++)
+                    sb.DrawString(f, (collapsed ? "[+] " : "[-] ") + title, new Vector2(rp.X + pad, rp.Y + 6), UiDraw.Accent);
+                    // title-bar click toggles collapse (full panel width, title-row height)
+                    var titleBar = new Rectangle(rp.X, rp.Y, rp.Width, labelH + 6);
+                    bool titleClicked = titleBar.Contains((int)ctx.Input.MousePos.X, (int)ctx.Input.MousePos.Y) && ctx.Input.LeftClick;
+                    if (!collapsed)
                     {
-                        var m = mods[i];
-                        int col = i % cols, row = i / cols;
-                        var tr = new Rectangle(rp.X + pad + col * (tile + gap), gy + row * (tile + gap), tile, tile);
-                        bool func = v.ModuleFunctioning(m, ctx.Clock.UT, ctx.Universe);
-                        pb.FillRect(tr, new Color(18, 26, 40, 230));
-                        UiDraw.Icon(pb, ctx.Textures?.Module(m.Def.Id), new Rectangle(tr.X + 2, tr.Y + 2, tile - 4, tile - 4), m.Def.Tint, !func);
-                        var border = m.Broken ? new Color(255, 90, 60) : func ? UiDraw.StatusOn : UiDraw.StatusOff;
-                        pb.RectOutline(tr, 2, border);
-                        if (m.Broken) pb.Line(new Vector2(tr.X + 4, tr.Y + 4), new Vector2(tr.Right - 4, tr.Bottom - 4), 2, border);
-                        bool hover = tr.Contains((int)ctx.Input.MousePos.X, (int)ctx.Input.MousePos.Y);
-                        if (hover) tip = m;
-                        if (hover && ctx.Input.LeftClick)
+                        int gy = rp.Y + 6 + labelH;
+                        for (int i = 0; i < mods.Count; i++)
                         {
-                            // RCS modules are Activatable:false; their on/off is the vessel flag (also [R])
-                            if (m.Def.Kind == ModuleKind.RCS) v.RcsEnabled = !v.RcsEnabled;
-                            else if (m.Def.Activatable) m.Active = !m.Active;
+                            var m = mods[i];
+                            int col = i % cols, row = i / cols;
+                            var tr = new Rectangle(rp.X + pad + col * (tile + gap), gy + row * (tile + gap), tile, tile);
+                            bool func = v.ModuleFunctioning(m, ctx.Clock.UT, ctx.Universe);
+                            pb.FillRect(tr, new Color(18, 26, 40, 230));
+                            UiDraw.Icon(pb, ctx.Textures?.Module(m.Def.Id), new Rectangle(tr.X + 2, tr.Y + 2, tile - 4, tile - 4), m.Def.Tint, !func);
+                            var border = m.Broken ? new Color(255, 90, 60) : func ? UiDraw.StatusOn : UiDraw.StatusOff;
+                            pb.RectOutline(tr, 2, border);
+                            if (m.Broken) pb.Line(new Vector2(tr.X + 4, tr.Y + 4), new Vector2(tr.Right - 4, tr.Bottom - 4), 2, border);
+                            // under-repair countdown overlay: time for wear to drain to zero at the engineer's rate
+                            if (m.Broken && canRepair && repairRate > 0)
+                            {
+                                string left = UiDraw.Time(m.Wear / repairRate);
+                                pb.FillRect(tr.X, tr.Bottom - 11, tr.Width, 11, new Color(0, 0, 0, 200));
+                                UiDraw.SmallText(sb, f, left, new Vector2(tr.X + 2, tr.Bottom - 11), new Color(255, 200, 120), 0.7f);
+                            }
+                            bool hover = tr.Contains((int)ctx.Input.MousePos.X, (int)ctx.Input.MousePos.Y);
+                            if (hover) tip = m;
+                            if (hover && ctx.Input.LeftClick)
+                            {
+                                // RCS modules are Activatable:false; their on/off is the vessel flag (also [R])
+                                if (m.Def.Kind == ModuleKind.RCS) v.RcsEnabled = !v.RcsEnabled;
+                                else if (m.Def.Activatable) m.Active = !m.Active;
+                            }
                         }
                     }
                     rColY = rp.Bottom + 8;
+                    return titleClicked;
                 }
 
-                Panel("MODULES  [G] solar", modules);
-                Panel("SCIENCE", science);
+                if (Panel("MODULES  [G] solar", modules, modulesCollapsed)) result.ToggleModules = true;
+                if (Panel("SCIENCE", science, scienceCollapsed)) result.ToggleScience = true;
                 if (tip != null) UiDraw.ModuleTooltip(pb, sb, f, tip.Def, ctx.Input.MousePos, w, h);
             }
 
             // ---- controls hint (bottom right) ----
             string hint = mapMode
                 ? "[click] orbit=node  [drag] handles  [wheel] tune (Shift/Alt finer)  X=del  [arrows] pan  [Tab/T] target  [F] focus  [M] flight"
-                : "[Shift/Ctrl] throttle  [A/D] rotate  [H] SAS  [L] gear  [Space] stage  [Tab/T] target  [K] dock  [U] undock  [C] crew  [B] base  [M] map  [,/.] warp";
+                : "[Shift/Ctrl] throttle  [A/D] rotate  [Y] SAS  [L] gear  [Space] stage  [Tab/T] target  [U] undock  [C] crew  [B] base  [M] map  [,/.] warp  [H] help";
             var hsz = f.MeasureString(hint);
             sb.DrawString(f, hint, new Vector2(w - hsz.X - 12, h - 24), new Color(120, 132, 150));
 
