@@ -17,7 +17,7 @@ namespace Solar.Rendering
         private readonly Dictionary<string, Texture2D> _ui = new();
         private readonly Dictionary<string, Texture2D> _player = new();
 
-        // EVA astronaut sprites by crew role (Content/Player/<role>.png). Absent = procedural fallback.
+        // Crew sprites by role (Content/Textures/Player/<role>.png), used by the crew panel and EVA. Absent = procedural fallback.
         private static readonly string[] PlayerIds = { "pilot", "engineer", "scientist" };
 
         // UI background textures (no catalog drives these; ids match Content/Textures/UI/*.png).
@@ -44,7 +44,7 @@ namespace Solar.Rendering
             foreach (var m in ModuleCatalog.All) TryLoad(content, _modules, "Textures/modules/", m.Id);
             foreach (var b in Solar.Physics.BodyCatalog.All) TryLoad(content, _bodies, "Textures/bodies/", b.Id);
             foreach (var id in UiIds) TryLoad(content, _ui, "Textures/UI/", id);
-            foreach (var id in PlayerIds) TryLoad(content, _player, "Player/", id);
+            foreach (var id in PlayerIds) TryLoad(content, _player, "Textures/Player/", id);
         }
 
         private static void TryLoad(ContentManager content, Dictionary<string, Texture2D> map, string dir, string id)

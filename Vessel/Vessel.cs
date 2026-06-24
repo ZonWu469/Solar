@@ -1136,6 +1136,23 @@ namespace Solar.Vessels
             return true;
         }
 
+        /// <summary>Move a specific crew member into <paramref name="to"/>, anywhere on this vessel (including
+        /// docked modules, since they share one part list). Returns false if the target is full, is the member's
+        /// current part, or the member is not aboard.</summary>
+        public bool TransferCrew(CrewMember c, Part to)
+        {
+            if (c == null || to == null || to.Crew.Count >= to.SeatCount) return false;
+            foreach (var from in AllParts())
+            {
+                if (!from.Crew.Contains(c)) continue;
+                if (from == to) return false;
+                from.Crew.Remove(c);
+                to.Crew.Add(c);
+                return true;
+            }
+            return false;
+        }
+
         public void GoOnRails(double ut)
         {
             Orbit = Kepler.ElementsFromState(Position, Velocity, Body.Mu, ut);

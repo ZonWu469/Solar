@@ -91,9 +91,21 @@ namespace Solar.Scenes
         private bool _showCrew;              // in-flight crew roster / transfer panel
         private float _crewScroll;           // crew-panel vertical scroll offset
         private bool _crewDrag;              // crew-panel scrollbar thumb is being dragged
+        private Vector2 _crewPanelPos = new(-1, -1);  // top-left of the floating crew panel (-1 = center on first open)
+        private bool _crewPanelDrag;         // crew-panel title bar is being dragged
+        private Vector2 _crewPanelGrab;      // mouse offset from panel origin while dragging
+        private Rectangle _crewPanelRect;    // last-drawn panel bounds (for click-through hit testing)
+        private CrewMember _selectedCrew;    // crew member picked for transfer (null = none)
         private bool _showHelp;              // help overlay (keys + icons reference)
-        private bool _modulesCollapsed;      // MODULES right-column panel collapsed to its title bar
-        private bool _scienceCollapsed;      // SCIENCE right-column panel collapsed to its title bar
+        private bool _modulesCollapsed;      // MODULES floating panel collapsed to its title bar
+        private bool _scienceCollapsed;      // SCIENCE floating panel collapsed to its title bar
+        // floating, draggable MODULES / SCIENCE windows (-1 pos = default to the right edge on first open)
+        private Vector2 _modPanelPos = new(-1, -1), _sciPanelPos = new(-1, -1);
+        private bool _modPanelDrag, _sciPanelDrag;     // title bar being dragged
+        private Vector2 _modPanelGrab, _sciPanelGrab;  // mouse offset from panel origin while dragging
+        private float _modScroll, _sciScroll;          // list vertical scroll offset
+        private bool _modScrollDrag, _sciScrollDrag;   // scrollbar thumb being dragged
+        private Rectangle _modPanelRect, _sciPanelRect; // last-drawn bounds (click-through / wheel hit testing)
         private int _rightColBottom;         // screen-Y below the HUD's right-column stack (set each Draw)
         private bool _showColony;            // colony / surface-base management panel (landed only)
         private bool _showAddModule;         // colony "add module" sub-list
@@ -562,11 +574,17 @@ namespace Solar.Scenes
             // map-view ship popup is handled first so its clicks don't fall through to node editing;
             // the flight-view part popup is the analogous click-handler for the non-map view
             bool menuConsumed = UpdateShipMenu(clock.UT);
-            UpdatePartPopup(clock.UT);
+            // a pending crew transfer (member selected in the crew panel) claims the world click before the
+            // part popup would open; clicks over the panel itself are left for its own controls in Draw
+            bool overCrewPanel = _showCrew && _crewPanelRect.Contains((int)inp.MousePos.X, (int)inp.MousePos.Y);
+            // the floating module/science windows also swallow clicks/wheel over their last-drawn bounds
+            bool overModulePanel = OverModulePanel(inp.MousePos);
+            bool crewConsumed = UpdateCrewTransfer(overCrewPanel);
+            if (!crewConsumed && !overCrewPanel && !overModulePanel) UpdatePartPopup(clock.UT);
             bool maneuverWheel = false;
-            UpdateManeuverInput(clock.UT, menuConsumed, out maneuverWheel);
+            UpdateManeuverInput(clock.UT, menuConsumed || overModulePanel, out maneuverWheel);
 
-            if (inp.WheelDelta != 0 && !maneuverWheel)
+            if (inp.WheelDelta != 0 && !maneuverWheel && !overModulePanel)
             {
                 double factor = Math.Pow(1.18, -inp.WheelDelta / 120.0);
                 // max m/px (2e9) frames the whole system out to Neptune (~4.5e11 m) with margin even when
@@ -592,16 +610,16 @@ namespace Solar.Scenes
                 if (inp.Pressed(Keys.Z)) _vessel.Throttle = 1;
                 if (inp.Pressed(Keys.X)) _vessel.Throttle = 0;
                 if (inp.Pressed(Keys.G)) ToggleSolar();
-                if (inp.Pressed(Keys.L)) ToggleGear();
-                if (inp.Pressed(Keys.J)) ToggleShield();
+                if (inp.Pressed(Keys.E)) ToggleGear();
+                if (inp.Pressed(Keys.Q)) ToggleShield();
                 if (inp.Pressed(Keys.Y)) CycleSas();
                 if (inp.Pressed(Keys.R)) _vessel.RcsEnabled = !_vessel.RcsEnabled;
-                // translation command: Q/E left-right (drives the off-axis lateral thrusters and RCS) is
+                // translation command: J/L left-right (drives the off-axis lateral thrusters and RCS) is
                 // read even while landed so the thruster responds the instant the craft lifts off; the I/K
-                // fore-aft RCS and the rotation model below are flight-only.
+                // fore-aft RCS and the rotation model below are flight-only. (I/J/K/L form the translation diamond.)
                 double rx = 0, ry = 0;
-                if (inp.Down(Keys.E)) rx += 1;
-                if (inp.Down(Keys.Q)) rx -= 1;
+                if (inp.Down(Keys.L)) rx += 1;
+                if (inp.Down(Keys.J)) rx -= 1;
                 if (_vessel.Landed)
                 {
                     _vessel.AngularVelocity = 0;             // no spinning while sitting on the surface
@@ -661,7 +679,7 @@ namespace Solar.Scenes
                     else
                         _vessel.AngularVelocity = 0;
 
-                    // RCS fore-aft translation: I/K along the Up axis (left-right Q/E is read above)
+                    // RCS fore-aft translation: I/K along the Up axis (left-right J/L is read above)
                     if (inp.Down(Keys.I)) ry += 1;
                     if (inp.Down(Keys.K)) ry -= 1;
                 }
@@ -1626,6 +1644,28 @@ namespace Solar.Scenes
         /// info panel; a decoupler can be fired straight from it. Mirrors the map-view ship menu. The panel's
         /// button rects are laid out by <see cref="DrawPartPopup"/> and consumed here a frame later (the same
         /// immediate-mode pattern the ship menu uses). Returns true when it consumed this frame's click.</summary>
+        /// <summary>While a crew member is selected in the crew panel, a flight-view click transfers them into
+        /// the clicked crew-capable part (if it has a free seat); a click on empty space deselects. Clicks over
+        /// the panel are left for its own controls. Also drops a selection whose member is no longer aboard.
+        /// Returns true when the click was consumed (so the part popup should not also act on it).</summary>
+        private bool UpdateCrewTransfer(bool overCrewPanel)
+        {
+            var inp = Ctx.Input;
+            var v = _vessel;
+            if (!_showCrew || v == null || v.Destroyed) { _selectedCrew = null; return false; }
+            if (_selectedCrew != null)
+            {
+                bool aboard = false;
+                foreach (var c in v.AllCrew()) if (c == _selectedCrew) { aboard = true; break; }
+                if (!aboard) _selectedCrew = null;
+            }
+            if (_selectedCrew == null || !inp.LeftClick || overCrewPanel || _map) return false;
+            if (PickPartAt(inp.MousePos, out var part) && part.SeatCount > 0 && part.Crew.Count < part.SeatCount)
+                v.TransferCrew(_selectedCrew, part);
+            _selectedCrew = null;   // transferred, or clicked empty space / a full part: clear the selection
+            return true;
+        }
+
         private bool UpdatePartPopup(double ut)
         {
             var inp = Ctx.Input;
@@ -2491,16 +2531,14 @@ namespace Solar.Scenes
             Ctx.Stars.Draw(pb, Ctx.W, Ctx.H, _cam.Center);
 
             if (_map) DrawMap(pb, sb, ut);
-            else { DrawWorld(pb, ut); DrawStormOverlay(pb, ut); }
+            else { DrawWorld(pb, ut); DrawStormOverlay(pb, ut); DrawCrewDropTargets(pb); }
 
             OrbitalElements? flybyEl = RouteFlyby(ut, out var fEl, out var fBody) ? fEl : (OrbitalElements?)null;
-            var hud = Hud.Draw(Ctx, _vessel, _pred, _map, FocusName(), DisplayNode(ut), BurnDirAngle(ut), _burnSpent, _nodes.Count, BuildNavMarkers(ut), flybyEl, fBody, _modulesCollapsed, _scienceCollapsed);
+            var hud = Hud.Draw(Ctx, _vessel, _pred, _map, FocusName(), DisplayNode(ut), BurnDirAngle(ut), _burnSpent, _nodes.Count, BuildNavMarkers(ut), flybyEl, fBody);
             _rightColBottom = hud.RightColumnBottom;
             if (hud.WarpToUT.HasValue) _warpTo = hud.WarpToUT;
             if (hud.FireStage) FireNextStage();
             if (hud.RequestedSas.HasValue) SetSas((SasMode)hud.RequestedSas.Value);
-            if (hud.ToggleModules) _modulesCollapsed = !_modulesCollapsed;
-            if (hud.ToggleScience) _scienceCollapsed = !_scienceCollapsed;
             if (hud.ToggleHelp) _showHelp = !_showHelp;
 
             if (_vessel != null && _vessel.IsEva && !_map)
@@ -2518,6 +2556,7 @@ namespace Solar.Scenes
             DrawTargetPanel(pb, sb, ut);
             DrawTargetWindow(pb, sb);
             DrawScienceStatus(pb, sb, ut);
+            DrawModulePanels(pb, sb);
             DrawCrewPanel(pb, sb);
             DrawColonyPanel(pb, sb, ut);
             if (_map) DrawShipMenu(pb, sb);
@@ -2602,9 +2641,171 @@ namespace Solar.Scenes
 
         /// <summary>In-flight crew panel: lists crew per crewable axial part, with Up/Dn buttons to
         /// transfer one crew member to the adjacent crewable part when it has a free seat.</summary>
+        /// <summary>Crew role tint, used for the icon swatch fallback and accents.</summary>
+        private static Color CrewRoleColor(CrewRole role) => role switch
+        {
+            CrewRole.Pilot => new Color(235, 175, 95),
+            CrewRole.Engineer => new Color(205, 205, 120),
+            _ => new Color(120, 200, 235),   // Scientist
+        };
+
+        /// <summary>Bar colour for a 0..1 hazard fraction: green (0, healthy) through amber to red (1, lethal).</summary>
+        private static Color HazardColor(float frac)
+        {
+            frac = Math.Clamp(frac, 0, 1);
+            return new Color((int)(80 + 175 * frac), (int)(220 - 150 * frac), 80);
+        }
+
+        /// <summary>Translucent highlight over crew-capable parts with a free seat while a crew member is
+        /// selected for transfer, so the valid drop targets are obvious. Reuses this frame's picked footprints.</summary>
+        private void DrawCrewDropTargets(PrimitiveBatch pb)
+        {
+            if (!_showCrew || _selectedCrew == null || _map) return;
+            foreach (var (part, quad) in _partHits)
+            {
+                if (part.SeatCount <= 0 || part.Crew.Count >= part.SeatCount) continue;
+                pb.Quad(quad[0], quad[1], quad[2], quad[3], new Color(120, 210, 255, 70));
+            }
+        }
+
+        /// <summary>True when the cursor is over either floating module/science window (last-frame bounds).
+        /// Used to keep world/map clicks and the camera wheel-zoom from passing through the panels.</summary>
+        private bool OverModulePanel(Vector2 m) =>
+            _modPanelRect.Contains((int)m.X, (int)m.Y) || _sciPanelRect.Contains((int)m.X, (int)m.Y);
+
+        /// <summary>Draws the floating, draggable MODULES and SCIENCE windows. Each lists its modules as
+        /// icon + name rows with a status mark (on/off, broken X, or live repair countdown), a vertical
+        /// scrollbar when the list is long, a [-]/[+] collapse glyph, and a title-bar drag handle. Replaces
+        /// the old right-column icon grids that used to live in <see cref="Hud.Draw"/>.</summary>
+        private void DrawModulePanels(PrimitiveBatch pb, Microsoft.Xna.Framework.Graphics.SpriteBatch sb)
+        {
+            var v = _vessel;
+            if (v == null || v.Destroyed) { _modPanelRect = Rectangle.Empty; _sciPanelRect = Rectangle.Empty; return; }
+
+            var modules = new List<ModuleInstance>();   // everything except science instruments
+            var science = new List<ModuleInstance>();
+            foreach (var p in v.AllParts())
+                foreach (var m in p.Modules)
+                    (m.Def.Kind == ModuleKind.Science ? science : modules).Add(m);
+
+            // an engineer with power repairs broken modules; used to show the live repair countdown
+            double engineer = v.CrewSkill(CrewRole.Engineer);
+            bool canRepair = engineer > 1 && v.ElectricCharge > 0;
+            double repairRate = Core.Balance.RepairPerSec * engineer;   // wear drained per second
+
+            int x = Ctx.W - 240;   // old right-column X: windows default to a stack down the right edge
+            DrawModuleWindow(pb, sb, "MODULES  [G] solar", modules, ref _modPanelPos, ref _modPanelDrag, ref _modPanelGrab,
+                ref _modScroll, ref _modScrollDrag, ref _modulesCollapsed, new Vector2(x, 10), canRepair, repairRate, out _modPanelRect);
+            DrawModuleWindow(pb, sb, "SCIENCE", science, ref _sciPanelPos, ref _sciPanelDrag, ref _sciPanelGrab,
+                ref _sciScroll, ref _sciScrollDrag, ref _scienceCollapsed, new Vector2(x, 264), canRepair, repairRate, out _sciPanelRect);
+        }
+
+        /// <summary>Draws one module-list window (shared by MODULES and SCIENCE). All persistent state is
+        /// passed by ref so the caller owns it; <paramref name="rect"/> returns the drawn bounds.</summary>
+        private void DrawModuleWindow(PrimitiveBatch pb, Microsoft.Xna.Framework.Graphics.SpriteBatch sb,
+            string title, List<ModuleInstance> mods, ref Vector2 pos, ref bool drag, ref Vector2 grab,
+            ref float scroll, ref bool scrollDrag, ref bool collapsed, Vector2 defaultPos,
+            bool canRepair, double repairRate, out Rectangle rect)
+        {
+            if (mods.Count == 0) { rect = Rectangle.Empty; drag = false; scrollDrag = false; return; }
+
+            var v = _vessel;
+            var f = Ctx.Font;
+            var inp = Ctx.Input;
+            const int width = 240, titleH = 24, rowH = 26, pad = 8, gutter = 12;
+
+            int contentH = mods.Count * rowH;
+            int maxView = Math.Max(rowH, Ctx.H - 80 - titleH);
+            int viewH = collapsed ? 0 : Math.Min(contentH, maxView);
+            bool needBar = !collapsed && contentH > viewH;
+            int panelH = collapsed ? titleH + 4 : titleH + viewH + pad;
+
+            // default position on first open; clamp on screen thereafter (matches the crew panel)
+            if (pos.X < 0) pos = defaultPos;
+            pos.X = Math.Clamp(pos.X, 0, Math.Max(0, Ctx.W - width));
+            pos.Y = Math.Clamp(pos.Y, 0, Math.Max(0, Ctx.H - panelH));
+            rect = new Rectangle((int)pos.X, (int)pos.Y, width, panelH);
+
+            UiDraw.TexPanel(pb, Ctx, "gameplay_modules_panel", rect);
+
+            // title bar: the left glyph toggles collapse; the rest of the bar is the drag handle
+            var glyphR = new Rectangle(rect.X + 6, rect.Y + 4, 22, titleH - 6);
+            sb.DrawString(f, collapsed ? "[+]" : "[-]", new Vector2(glyphR.X, rect.Y + 6), UiDraw.Accent);
+            sb.DrawString(f, title, new Vector2(rect.X + 34, rect.Y + 6), UiDraw.Accent);
+            var titleBar = new Rectangle(rect.X, rect.Y, width, titleH);
+            if (inp.LeftClick && glyphR.Contains((int)inp.MousePos.X, (int)inp.MousePos.Y)) collapsed = !collapsed;
+            else if (inp.LeftClick && titleBar.Contains((int)inp.MousePos.X, (int)inp.MousePos.Y))
+            { drag = true; grab = inp.MousePos - new Vector2(rect.X, rect.Y); }
+            if (!inp.LeftDown) drag = false;
+            if (drag) pos = inp.MousePos - grab;
+
+            if (collapsed) { scrollDrag = false; return; }
+
+            var body = new Rectangle(rect.X, rect.Y + titleH, width - (needBar ? gutter : 0), viewH);
+
+            // wheel over the body scrolls the list (camera zoom is suppressed here via OverModulePanel)
+            if (body.Contains((int)inp.MousePos.X, (int)inp.MousePos.Y)) scroll -= inp.WheelDelta * 0.4f;
+            scroll = Math.Clamp(scroll, 0, Math.Max(0, contentH - viewH));
+
+            ModuleInstance tip = null;
+            float yTop = body.Y - scroll;
+            int icon = rowH - 8;
+            for (int i = 0; i < mods.Count; i++)
+            {
+                var m = mods[i];
+                int ry = (int)(yTop + i * rowH);
+                if (ry + rowH <= body.Y || ry >= body.Bottom) continue;   // cull rows outside the view (no scissor)
+                var rowR = new Rectangle(body.X + pad, ry, body.Width - pad * 2, rowH - 2);
+
+                bool func = v.ModuleFunctioning(m, Ctx.Clock.UT, Ctx.Universe);
+                bool hover = rowR.Contains((int)inp.MousePos.X, (int)inp.MousePos.Y)
+                             && body.Contains((int)inp.MousePos.X, (int)inp.MousePos.Y);
+                if (hover) { pb.FillRect(rowR, new Color(60, 90, 130, 110)); tip = m; }
+
+                var iconR = new Rectangle(rowR.X, rowR.Y + 1, icon, icon);
+                pb.FillRect(iconR, new Color(18, 26, 40, 230));
+                UiDraw.Icon(pb, Ctx.Textures?.Module(m.Def.Id), new Rectangle(iconR.X + 1, iconR.Y + 1, icon - 2, icon - 2), m.Def.Tint, !func);
+                var border = m.Broken ? new Color(255, 90, 60) : func ? UiDraw.StatusOn : UiDraw.StatusOff;
+                pb.RectOutline(iconR, 2, border);
+                if (m.Broken) pb.Line(new Vector2(iconR.X + 3, iconR.Y + 3), new Vector2(iconR.Right - 3, iconR.Bottom - 3), 2, border);
+
+                UiDraw.SmallText(sb, f, m.Def.Name ?? m.Def.Id, new Vector2(iconR.Right + 6, rowR.Y + 4), func ? Color.White : UiDraw.TextDim, 0.85f);
+
+                // right-aligned status: live repair countdown when broken+repairable, else on/off/X
+                if (m.Broken && canRepair && repairRate > 0)
+                    UiDraw.SmallText(sb, f, UiDraw.Time(m.Wear / repairRate), new Vector2(rowR.Right - 52, rowR.Y + 5), new Color(255, 200, 120), 0.75f);
+                else
+                {
+                    string mark = m.Broken ? "X"
+                        : m.Def.Kind == ModuleKind.RCS ? (v.RcsEnabled ? "on" : "off")
+                        : m.Def.Activatable ? (m.Active ? "on" : "off") : "";
+                    if (mark.Length > 0) UiDraw.SmallText(sb, f, mark, new Vector2(rowR.Right - 26, rowR.Y + 5), border, 0.8f);
+                }
+
+                if (hover && inp.LeftClick)
+                {
+                    // RCS modules are Activatable:false; their on/off is the vessel flag (also [R])
+                    if (m.Def.Kind == ModuleKind.RCS) v.RcsEnabled = !v.RcsEnabled;
+                    else if (m.Def.Activatable) m.Active = !m.Active;
+                }
+            }
+
+            if (needBar)
+            {
+                var track = new Rectangle(rect.Right - gutter, body.Y, gutter - 2, viewH);
+                scroll = UiDraw.VScrollbar(pb, track, scroll, viewH, contentH, inp, ref scrollDrag);
+            }
+            else scrollDrag = false;
+
+            if (tip != null) UiDraw.ModuleTooltip(pb, sb, f, tip.Def, inp.MousePos, Ctx.W, Ctx.H);
+        }
+
+        /// <summary>Floating, draggable crew panel (toggled with [C]): per crew-capable part it lists the
+        /// aboard crew with a role icon and radiation / illness bars. Click a crew member to select them, then
+        /// click a part in the world to transfer them (handled in <see cref="UpdateCrewTransfer"/>).</summary>
         private void DrawCrewPanel(PrimitiveBatch pb, Microsoft.Xna.Framework.Graphics.SpriteBatch sb)
         {
-            if (!_showCrew) return;
+            if (!_showCrew) { _crewPanelRect = Rectangle.Empty; return; }
             var v = _vessel;
             var f = Ctx.Font;
             var inp = Ctx.Input;
@@ -2612,22 +2813,38 @@ namespace Solar.Scenes
             if (v != null && !v.Destroyed) foreach (var p in v.Parts) if (p.SeatCount > 0) seated.Add(p);
 
             int crew = v?.CrewCount ?? 0;
-            int wWin = 230, rows = 0;   // match the HUD right-column width (rColW)
-            foreach (var p in seated) rows += 1 + p.Crew.Count;
+            const int wWin = 280, headH = 52, padBot = 8, partH = 22, crewRowH = 40, titleBarH = 24;
 
-            // fixed header region (title + life-support line); the per-part crew list below it scrolls
-            const int rowH = 20, headH = 52, padBot = 8;
-            int contentH = Math.Max(1, rows) * rowH;
-            int maxH = Math.Max(headH + rowH + padBot, Ctx.H - _rightColBottom - 16);   // clamp to screen
+            // content height = per-part header + a tall row per seated crew member
+            int contentH = 0;
+            foreach (var p in seated) contentH += partH + p.Crew.Count * crewRowH;
+            contentH = Math.Max(contentH, crewRowH);
+
+            int maxH = Math.Max(headH + crewRowH + padBot, Ctx.H - 40);
             int panelH = Math.Min(headH + contentH + padBot, maxH);
             int viewH = panelH - headH - padBot;
             bool needScroll = contentH > viewH;
 
-            // sit below the right-column stack (systems/modules/science) so it no longer overlaps them
-            var r = new Rectangle(Ctx.W - wWin - 10, _rightColBottom, wWin, panelH);
+            // center on first open; thereafter follow the dragged position, clamped on screen
+            if (_crewPanelPos.X < 0) _crewPanelPos = new Vector2((Ctx.W - wWin) / 2f, (Ctx.H - panelH) / 2f);
+            _crewPanelPos.X = Math.Clamp(_crewPanelPos.X, 0, Math.Max(0, Ctx.W - wWin));
+            _crewPanelPos.Y = Math.Clamp(_crewPanelPos.Y, 0, Math.Max(0, Ctx.H - panelH));
+            var r = new Rectangle((int)_crewPanelPos.X, (int)_crewPanelPos.Y, wWin, panelH);
+            _crewPanelRect = r;
+
             UiDraw.TexPanel(pb, Ctx, "gameplay_modules_panel", r);
+
+            // close button (top-right); the rest of the title bar is the drag handle
+            var closeR = new Rectangle(r.Right - 26, r.Y + 4, 20, 18);
+            if (UiDraw.Button(pb, sb, f, closeR, "X", inp)) { _showCrew = false; _selectedCrew = null; }
+            var titleBar = new Rectangle(r.X, r.Y, wWin - 32, titleBarH);
+            if (inp.LeftClick && titleBar.Contains((int)inp.MousePos.X, (int)inp.MousePos.Y))
+            { _crewPanelDrag = true; _crewPanelGrab = inp.MousePos - new Vector2(r.X, r.Y); }
+            if (!inp.LeftDown) _crewPanelDrag = false;
+            if (_crewPanelDrag) _crewPanelPos = inp.MousePos - _crewPanelGrab;
+
             float y = r.Y + 8;
-            sb.DrawString(f, "CREW  [C] close", new Vector2(r.X + 10, y), UiDraw.Accent); y += 22;
+            sb.DrawString(f, "CREW", new Vector2(r.X + 10, y), UiDraw.Accent); y += 22;
 
             // life-support wellbeing summary (which resource is the limiter, and time left)
             if (v != null && crew > 0)
@@ -2637,7 +2854,6 @@ namespace Solar.Scenes
                 if (!ok) ls = "Life support: CRITICAL";
                 else
                 {
-                    // the resource that will run out first, by time-to-empty per current crew draw
                     double tO = TimeLeft(v.Oxygen, crew * Vessel.OxygenPerCrew);
                     double tW = TimeLeft(v.Water, crew * Vessel.WaterPerCrew);
                     double tF = TimeLeft(v.Food, crew * Vessel.FoodPerCrew);
@@ -2658,33 +2874,42 @@ namespace Solar.Scenes
                             && inp.MousePos.Y >= bodyTop && inp.MousePos.Y <= bodyBot;
             if (overBody) _crewScroll -= inp.WheelDelta * 0.4f;
             _crewScroll = Math.Clamp(_crewScroll, 0, Math.Max(0, contentH - viewH));
-            int rightEdge = r.Right - (needScroll ? 18 : 4);   // leave room for the scrollbar gutter
+            int rightEdge = r.Right - (needScroll ? 18 : 8);
 
-            Color crewCol = (v != null && !v.LifeSupportOk) ? new Color(255, 100, 90) : Color.White;
-            Solar.Parts.Part moveFrom = null, moveTo = null;
+            Color partCol = (v != null && !v.LifeSupportOk) ? new Color(255, 100, 90) : Color.White;
+            float rdd = (float)Solar.Vessels.Threats.RadDeathDose;
             y = bodyTop - _crewScroll;
             for (int k = 0; k < seated.Count; k++)
             {
                 var p = seated[k];
-                if (y + rowH > bodyTop && y < bodyBot)   // part row in view
-                {
-                    sb.DrawString(f, $"{p.Def.Name}  ({p.Crew.Count}/{p.SeatCount})", new Vector2(r.X + 10, y), crewCol);
-                    if (p.Crew.Count > 0)
-                    {
-                        if (k > 0 && seated[k - 1].Crew.Count < seated[k - 1].SeatCount
-                            && UiDraw.Button(pb, sb, f, new Rectangle(rightEdge - 64, (int)y - 2, 30, 20), "Up", inp))
-                        { moveFrom = p; moveTo = seated[k - 1]; }
-                        if (k < seated.Count - 1 && seated[k + 1].Crew.Count < seated[k + 1].SeatCount
-                            && UiDraw.Button(pb, sb, f, new Rectangle(rightEdge - 30, (int)y - 2, 30, 20), "Dn", inp))
-                        { moveFrom = p; moveTo = seated[k + 1]; }
-                    }
-                }
-                y += rowH;
+                if (y + partH > bodyTop && y < bodyBot)
+                    sb.DrawString(f, $"{p.Def.Name}  ({p.Crew.Count}/{p.SeatCount})", new Vector2(r.X + 10, y), partCol);
+                y += partH;
                 foreach (var c in p.Crew)
                 {
-                    if (y + rowH > bodyTop && y < bodyBot)
-                        sb.DrawString(f, $"  - {c.Name} ({c.Role})", new Vector2(r.X + 10, y), UiDraw.TextDim);
-                    y += rowH;
+                    if (y + crewRowH > bodyTop && y < bodyBot)
+                    {
+                        var rowR = new Rectangle(r.X + 6, (int)y, rightEdge - (r.X + 6), crewRowH - 4);
+                        bool selected = c == _selectedCrew;
+                        if (selected) { pb.FillRect(rowR, new Color(120, 210, 255, 45)); pb.RectOutline(rowR, 1, UiDraw.Accent); }
+                        // click to (de)select for transfer
+                        if (inp.LeftClick && rowR.Contains((int)inp.MousePos.X, (int)inp.MousePos.Y))
+                            _selectedCrew = selected ? null : c;
+
+                        var iconR = new Rectangle(r.X + 12, (int)y + 3, 30, 30);
+                        UiDraw.Icon(pb, Ctx.Textures.Player(c.Role.ToString().ToLowerInvariant()), iconR, CrewRoleColor(c.Role));
+
+                        int bx = iconR.Right + 8, bw = rightEdge - bx - 14;
+                        sb.DrawString(f, $"{c.Name}  ({c.Role})", new Vector2(bx, y + 1), selected ? UiDraw.Accent : Color.White);
+                        // radiation + illness bars (0..1, green->red)
+                        float radF = rdd > 0 ? (float)(c.RadDose / rdd) : 0f;
+                        float illF = (float)c.Illness;
+                        UiDraw.SmallText(sb, f, "R", new Vector2(bx, y + 19), UiDraw.TextDim);
+                        UiDraw.Bar(pb, new Rectangle(bx + 12, (int)y + 20, Math.Max(8, bw), 6), radF, HazardColor(radF));
+                        UiDraw.SmallText(sb, f, "I", new Vector2(bx, y + 28), UiDraw.TextDim);
+                        UiDraw.Bar(pb, new Rectangle(bx + 12, (int)y + 29, Math.Max(8, bw), 6), illF, HazardColor(illF));
+                    }
+                    y += crewRowH;
                 }
             }
             if (needScroll)
@@ -2692,7 +2917,10 @@ namespace Solar.Scenes
                 var track = new Rectangle(r.Right - 14, bodyTop, 10, viewH);
                 _crewScroll = UiDraw.VScrollbar(pb, track, _crewScroll, viewH, contentH, inp, ref _crewDrag);
             }
-            if (moveFrom != null && moveTo != null) v.TransferCrew(moveFrom, moveTo);
+
+            // hint at the bottom while a member is selected
+            if (_selectedCrew != null)
+                UiDraw.SmallText(sb, f, "click a part to transfer", new Vector2(r.X + 10, r.Bottom - 16), UiDraw.Accent);
         }
 
         /// <summary>Centered modal help overlay (toggled with [H] or the button left of the time panel):
@@ -2727,15 +2955,15 @@ namespace Solar.Scenes
                 ("C", "Crew panel"),
                 ("B", "Base panel (landed)"),
                 ("G", "Toggle solar panels"),
-                ("L", "Toggle landing gear"),
-                ("J", "Toggle heat shield"),
+                ("E", "Toggle landing gear"),
+                ("Q", "Toggle heat shield"),
                 ("Y", "Cycle SAS mode"),
                 ("R", "Toggle RCS"),
                 ("Z / X", "Throttle max / zero"),
                 ("Shift / Ctrl", "Throttle up / down"),
                 (", / .", "Warp down / up"),
                 ("A / D", "Rotate"),
-                ("Q/E  I/K", "RCS translate"),
+                ("J/L  I/K", "RCS translate"),
                 ("Space", "Fire next stage"),
                 ("H", "Show / hide this help"),
             };
