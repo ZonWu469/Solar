@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 
 namespace Solar.Core
@@ -21,7 +21,7 @@ namespace Solar.Core
         public static double RadDecayPerSec    = 1000.0 / (18 * 3600); // dose clears outside any belt (~18 h to fully clear)
 
         // ----- solar storms (space weather; see Physics/SpaceWeather.cs) -----
-        public static double StormIntervalS    = 15 * 24 * 3600;       // mean time between storms (~15 days)
+        public static double StormIntervalS    = 150 * 24 * 3600;       // mean time between storms (~15 days)
         public static double StormDurationS    = 2 * 3600;             // nominal storm length at the vessel (~2 h)
         public static double StormFrontSpeed   = 1.0e7;                // particle-front speed (m/s); sets the distance-scaled warning window
         public static double StormPeakDose     = 0.2;                  // peak dose rate (units/s) at Earth distance, full exposure

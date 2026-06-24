@@ -1734,6 +1734,36 @@ namespace Solar.Tests
                 Check("malfunction repair", broke && repaired);
             }
 
+            // 36b. autonomous maintenance: a maintenance drone repairs a broken module on a CREWLESS craft
+            //      (a virtual engineer), but only with power; with neither crew nor drone the break is permanent.
+            //      A huge dt drives the repair probability to ~1, mirroring check 36.
+            {
+                var rng = new Random(11);
+                Vessels.Vessel Probe(bool drone, double ec)
+                {
+                    var v = new Vessels.Vessel { ElectricCharge = ec };
+                    var pod = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
+                    pod.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Reaction Wheel")) { Broken = true, Wear = 1 });
+                    if (drone) pod.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.GetById("maintenance-drone")) { Active = true });
+                    v.Parts.Add(pod);
+                    return v;
+                }
+                var withDrone = Probe(true, 100);
+                Vessels.Threats.Tick(withDrone, 1e7, 0, null, rng);
+                var w = withDrone.Parts[0].Modules[0];
+                bool droneRepairs = !w.Broken && w.Wear <= 1e-9;            // crewless self-repair
+
+                var noPower = Probe(true, 0);
+                Vessels.Threats.Tick(noPower, 1e7, 0, null, rng);
+                bool needsPower = noPower.Parts[0].Modules[0].Broken;       // an unpowered drone can't repair
+
+                var noHelp = Probe(false, 100);
+                Vessels.Threats.Tick(noHelp, 1e7, 0, null, rng);
+                bool crewlessStuck = noHelp.Parts[0].Modules[0].Broken;     // no crew, no drone -> permanent
+
+                Check("autonomous maintenance drone", droneRepairs && needsPower && crewlessStuck);
+            }
+
             // 37. illness + persistence: a fully ill engineer contributes no skill bonus; RadiationAt reads
             //     the belt dose only inside its band; broken/wear state round-trips through the savegame.
             {
@@ -2296,6 +2326,26 @@ namespace Solar.Tests
 
                 Check("storm fries exposed electronics",
                       activeUt >= 0 && Instr(exposed).Broken && !Instr(off).Broken && !Instr(sheltered).Broken);
+            }
+
+            // ----- part-local, omnidirectional shielded bay -----
+            {
+                var bay = Parts.ModuleCatalog.GetById("shielded-bay");
+                bool loaded = bay != null && bay.Kind == Parts.ModuleKind.RadShield && bay.LocalShield && bay.ShieldFactor > 0.5;
+
+                var v = new Vessels.Vessel();
+                var shieldedPod = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
+                shieldedPod.Modules.Add(new Parts.ModuleInstance(bay));
+                var barePod = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
+                v.Parts.Add(shieldedPod); v.Parts.Add(barePod);
+
+                // protects its own bay at full strength, in any orientation; gives nothing to the other part
+                double inBay = Vessels.Threats.PartLocalShield(shieldedPod);
+                double outBay = Vessels.Threats.PartLocalShield(barePod);
+                // and it is NOT a whole-vessel directional shield: facing away from the Sun the storm helper reads 0
+                double away = Vessels.Threats.BestStormShield(v, new Vec2d(-v.Up.X, -v.Up.Y));
+                Check("part-local omni shield",
+                      loaded && Math.Abs(inBay - bay.ShieldFactor) < 1e-9 && outBay == 0 && away == 0);
             }
 
             // ----- EVA: leave a craft, then board (rescue) -----

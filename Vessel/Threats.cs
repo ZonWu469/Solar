@@ -42,23 +42,25 @@ namespace Solar.Vessels
         // ----- 1. malfunctions & wear -----
         private static void Malfunctions(Vessel v, double dt, double ut, Universe u, Random rng)
         {
-            double engineer = v.CrewSkill(CrewRole.Engineer);   // >= 1; cuts failure rate, speeds repair
-            // an engineer can repair anywhere there's power (e.g. a crewed orbital station), not only when landed
-            bool canRepair = engineer > 1 && v.ElectricCharge > 0;
+            // Maintenance capability: crew engineers (>= 1) plus any functioning maintenance drones. Drones let a
+            // crewless craft self-repair, just slower. Either can repair anywhere there's power (e.g. an orbital
+            // station), not only when landed.
+            double power = v.CrewSkill(CrewRole.Engineer) + v.AutoRepairSkill(ut, u);
+            bool canRepair = power > 1 && v.ElectricCharge > 0;
             foreach (var p in v.AllParts())
                 foreach (var m in p.Modules)
                 {
                     if (m.Broken)
                     {
                         if (!canRepair) continue;
-                        m.Wear -= RepairPerSec * engineer * dt;
+                        m.Wear -= RepairPerSec * power * dt;
                         if (m.Wear <= 0) { m.Wear = 0; m.Broken = false; v.RecentRepairs.Add(m.Def.Name); }
                         continue;
                     }
                     if (!v.ModuleFunctioning(m, ut, u)) continue;   // only working equipment wears out
                     m.Wear = Math.Min(1, m.Wear + WearPerSec * dt);
                     double reliability = m.Def.Reliability > 0 ? m.Def.Reliability : 1;
-                    double rate = BreakBaseRate * (1 + 5 * m.Wear) / reliability / engineer;
+                    double rate = BreakBaseRate * (1 + 5 * m.Wear) / reliability / power;
                     if (Fires(rng, rate, dt)) { m.Broken = true; v.RecentFailures.Add(m.Def.Name); }
                 }
         }
@@ -66,10 +68,11 @@ namespace Solar.Vessels
         // ----- 2. radiation: belts (omnidirectional) + solar storms (directional) -----
         private static void Radiation(Vessel v, double dt, double ut, Universe u)
         {
-            // belt dose is omnidirectional and cut by the strongest functioning shield (unchanged), applied
-            // uniformly to all crew.
+            // belt dose is omnidirectional and cut by the strongest functioning shield. The whole-vessel best is
+            // computed once; a part's own LocalShield (if any) is folded in per crew part below.
             double beltDose = v.Body?.RadiationAt(v.Altitude) ?? 0;
-            double shieldedBelt = beltDose * (1 - BestShield(v));
+            double vesselShield = BestShield(v);
+            double shieldedBelt = beltDose * (1 - vesselShield);
 
             // storm context: dose from the Sun's actual direction, cut by the atmosphere when flying deep in
             // air and falling off inverse-square with distance. The directional shield is resolved PER CREW
@@ -104,10 +107,11 @@ namespace Solar.Vessels
 
             foreach (var (part, c) in crewByPart)
             {
-                double rate = shieldedBelt;
+                double local = PartLocalShield(part);                  // omnidirectional, this bay only
+                double rate = beltDose * (1 - Math.Max(vesselShield, local));
                 if (stormActive)
                 {
-                    double eff = Math.Max(moduleShield, SolarShieldFor(v, part, sunDir));
+                    double eff = Math.Max(moduleShield, Math.Max(SolarShieldFor(v, part, sunDir), local));
                     rate += stormBase * (1 - eff);
                 }
                 if (rate > 0)
@@ -122,14 +126,27 @@ namespace Solar.Vessels
             }
         }
 
-        /// <summary>Strongest radiation shielding fraction (0..1) over the vessel's functioning shields.</summary>
+        /// <summary>Strongest whole-vessel radiation shielding fraction (0..1) over the functioning shields.
+        /// Part-local (<see cref="ModuleDef.LocalShield"/>) shields are excluded — they protect only their own
+        /// bay (folded in per-part via <see cref="PartLocalShield"/>).</summary>
         private static double BestShield(Vessel v)
         {
             double best = 0;
             foreach (var p in v.AllParts())
                 foreach (var m in p.Modules)
-                    if (m.Def.Kind == ModuleKind.RadShield && !m.Broken && m.Def.ShieldFactor > best)
+                    if (m.Def.Kind == ModuleKind.RadShield && !m.Def.LocalShield && !m.Broken && m.Def.ShieldFactor > best)
                         best = m.Def.ShieldFactor;
+            return Math.Clamp(best, 0, 1);
+        }
+
+        /// <summary>Best omnidirectional shielding fraction (0..1) from LocalShield modules fitted *in this part*.
+        /// Unlike a normal RadShield this protects only its host part, but in any orientation (no sun cone).</summary>
+        public static double PartLocalShield(Part p)
+        {
+            double best = 0;
+            foreach (var m in p.Modules)
+                if (m.Def.Kind == ModuleKind.RadShield && m.Def.LocalShield && !m.Broken && m.Def.ShieldFactor > best)
+                    best = m.Def.ShieldFactor;
             return Math.Clamp(best, 0, 1);
         }
 
@@ -143,7 +160,7 @@ namespace Solar.Vessels
             double best = 0;
             foreach (var p in v.AllParts())
                 foreach (var m in p.Modules)
-                    if (m.Def.Kind == ModuleKind.RadShield && !m.Broken && m.Def.ShieldFactor > best)
+                    if (m.Def.Kind == ModuleKind.RadShield && !m.Def.LocalShield && !m.Broken && m.Def.ShieldFactor > best)
                         best = m.Def.ShieldFactor;
             return Math.Clamp(best * cone, 0, 1);
         }
@@ -215,8 +232,8 @@ namespace Solar.Vessels
 
             foreach (var p in v.AllParts())
             {
-                // a deployed solar shield shadowing this part also protects its electronics
-                double eff = Math.Max(moduleShield, SolarShieldFor(v, p, storm.SunDir));
+                // a deployed solar shield shadowing this part — or a LocalShield fitted in it — also protects its electronics
+                double eff = Math.Max(moduleShield, Math.Max(SolarShieldFor(v, p, storm.SunDir), PartLocalShield(p)));
                 double partRate = rateScale * (1 - eff);
                 if (partRate <= 0) continue;
                 foreach (var m in p.Modules)
@@ -242,7 +259,8 @@ namespace Solar.Vessels
         {
             ModuleKind.SolarPanel or ModuleKind.ReactionWheel or ModuleKind.Science or ModuleKind.Antenna
             or ModuleKind.OreScanner or ModuleKind.Light or ModuleKind.RCS or ModuleKind.Medbay
-            or ModuleKind.FuelCell or ModuleKind.IsruConverter or ModuleKind.Harvester => true,
+            or ModuleKind.FuelCell or ModuleKind.IsruConverter or ModuleKind.Harvester
+            or ModuleKind.MaintenanceDrone => true,
             _ => false,
         };
 

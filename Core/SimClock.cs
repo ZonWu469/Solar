@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace Solar.Core
 {
@@ -7,7 +7,7 @@ namespace Solar.Core
     public sealed class SimClock
     {
         public static readonly double[] Levels = { 1, 2, 4, 10, 100, 1_000, 10_000, 100_000, 1_000_000 };
-        public const int PhysicsMaxIndex = 2; // 4x cap while off-rails
+        public const int PhysicsMaxIndex = 4; // 4x cap while off-rails
 
         public double UT;
         public int WarpIndex;

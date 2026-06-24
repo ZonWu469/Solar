@@ -81,8 +81,10 @@ namespace Solar.Parts
         public double RcsIsp { get; set; }
         public double Reliability { get; set; }
         public double ShieldFactor { get; set; }
+        public bool LocalShield { get; set; }
         public double CureRate { get; set; }
         public double StormHardening { get; set; }
+        public double RepairSkill { get; set; }
         public double FuelProduce { get; set; }
         public double FuelDraw { get; set; }
         public double FuelCapacity { get; set; }
@@ -102,8 +104,8 @@ namespace Solar.Parts
             WaterRegen = m.WaterRegen, OxygenRegen = m.OxygenRegen, FoodRegen = m.FoodRegen,
             CrewCapacity = m.CrewCapacity, Range = m.Range, Relay = m.Relay,
             ScienceValue = m.ScienceValue, Torque = m.Torque, RcsThrust = m.RcsThrust, RcsIsp = m.RcsIsp,
-            Reliability = m.Reliability, ShieldFactor = m.ShieldFactor, CureRate = m.CureRate,
-            StormHardening = m.StormHardening,
+            Reliability = m.Reliability, ShieldFactor = m.ShieldFactor, LocalShield = m.LocalShield,
+            CureRate = m.CureRate, StormHardening = m.StormHardening, RepairSkill = m.RepairSkill,
             FuelProduce = m.FuelProduce, FuelDraw = m.FuelDraw,
             FuelCapacity = m.FuelCapacity,
             OreProduce = m.OreProduce, OreDraw = m.OreDraw, OreCapacity = m.OreCapacity,
@@ -126,8 +128,10 @@ namespace Solar.Parts
             RcsIsp = RcsIsp > 0 ? RcsIsp : (Kind == ModuleKind.RCS ? 240 : 0),
             Reliability = Reliability > 0 ? Reliability : DefaultReliability(Kind),
             ShieldFactor = ShieldFactor,   // 0 unless authored (only meaningful for RadShield)
+            LocalShield = LocalShield,     // false unless authored (only meaningful for RadShield)
             CureRate = CureRate > 0 ? CureRate : (Kind == ModuleKind.Medbay ? 0.02 : 0),
             StormHardening = StormHardening > 0 ? StormHardening : (Kind == ModuleKind.Radiator ? 0.6 : 0),
+            RepairSkill = RepairSkill > 0 ? RepairSkill : (Kind == ModuleKind.MaintenanceDrone ? 0.4 : 0),
             FuelProduce = FuelProduce, FuelDraw = FuelDraw,
             FuelCapacity = FuelCapacity,
             // migration-safe fallback: a drill authored before ore existed inherits its old FuelProduce
@@ -142,7 +146,7 @@ namespace Solar.Parts
         private static double DefaultReliability(ModuleKind k) => k switch
         {
             ModuleKind.Harvester or ModuleKind.IsruConverter or ModuleKind.FuelCell => 0.7,
-            ModuleKind.SolarPanel or ModuleKind.ReactionWheel or ModuleKind.RCS => 0.85,
+            ModuleKind.SolarPanel or ModuleKind.ReactionWheel or ModuleKind.RCS or ModuleKind.MaintenanceDrone => 0.85,
             ModuleKind.Battery or ModuleKind.Tank or ModuleKind.Storage or ModuleKind.LandingLeg => 4.0,
             _ => 1.0,
         };

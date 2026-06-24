@@ -787,6 +787,19 @@ namespace Solar.Vessels
             return 1 + per * Math.Min(effective, cap);
         }
 
+        /// <summary>Engineer-equivalent repair capability from functioning maintenance drones (0 if none).
+        /// Lets a crewless craft self-repair, slowly: it adds to (or stands in for) a crew engineer in
+        /// <see cref="Threats"/>. Capped like crew engineers.</summary>
+        public double AutoRepairSkill(double ut, Universe u)
+        {
+            double s = 0;
+            foreach (var p in AllParts())
+                foreach (var m in p.Modules)
+                    if (m.Def.Kind == ModuleKind.MaintenanceDrone && ModuleFunctioning(m, ut, u))
+                        s += m.Def.RepairSkill;
+            return Math.Min(s, EngineerGainCap);   // reuse the existing diminishing-returns cap
+        }
+
         /// <summary>Total liquid (non-solid) fuel aboard, across axial and radial tanks.</summary>
         public double TotalLiquidFuel
         {
@@ -843,6 +856,7 @@ namespace Solar.Vessels
                         case ModuleKind.Science: if (m.Active) draw += m.Def.EcDraw; break;
                         case ModuleKind.Antenna: if (m.Active) draw += m.Def.EcDraw; break;
                         case ModuleKind.Light: if (m.Active) draw += m.Def.EcDraw; break;
+                        case ModuleKind.MaintenanceDrone: if (!m.Def.Activatable || m.Active) draw += m.Def.EcDraw; break;
                     }
                 }
             }
@@ -872,6 +886,7 @@ namespace Solar.Vessels
                 case ModuleKind.RCS: return RcsEnabled && Monoprop > 0 && ec;
                 case ModuleKind.Medbay: return (!m.Def.Activatable || m.Active) && (m.Def.EcDraw <= 0 || ec);
                 case ModuleKind.RadShield: return true;                            // passive shielding, always on
+                case ModuleKind.MaintenanceDrone: return (!m.Def.Activatable || m.Active) && ec;
                 default: return true;                                              // Battery / Tank / Storage / LandingLeg
             }
         }
