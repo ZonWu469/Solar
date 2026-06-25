@@ -3969,12 +3969,12 @@ namespace Solar.Scenes
 
                 if (clamped)
                 {
-                    // off-screen node: the gizmo is a proxy pinned to the screen edge. Frame it with a
-                    // blue square so an off-screen node is unmistakable, point an outward chevron toward
-                    // the real node so its direction reads, and skip the burn arrow.
-                    const float box = 22f;
-                    pb.RectOutline(new Rectangle((int)(nodeScreen.X - box / 2), (int)(nodeScreen.Y - box / 2),
-                                                 (int)box, (int)box), 2f, new Color(90, 160, 255));
+                    // off-screen node: the gizmo is a proxy pinned to the screen edge. Frame the whole
+                    // gizmo (node + the four handles) with a blue square so it's unmistakable, point an
+                    // outward chevron toward the real node so its direction reads, and skip the burn arrow.
+                    const float half = HandleDist + 10f;   // enclose the 52px-out handle ring
+                    pb.RectOutline(new Rectangle((int)(nodeScreen.X - half), (int)(nodeScreen.Y - half),
+                                                 (int)(half * 2), (int)(half * 2)), 2f, new Color(90, 160, 255));
                     var outDir = trueScreen - nodeScreen;
                     if (outDir.LengthSquared() > 1e-3f)
                     {
