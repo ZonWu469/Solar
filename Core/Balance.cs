@@ -15,6 +15,7 @@ namespace Solar.Core
         public static double WearPerSec        = 1.0 / (5840 * 3600);  // a running module is fully worn after ~8 months
         public static double BreakBaseRate     = 1.0 / (1000 * 3600);  // break chance/s at zero wear, reliability 1 (~6 weeks)
         public static double RepairPerSec      = 1.0 / (2 * 3600);     // an engineer repairs a broken module in ~2 h
+        public static double UnpoweredRepairFactor = 0.2;              // repair speed (fraction) with no EC, so a broken sole power source can still recover (no deadlock)
 
         // ----- radiation -----
         public static double RadDeathDose      = 1000.0;               // accumulated dose that kills a crew member
@@ -60,6 +61,7 @@ namespace Solar.Core
                 if (d.WearHours is { } wh && wh > 0)         WearPerSec = 1.0 / (wh * 3600);
                 if (d.BreakHours is { } bh && bh > 0)        BreakBaseRate = 1.0 / (bh * 3600);
                 if (d.RepairHours is { } rh && rh > 0)       RepairPerSec = 1.0 / (rh * 3600);
+                if (d.UnpoweredRepairFactor is { } urf && urf >= 0) UnpoweredRepairFactor = urf;
                 if (d.RadDeathDose is { } rd && rd > 0)      RadDeathDose = rd;
                 if (d.RadDecayHours is { } rdh && rdh > 0)   RadDecayPerSec = RadDeathDose / (rdh * 3600);
                 if (d.InfectHours is { } ih && ih > 0)       InfectBaseRate = 1.0 / (ih * 3600);
@@ -88,6 +90,7 @@ namespace Solar.Core
             public double? WearHours { get; set; }
             public double? BreakHours { get; set; }
             public double? RepairHours { get; set; }
+            public double? UnpoweredRepairFactor { get; set; }
             public double? RadDeathDose { get; set; }
             public double? RadDecayHours { get; set; }
             public double? InfectHours { get; set; }

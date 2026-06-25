@@ -213,7 +213,9 @@ namespace Solar.UI
                 if (beltDose > 0 || worstDose > 0 || worstIll > 0 || stormShow)
                 {
                     int rows = 2;
-                    var hp = new Rectangle(10, 64, 196, 30 + 24 * rows + (stormShow ? 20 : 0));
+                    // top-center (was top-left, where it hid behind the vessel/orbit panel)
+                    int hpW = 196;
+                    var hp = new Rectangle(w / 2 - hpW / 2, 64, hpW, 30 + 24 * rows + (stormShow ? 20 : 0));
                     UiDraw.Panel(pb, hp);
                     sb.DrawString(f, "HAZARDS", new Vector2(hp.X + 10, hp.Y + 6), UiDraw.Accent);
                     if (beltDose > 0)
@@ -676,6 +678,44 @@ namespace Solar.UI
                                 yy += 10;
                             }
                         }
+                    }
+                    rColY = rp.Bottom + 8;
+                }
+            }
+
+            // ---- repairs panel (right): broken modules with their repair ETA (or why repair is stalled),
+            // so maintenance progress is visible instead of silent. Shown only while something is broken. ----
+            if (!v.Destroyed)
+            {
+                var broken = new List<ModuleInstance>();
+                foreach (var p in v.AllParts())
+                    foreach (var m in p.Modules)
+                        if (m.Broken) broken.Add(m);
+                if (broken.Count > 0)
+                {
+                    double rpow = v.CrewSkill(CrewRole.Engineer) + v.AutoRepairSkill(ctx.Clock.UT, ctx.Universe);
+                    bool hasPower = v.ElectricCharge > 0;
+                    double factor = hasPower ? 1 : Core.Balance.UnpoweredRepairFactor;
+                    var red = new Color(255, 100, 90); var amber = new Color(255, 190, 90);
+                    int hh = 26 + broken.Count * 18 + 6;
+                    var rp = new Rectangle(rColX, (int)rColY, rColW, hh);
+                    UiDraw.TexPanel(pb, ctx, "gameplay_modules_panel", rp);
+                    sb.DrawString(f, "REPAIRS", new Vector2(rp.X + 12, rp.Y + 6), amber);
+                    float yy = rp.Y + 26;
+                    foreach (var m in broken)
+                    {
+                        string status; Color col;
+                        if (rpow <= 1) { status = "no engineer"; col = red; }
+                        else
+                        {
+                            double eta = m.Wear / Math.Max(1e-9, Core.Balance.RepairPerSec * rpow * factor);
+                            status = "T-" + UiDraw.Time(eta) + (hasPower ? "" : " (slow)");
+                            col = hasPower ? new Color(255, 210, 140) : amber;
+                        }
+                        sb.DrawString(f, m.Def.Name, new Vector2(rp.X + 12, yy), UiDraw.TextDim);
+                        var ssz = f.MeasureString(status);
+                        sb.DrawString(f, status, new Vector2(rp.Right - ssz.X - 10, yy), col);
+                        yy += 18;
                     }
                     rColY = rp.Bottom + 8;
                 }

@@ -2662,7 +2662,8 @@ namespace Solar.Scenes
                 var f = Ctx.FontBig;
                 var sz = f.MeasureString(_toast);
                 float alpha = (float)Math.Clamp(_toastT, 0, 1);
-                var pos = new Vector2(Ctx.W / 2 - sz.X / 2, 70);
+                // below the top-center hazard readout so a storm warning and a toast don't overlap
+                var pos = new Vector2(Ctx.W / 2 - sz.X / 2, 170);
                 pb.FillRect((int)pos.X - 14, (int)pos.Y - 6, (int)sz.X + 28, (int)sz.Y + 12, new Color(20, 30, 22, (int)(200 * alpha)));
                 sb.DrawString(f, _toast, pos, new Color(150, 230, 150) * alpha);
             }
@@ -2977,6 +2978,9 @@ namespace Solar.Scenes
 
             Color partCol = (v != null && !v.LifeSupportOk) ? new Color(255, 100, 90) : Color.White;
             float rdd = (float)Solar.Vessels.Threats.RadDeathDose;
+            double radDeath = Solar.Vessels.Threats.RadDeathDose;
+            var nextLsVictim = (v != null && !v.LifeSupportOk) ? v.NextLifeSupportVictim() : null;
+            var dieCol = new Color(255, 100, 90);
             y = bodyTop - _crewScroll;
             for (int k = 0; k < seated.Count; k++)
             {
@@ -2998,7 +3002,16 @@ namespace Solar.Scenes
                         var iconR = new Rectangle(r.X + 12, (int)y + 3, 30, 30);
                         UiDraw.Icon(pb, Ctx.Textures.Player(c.Role.ToString().ToLowerInvariant()), iconR, CrewRoleColor(c.Role));
 
-                        int bx = iconR.Right + 8, bw = rightEdge - bx - 14;
+                        // is this crew member dying? soonest deterministic lethal ETA from radiation or life
+                        // support; terminal illness gets an "ILL" tag (its death is random, so no countdown).
+                        bool terminalIll = c.Illness >= 1;
+                        double radEta = c.RadDoseRate > 0 ? (radDeath - c.RadDose) / c.RadDoseRate : double.PositiveInfinity;
+                        double lsEta = c == nextLsVictim ? v.LifeSupportDeathEta : double.PositiveInfinity;
+                        double dieEta = Math.Min(radEta, lsEta);
+                        bool dying = !double.IsPositiveInfinity(dieEta);
+                        int tagW = (dying || terminalIll) ? 74 : 0;
+
+                        int bx = iconR.Right + 8, bw = rightEdge - bx - 14 - tagW;
                         sb.DrawString(f, $"{c.Name}  ({c.Role})", new Vector2(bx, y + 1), selected ? UiDraw.Accent : Color.White);
                         // radiation + illness bars (0..1, green->red)
                         float radF = rdd > 0 ? (float)(c.RadDose / rdd) : 0f;
@@ -3007,6 +3020,19 @@ namespace Solar.Scenes
                         UiDraw.Bar(pb, new Rectangle(bx + 12, (int)y + 20, Math.Max(8, bw), 6), radF, HazardColor(radF));
                         UiDraw.SmallText(sb, f, "I", new Vector2(bx, y + 28), UiDraw.TextDim);
                         UiDraw.Bar(pb, new Rectangle(bx + 12, (int)y + 29, Math.Max(8, bw), 6), illF, HazardColor(illF));
+
+                        // death countdown + illness tag, right-aligned in the reserved column
+                        if (dying)
+                        {
+                            string t = "T-" + UiDraw.Time(dieEta);
+                            float tw = f.MeasureString(t).X * 0.8f;
+                            UiDraw.SmallText(sb, f, t, new Vector2(rightEdge - tw, y + 18), dieCol);
+                        }
+                        if (terminalIll)
+                        {
+                            float iw = f.MeasureString("ILL").X * 0.8f;
+                            UiDraw.SmallText(sb, f, "ILL", new Vector2(rightEdge - iw, y + 28), dieCol);
+                        }
                     }
                     y += crewRowH;
                 }

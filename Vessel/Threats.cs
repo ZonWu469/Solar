@@ -46,14 +46,17 @@ namespace Solar.Vessels
             // crewless craft self-repair, just slower. Either can repair anywhere there's power (e.g. an orbital
             // station), not only when landed.
             double power = v.CrewSkill(CrewRole.Engineer) + v.AutoRepairSkill(ut, u);
-            bool canRepair = power > 1 && v.ElectricCharge > 0;
+            // an engineer/drone can repair even with no power, just slowly: this avoids a deadlock where a
+            // craft's only power source breaks and can never be fixed (you'd need power to repair it).
+            bool canRepair = power > 1;
+            bool hasPower = v.ElectricCharge > 0;
             foreach (var p in v.AllParts())
                 foreach (var m in p.Modules)
                 {
                     if (m.Broken)
                     {
                         if (!canRepair) continue;
-                        m.Wear -= RepairPerSec * power * dt;
+                        m.Wear -= RepairPerSec * power * (hasPower ? 1 : Core.Balance.UnpoweredRepairFactor) * dt;
                         if (m.Wear <= 0) { m.Wear = 0; m.Broken = false; v.RecentRepairs.Add(m.Def.Name); }
                         continue;
                     }
@@ -96,7 +99,7 @@ namespace Solar.Vessels
             if (shieldedBelt <= 0 && !stormActive)
             {
                 foreach (var c in v.AllCrew())
-                    c.RadDose = Math.Max(0, c.RadDose - RadDecayPerSec * dt);
+                { c.RadDoseRate = 0; c.RadDose = Math.Max(0, c.RadDose - RadDecayPerSec * dt); }
                 return;
             }
 
@@ -114,6 +117,7 @@ namespace Solar.Vessels
                     double eff = Math.Max(moduleShield, Math.Max(SolarShieldFor(v, part, sunDir), local));
                     rate += stormBase * (1 - eff);
                 }
+                c.RadDoseRate = Math.Max(0, rate);   // expose the live rate for the HUD death ETA
                 if (rate > 0)
                 {
                     c.RadDose += rate * dt;

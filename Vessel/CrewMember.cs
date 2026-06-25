@@ -17,6 +17,12 @@ namespace Solar.Vessels
         public double RadDose;   // accumulated radiation dose (0 = clean); decays when clear/shielded
         public double Illness;   // 0..1 sickness; lowers effective skill and can be fatal (0 = healthy)
 
+        /// <summary>Transient (never saved): the net radiation dose rate (units/s) this crew member is
+        /// taking right now, refreshed each <see cref="Threats.Tick"/>. Drives the HUD "time to death"
+        /// readout; 0 when fully shielded or recovering.</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public double RadDoseRate;
+
         public CrewMember() { }
         public CrewMember(string name, CrewRole role) { Name = name; Role = role; }
     }

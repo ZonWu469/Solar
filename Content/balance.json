@@ -1,4 +1,4 @@
-{
+﻿{
   "_comment": "Global survival-hazard and life-support tunables. Durations are in HOURS. Any field may be omitted; omitted fields use the in-code default in Core/Balance.cs. Deleting this file is safe (defaults stand).",
 
   "WearHours": 5840,
@@ -15,7 +15,7 @@
   "StormPeakDose": 0.08,
 
   "OxygenPerCrew": 0.5,
-  "WaterPerCrew": 0.2,
+  "WaterPerCrew": 0.15,
   "FoodPerCrew": 0.1,
   "LsDeathHours": 6,
   "NicheLifeSupportFactor": 0.5,

@@ -1764,6 +1764,27 @@ namespace Solar.Tests
                 Check("autonomous maintenance drone", droneRepairs && needsPower && crewlessStuck);
             }
 
+            // 36c. zero-power repair (deadlock fix): an engineer can hand-repair even with no electric charge
+            //      (just slower), so a craft whose only power source broke isn't stuck broken forever.
+            {
+                var rng = new Random(13);
+                var v = new Vessels.Vessel { ElectricCharge = 0 };
+                var pod = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
+                pod.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Reaction Wheel")) { Broken = true, Wear = 1 });
+                pod.Crew.Add(new Vessels.CrewMember("E", Vessels.CrewRole.Engineer));
+                v.Parts.Add(pod);
+                Vessels.Threats.Tick(v, 1e7, 0, null, rng);
+                Check("zero-power engineer repair", !v.Parts[0].Modules[0].Broken);
+            }
+
+            // 36d. a life-support recycler's StatLine advertises the crew it sustains, computed from its regen
+            //      vs the per-crew consumption tunables (so the editor tooltip tracks balance.json).
+            {
+                var co2 = Parts.ModuleCatalog.GetById("co2-scrubber");
+                string sl = co2.StatLine;
+                Check("LS module advertises crew support", sl.Contains("sustains") && sl.Contains("O2:") && sl.Contains("crew"));
+            }
+
             // 37. illness + persistence: a fully ill engineer contributes no skill bonus; RadiationAt reads
             //     the belt dose only inside its band; broken/wear state round-trips through the savegame.
             {

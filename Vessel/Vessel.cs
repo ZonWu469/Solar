@@ -1143,16 +1143,28 @@ namespace Solar.Vessels
         /// roster instance, and record the name for the scene to toast.</summary>
         private void KillOneCrew()
         {
+            var c = NextLifeSupportVictim();
+            if (c == null) return;
             foreach (var p in AllParts())
-            {
-                if (p.Crew.Count == 0) continue;
-                var c = p.Crew[p.Crew.Count - 1];
-                p.Crew.RemoveAt(p.Crew.Count - 1);
-                c.Status = CrewStatus.KIA;
-                RecentDeaths.Add(c.Name);
-                return;
-            }
+                if (p.Crew.Remove(c)) break;
+            c.Status = CrewStatus.KIA;
+            RecentDeaths.Add(c.Name);
         }
+
+        /// <summary>The crew member who will die next from life-support deprivation (last-boarded crew of
+        /// the first occupied part — the same pick <see cref="KillOneCrew"/> makes). Null if none aboard.
+        /// Lets the HUD put the "time to death" countdown on the right person.</summary>
+        public CrewMember NextLifeSupportVictim()
+        {
+            foreach (var p in AllParts())
+                if (p.Crew.Count > 0) return p.Crew[p.Crew.Count - 1];
+            return null;
+        }
+
+        /// <summary>Seconds until the next life-support death, or +inf while life support is OK. Each empty
+        /// resource kills one crew every <see cref="LsDeathTime"/>; this is the time left on that cadence.</summary>
+        public double LifeSupportDeathEta =>
+            LifeSupportOk ? double.PositiveInfinity : Math.Max(0, LsDeathTime - _lsDeprivedFor);
 
         /// <summary>Kill a specific crew member (e.g. from radiation or illness): remove them from
         /// whichever part holds them, mark them KIA on the shared roster instance, and record the name

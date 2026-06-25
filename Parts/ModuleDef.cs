@@ -52,13 +52,31 @@ namespace Solar.Parts
         private static string RangeFmt(double r) => r >= 1e9 ? $"{r / 1e9:0.#} Gm"
                                                   : r >= 1e6 ? $"{r / 1e6:0} Mm" : $"{r / 1e3:0} km";
 
+        /// <summary>Per-resource crew this recycler sustains, computed live from its regen rates vs the
+        /// per-crew consumption tunables (so it tracks balance.json), e.g. "O2: 2.4, Food: 6 crew".
+        /// Empty when the module regenerates nothing.</summary>
+        private string CrewSupportText
+        {
+            get
+            {
+                var parts = new System.Collections.Generic.List<string>();
+                if (OxygenRegen > 0 && Solar.Core.Balance.OxygenPerCrew > 0)
+                    parts.Add($"O2: {OxygenRegen / Solar.Core.Balance.OxygenPerCrew:0.#}");
+                if (WaterRegen > 0 && Solar.Core.Balance.WaterPerCrew > 0)
+                    parts.Add($"Water: {WaterRegen / Solar.Core.Balance.WaterPerCrew:0.#}");
+                if (FoodRegen > 0 && Solar.Core.Balance.FoodPerCrew > 0)
+                    parts.Add($"Food: {FoodRegen / Solar.Core.Balance.FoodPerCrew:0.#}");
+                return parts.Count > 0 ? string.Join(", ", parts) + " crew" : "";
+            }
+        }
+
         public string StatLine => Kind switch
         {
             ModuleKind.SolarPanel => $"+{EcProduce:0.#} EC/s — deployable solar panel, {DryMass:0} kg",
             ModuleKind.Rtg => $"+{EcProduce:0.#} EC/s — passive radioisotope generator, {DryMass:0} kg",
             ModuleKind.Battery => $"{EcCapacity:0} EC storage, {DryMass:0} kg",
             ModuleKind.LifeSupport => CrewCapacity > 0 ? $"life support  +{CrewCapacity} crew  {DryMass:0} kg"
-                                      : (OxygenRegen > 0 || FoodRegen > 0 || WaterRegen > 0) ? $"life-support recycler  {DryMass:0} kg"
+                                      : (OxygenRegen > 0 || FoodRegen > 0 || WaterRegen > 0) ? $"recycler - sustains {CrewSupportText}, {DryMass:0} kg"
                                       : $"life support  {DryMass:0} kg",
             ModuleKind.Harvester => $"+{OreProduce:0.#} ore/s — mining drill, {DryMass:0} kg",
             ModuleKind.IsruConverter => $"{OreDraw:0.#} ore/s -> {FuelProduce:0.#} fuel/s — ISRU converter, {DryMass:0} kg",
