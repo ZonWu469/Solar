@@ -12,6 +12,9 @@ namespace Solar.Vessels
         public double DeltaV;       // m/s
         public double Twr;          // at Earth surface gravity
         public double BurnTime;     // s at full throttle
+        public double Ve;           // effective exhaust velocity (m/s) = thrust/flow; for partial-burn timing
+        public double M0;           // stage start mass (kg); for partial-burn timing
+        public double Flow;         // propellant mass flow (kg/s) at full throttle; for partial-burn timing
         public double Fuel;         // kg burned by this stage
         public double FuelCap;      // kg capacity of that fuel (for the HUD fuel bar)
         public bool Decouples;      // this stage fires a decoupler / drops parts
@@ -268,7 +271,13 @@ namespace Solar.Vessels
                 if (remaining <= 0) break;
                 if (st.DeltaV <= 0 || st.BurnTime <= 0) continue;
                 double use = Math.Min(remaining, st.DeltaV);
-                t += st.BurnTime * (use / st.DeltaV);
+                // Time to gain `use` m/s within this stage follows Tsiolkovsky (mass drops as fuel burns),
+                // not a linear slice of the stage's full burn time -- a partial burn of a high-mass-ratio
+                // stage takes longer than (use/DeltaV) of it. Mirrors BurnProjector's dv->time mapping.
+                if (use >= st.DeltaV) t += st.BurnTime;                                   // whole stage (exact)
+                else if (st.Ve > 0 && st.Flow > 0)
+                    t += st.M0 * (1 - Math.Exp(-use / st.Ve)) / st.Flow;                  // partial stage
+                else t += st.BurnTime * (use / st.DeltaV);                                // degenerate fallback
                 remaining -= use;
             }
             return remaining > 1e-6 ? -1 : t;
@@ -470,6 +479,9 @@ namespace Solar.Vessels
                     st.DeltaV = isp * G0 * Math.Log(m0 / (m0 - fuel));
                     st.Twr = agg.Thrust / (m0 * surfaceG);
                     st.BurnTime = fuel / agg.Flow;
+                    st.Ve = agg.Thrust / agg.Flow;   // effective exhaust velocity, for partial-burn timing
+                    st.M0 = m0;
+                    st.Flow = agg.Flow;
                 }
                 stats.Add(st);
                 if (finalHere) remainderDone = true;

@@ -191,6 +191,26 @@ namespace Solar.Tests
                 Check("warp stops before node", bt > 0 && stop <= nodeUT && stop > nodeUT - bt - 1e-9);
             }
 
+            // 7b. partial-stage burn time follows Tsiolkovsky, not a linear slice: half a stage's delta-v
+            //     takes MORE than half its full burn time (mass drops as it burns). Guards the BurnTime fix.
+            {
+                var v = new Vessels.Vessel();
+                foreach (var d in Parts.PartCatalog.DefaultDesign()) v.Parts.Add(new Parts.Part(d));
+                Vessels.StageStat s0 = null;
+                foreach (var st in Vessels.Staging.ComputeStages(v.Parts))
+                    if (st.BurnTime > 0 && st.DeltaV > 0) { s0 = st; break; }
+                bool ok = false;
+                if (s0 != null)
+                {
+                    double half = s0.DeltaV * 0.5;
+                    double bt = Vessels.Staging.BurnTime(v, half);
+                    double closed = s0.M0 * (1 - Math.Exp(-half / s0.Ve)) / s0.Flow;
+                    ok = bt > s0.BurnTime * 0.5 + 1e-6            // strictly more than the old linear estimate
+                         && Math.Abs(bt - closed) < 1e-6;        // matches the closed-form Tsiolkovsky time
+                }
+                Check("partial-stage burn time (Tsiolkovsky)", ok);
+            }
+
             // 8. rendezvous closest approach between two coplanar circular orbits: minimum
             //    separation must be the radius difference (they line up once per synodic period).
             {

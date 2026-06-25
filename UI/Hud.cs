@@ -499,8 +499,11 @@ namespace Solar.UI
                 double avail = totalDV;
                 bool done = node.Reached;   // burn time has passed: show the executed plan, no live cues
                 bool enough = node.DeltaV <= avail + 1e-6;
-                double bt = Staging.BurnTime(v, node.DeltaV);
                 bool burning = burnSpent > 0;
+                // estimate against the dV still to burn, so the readout counts down with the burn instead
+                // of staying on the full-node figure (or flipping to "-" once spent fuel drops capacity).
+                double dvLeft = burning ? Math.Max(0, node.DeltaV - burnSpent) : node.DeltaV;
+                double bt = Staging.BurnTime(v, dvLeft);
                 var mp = new Rectangle(rColX, (int)rColY, rColW, 248);
                 UiDraw.TexPanel(pb, ctx, "gameplay_modules_panel", mp);
                 float my = mp.Y + 8;
