@@ -24,11 +24,11 @@ namespace Solar.Core
         public static double StormIntervalS    = 150 * 24 * 3600;       // mean time between storms (~15 days)
         public static double StormDurationS    = 2 * 3600;             // nominal storm length at the vessel (~2 h)
         public static double StormFrontSpeed   = 1.0e7;                // particle-front speed (m/s); sets the distance-scaled warning window
-        public static double StormPeakDose     = 0.2;                  // peak dose rate (units/s) at Earth distance, full exposure
+        public static double StormPeakDose     = 0.08;                 // peak dose rate (units/s) at Earth distance, full exposure: tuned so the strongest storm (1.8x peak, 1.5x duration) delivers ~100% of RadDeathDose at 1 AU
         public static double StormFryPerSec    = 1.0 / (1800);         // exposed powered module fry chance/s at full storm (~30 min mean)
 
         // ----- biological contagion -----
-        public static double InfectBaseRate    = 1.0 / (8760 * 3600);  // base infection chance/s per healthy crew (~yearly)
+        public static double InfectBaseRate    = 1.0 / (17200 * 3600); // base infection chance/s per healthy crew (~20% over a 160-day mission)
         public static double IllnessGrowPerSec = 1.0 / (72 * 3600);    // untreated sickness worsens over ~72 h
         public static double IllnessDeathRate  = 1.0 / (24 * 3600);    // death chance/s once illness is terminal
 

@@ -1790,6 +1790,11 @@ namespace Solar.Tests
                 bool persisted = m2.Broken && Math.Abs(m2.Wear - 0.42) < 1e-9;
 
                 Check("illness + threat persistence", illnessDrags && band && persisted);
+
+                // balance guard: a single crew member's infection chance over a 160-day mission should be ~20%
+                // at the base contagion rate (the exponential survival law makes warp chunking irrelevant).
+                double infect160d = 1.0 - Math.Exp(-(160.0 * 86400.0) * Core.Balance.InfectBaseRate);
+                Check("infection ~20% over 160 days", Math.Abs(infect160d - 0.20) < 0.01);
             }
 
             // 30. encounter band-rejection: a vessel orbit whose radius band overlaps a child's (with SOI
@@ -2261,6 +2266,12 @@ namespace Solar.Tests
                 // SunDir points from the vessel toward the Sun
                 var sd = SpaceWeather.ForVessel(seed, 0, atEarth, sun, earthDist, frontSpeed, interval, duration, peak).SunDir;
                 Check("storm sun direction", sd.X < -0.99 && Math.Abs(sd.Y) < 1e-6);
+
+                // balance guard: the strongest possible storm at Earth distance, full exposure, unshielded
+                // (1.8x peak draw, 1.5x duration, sin-envelope average 2/pi) must not exceed the death dose --
+                // a strong storm should be at most exactly lethal, never multiples of it.
+                double worstStormDose = Core.Balance.StormPeakDose * 1.8 * (2.0 / Math.PI) * Core.Balance.StormDurationS * 1.5;
+                Check("strong storm <= death dose at Earth", worstStormDose <= Vessels.Threats.RadDeathDose);
             }
 
             // ----- directional storm shielding & atmospheric shelter -----

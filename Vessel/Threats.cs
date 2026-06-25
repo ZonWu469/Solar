@@ -287,8 +287,8 @@ namespace Solar.Vessels
             {
                 if (c.Illness <= 0)
                 {
-                    // healthy crew can catch an illness; spread accelerates with how many are already sick
-                    double rate = InfectBaseRate * (1 + 4 * sickFrac);
+                    // healthy crew can catch an illness; spread accelerates with how many are already sick (up to 3x)
+                    double rate = InfectBaseRate * (1 + 2 * sickFrac);
                     if (Fires(rng, rate, dt)) c.Illness = 0.1;
                     continue;
                 }

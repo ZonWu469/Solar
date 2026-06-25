@@ -710,6 +710,9 @@ namespace Solar.Scenes
                 if (AnyOtherNear()) clock.MaxWarpIndex = Math.Min(clock.MaxWarpIndex, SimClock.PhysicsMaxIndex);
                 // during an active storm, hold warp down so the player can orient the shield and power systems off
                 if (_storm.IsActive) clock.MaxWarpIndex = Math.Min(clock.MaxWarpIndex, SimClock.PhysicsMaxIndex);
+                // once life support is empty, hold warp down so the crew die off gradually (and visibly) rather
+                // than a single huge step emptying the whole roster at once.
+                if (!_vessel.LifeSupportOk) clock.MaxWarpIndex = Math.Min(clock.MaxWarpIndex, SimClock.PhysicsMaxIndex);
 
                 // "warp to maneuver": force max warp while coasting toward the target, else cancel
                 if (_warpTo.HasValue)
@@ -723,6 +726,18 @@ namespace Solar.Scenes
                 // never let a single warp step jump over the onset of a solar storm (KSP-style "warp stops here")
                 double nextStorm = Solar.Physics.SpaceWeather.NextArrivalUt(Ctx.State.WeatherSeed, clock.UT, _vessel.AbsolutePosition(clock.UT), Ctx.Universe);
                 if (nextStorm > clock.UT && nextStorm - clock.UT < sdt) sdt = nextStorm - clock.UT;
+
+                // likewise, don't let a warp step sail past the moment life support runs out: advance exactly to
+                // depletion, then stop and warn so the crew aren't silently wiped mid-warp. LifeSupportEndurance
+                // is +inf when uncrewed or self-sustaining (clamp inert); 0 once already empty (warp cap above).
+                double lsEndurance = _vessel.LifeSupportEndurance();
+                if (lsEndurance > 0 && lsEndurance < sdt)
+                {
+                    sdt = lsEndurance;
+                    _warpTo = null;
+                    clock.DropToRealtime();
+                    _toast = "Life support depleted - warp stopped"; _toastT = 5;   // ASCII-only (font is 32-126)
+                }
 
                 if (_vessel.Landed)
                 {
@@ -2274,13 +2289,41 @@ namespace Solar.Scenes
             return true;
         }
 
-        /// <summary>Screen position of a node and the (unit) screen-space prograde/radial-out axes.</summary>
-        private bool ManeuverGeometry(Maneuver node, double ut, out Vector2 nodeScreen, out Vector2 proDir, out Vector2 radDir)
+        // Inset from the screen edge at which an off-screen node's proxy gizmo is pinned. Kept >=
+        // HandleDist+HandleHit so all four (52px-out) handles stay grabbable on-screen.
+        private const float ManeuverEdge = HandleDist + HandleHit;
+
+        /// <summary>Point on the screen-edge margin box (a rect inset by <paramref name="margin"/>)
+        /// in the direction of <paramref name="target"/> from screen centre, plus that unit direction.</summary>
+        private Vector2 ClampToScreenEdge(Vector2 target, float margin, out Vector2 dir)
         {
-            nodeScreen = default; proDir = default; radDir = default;
+            var center = new Vector2(Ctx.W / 2f, Ctx.H / 2f);
+            dir = target - center;
+            if (dir.LengthSquared() < 1e-3f) dir = new Vector2(0, -1);
+            dir.Normalize();
+            float halfW = Ctx.W / 2f - margin, halfH = Ctx.H / 2f - margin;
+            float scale = Math.Min(halfW / Math.Max(1e-3f, Math.Abs(dir.X)), halfH / Math.Max(1e-3f, Math.Abs(dir.Y)));
+            return center + dir * scale;
+        }
+
+        /// <summary>Screen position of a node and the (unit) screen-space prograde/radial-out axes.
+        /// When the node falls outside the viewport the returned <paramref name="nodeScreen"/> is
+        /// pinned to the screen edge (a draggable proxy); <paramref name="clamped"/> says so and
+        /// <paramref name="trueScreen"/> is the real off-screen position the proxy points toward.</summary>
+        private bool ManeuverGeometry(Maneuver node, double ut, out Vector2 nodeScreen, out Vector2 proDir, out Vector2 radDir,
+                                      out bool clamped, out Vector2 trueScreen)
+        {
+            nodeScreen = default; proDir = default; radDir = default; clamped = false; trueScreen = default;
             if (node == null || !ManeuverContext(node, ut, out var orbit, out _, out var primaryAbs)) return false;
             var (rN, vN) = Kepler.StateAtTime(orbit, node.UT);
-            nodeScreen = _cam.WorldToScreen(primaryAbs + rN);
+            trueScreen = _cam.WorldToScreen(primaryAbs + rN);
+            nodeScreen = trueScreen;
+            if (trueScreen.X < ManeuverEdge || trueScreen.X > Ctx.W - ManeuverEdge ||
+                trueScreen.Y < ManeuverEdge || trueScreen.Y > Ctx.H - ManeuverEdge)
+            {
+                nodeScreen = ClampToScreenEdge(trueScreen, ManeuverEdge, out _);
+                clamped = true;
+            }
             Vec2d pro = vN.Normalized();
             Vec2d radOut = pro.Perp();
             if (radOut.Dot(rN) < 0) radOut = -radOut;
@@ -2384,7 +2427,7 @@ namespace Solar.Scenes
                     if (Vector2.Distance(mouse, XButtonPos(ReachedNodeScreen(_nodes[n]))) <= XHit) { _hoverX = n; break; }
                     continue;
                 }
-                if (!ManeuverGeometry(_nodes[n], ut, out var ns, out var pd, out var rd)) continue;
+                if (!ManeuverGeometry(_nodes[n], ut, out var ns, out var pd, out var rd, out _, out _)) continue;
                 if (Vector2.Distance(mouse, XButtonPos(ns)) <= XHit) { _hoverX = n; break; }
                 var h = new[] { ns + pd * HandleDist, ns - pd * HandleDist, ns + rd * HandleDist, ns - rd * HandleDist };
                 for (int k = 0; k < 4; k++)
@@ -2422,14 +2465,15 @@ namespace Solar.Scenes
                 else if (_hoverHandle >= 0 && _hoverNode >= 0)
                 {
                     _dragHandle = _hoverHandle; _dragNode = _hoverNode; _dragFineMult = 1.0;
-                    ManeuverGeometry(_nodes[_dragNode], ut, out var ns, out var pd, out var rd);
+                    ManeuverGeometry(_nodes[_dragNode], ut, out var ns, out var pd, out var rd, out _, out _);
                     Vector2 axis = _dragHandle < 2 ? pd : rd;
                     _dragStartProj = Vector2.Dot(mouse - ns, axis);
                     _dragStartValue = _dragHandle < 2 ? _nodes[_dragNode].Prograde : _nodes[_dragNode].Radial;
                 }
-                else if (_hoverNode >= 0)
+                else if (_hoverNode >= 0 &&
+                         ManeuverGeometry(_nodes[_hoverNode], ut, out _, out _, out _, out bool nodeClamped, out _) && !nodeClamped)
                 {
-                    _dragHandle = 4; _dragNode = _hoverNode; // move node along its orbit
+                    _dragHandle = 4; _dragNode = _hoverNode; // move node along its orbit (only when on-screen)
                 }
                 else if (ClickedEncounterMarker(ut, mouse, out var encBody, out var encUT))
                 {
@@ -2474,7 +2518,7 @@ namespace Solar.Scenes
                     if (PickOrbitNu(src, nodeAbs, mouse, nodeBody.SoiRadius, out double nu))
                         node.UT = Kepler.TimeAtTrueAnomaly(src, nu, ut);
                 }
-                else if (ManeuverGeometry(node, ut, out var ns, out var pd, out var rd))
+                else if (ManeuverGeometry(node, ut, out var ns, out var pd, out var rd, out _, out _))
                 {
                     Vector2 axis = _dragHandle < 2 ? pd : rd;
                     double proj = Vector2.Dot(mouse - ns, axis);
@@ -3419,13 +3463,7 @@ namespace Solar.Scenes
             else
             {
                 // clamp the direction to the screen-edge margin box and draw an arrow toward it
-                var center = new Vector2(Ctx.W / 2f, Ctx.H / 2f);
-                var dir = new Vector2((float)tScreen.X - center.X, (float)tScreen.Y - center.Y);
-                if (dir.LengthSquared() < 1e-3f) dir = new Vector2(0, -1);
-                dir.Normalize();
-                float halfW = Ctx.W / 2f - margin, halfH = Ctx.H / 2f - margin;
-                float scale = Math.Min(halfW / Math.Max(1e-3f, Math.Abs(dir.X)), halfH / Math.Max(1e-3f, Math.Abs(dir.Y)));
-                var edge = center + dir * scale;
+                var edge = ClampToScreenEdge(new Vector2((float)tScreen.X, (float)tScreen.Y), margin, out var dir);
                 var perp = new Vector2(-dir.Y, dir.X);
                 pb.Line(edge - dir * 10 + perp * 7, edge, 2f, TargetColor);
                 pb.Line(edge - dir * 10 - perp * 7, edge, 2f, TargetColor);
@@ -3926,27 +3964,51 @@ namespace Solar.Scenes
             foreach (var node in Sorted(ut))
             {
                 if (!node.HasSource || node.UT < ut) continue;
-                if (!ManeuverGeometry(node, ut, out var nodeScreen, out var proDir, out var radDir)) continue;
+                if (!ManeuverGeometry(node, ut, out var nodeScreen, out var proDir, out var radDir,
+                                      out bool clamped, out var trueScreen)) continue;
 
-                // burn-direction arrow + delta-v handles
-                var (rN, vN) = Kepler.StateAtTime(node.Source, node.UT);
-                Vec2d bd = node.BurnDelta(rN, vN);
-                if (bd.Length > 1e-6)
+                if (clamped)
                 {
-                    Vec2d u = bd.Normalized();
-                    var dir = new Vector2((float)u.X, -(float)u.Y);
-                    float len = (float)Math.Min(64, 18 + node.DeltaV * 0.05);
-                    pb.Line(nodeScreen, nodeScreen + dir * len, 2f, PeColor);
+                    // off-screen node: the gizmo is a proxy pinned to the screen edge. Frame it with a
+                    // blue square so an off-screen node is unmistakable, point an outward chevron toward
+                    // the real node so its direction reads, and skip the burn arrow.
+                    const float box = 22f;
+                    pb.RectOutline(new Rectangle((int)(nodeScreen.X - box / 2), (int)(nodeScreen.Y - box / 2),
+                                                 (int)box, (int)box), 2f, new Color(90, 160, 255));
+                    var outDir = trueScreen - nodeScreen;
+                    if (outDir.LengthSquared() > 1e-3f)
+                    {
+                        outDir.Normalize();
+                        var perp = new Vector2(-outDir.Y, outDir.X);
+                        var tip = nodeScreen + outDir * 13f;
+                        pb.Line(tip, nodeScreen + perp * 7f, 2f, PeColor);
+                        pb.Line(tip, nodeScreen - perp * 7f, 2f, PeColor);
+                    }
+                }
+                else
+                {
+                    // burn-direction arrow
+                    var (rN, vN) = Kepler.StateAtTime(node.Source, node.UT);
+                    Vec2d bd = node.BurnDelta(rN, vN);
+                    if (bd.Length > 1e-6)
+                    {
+                        Vec2d u = bd.Normalized();
+                        var dir = new Vector2((float)u.X, -(float)u.Y);
+                        float len = (float)Math.Min(64, 18 + node.DeltaV * 0.05);
+                        pb.Line(nodeScreen, nodeScreen + dir * len, 2f, PeColor);
+                    }
                 }
 
+                // delta-v handles
                 Vector2[] hp = { nodeScreen + proDir * HandleDist, nodeScreen - proDir * HandleDist,
                                  nodeScreen + radDir * HandleDist, nodeScreen - radDir * HandleDist };
                 Color[] hc = { new Color(120, 255, 140), new Color(255, 120, 110),
                                new Color(120, 210, 255), new Color(255, 200, 120) };
+                float connA = clamped ? 0.3f : 0.5f;   // dim the proxy's connectors to read as off-screen
                 int ni = _nodes.IndexOf(node);
                 for (int k = 0; k < 4; k++)
                 {
-                    pb.Line(nodeScreen, hp[k], 1f, hc[k] * 0.5f);
+                    pb.Line(nodeScreen, hp[k], 1f, hc[k] * connA);
                     bool active = (_dragNode == ni && _dragHandle == k) || (_hoverNode == ni && _hoverHandle == k);
                     pb.FillCircle(hp[k], active ? 7f : 5f, hc[k]);
                     // D4: dV tooltip on the hovered/dragged handle (k: 0/1 = prograde +/-, 2/3 = radial out/in).
@@ -3958,8 +4020,8 @@ namespace Solar.Scenes
                     }
                 }
 
-                // node marker
-                pb.CircleOutline(nodeScreen, 8, 2f, Color.White);
+                // node marker (dashed-looking dimmer ring when it's an off-screen proxy)
+                pb.CircleOutline(nodeScreen, 8, 2f, clamped ? new Color(255, 170, 90) : Color.White);
                 pb.FillCircle(nodeScreen, 3, PeColor);
 
                 // X delete button

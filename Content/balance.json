@@ -8,9 +8,11 @@
   "RadDeathDose": 1000,
   "RadDecayHours": 18,
 
-  "InfectHours": 8760,
+  "InfectHours": 17200,
   "IllnessGrowHours": 72,
   "IllnessDeathHours": 24,
+
+  "StormPeakDose": 0.08,
 
   "OxygenPerCrew": 0.5,
   "WaterPerCrew": 0.2,
