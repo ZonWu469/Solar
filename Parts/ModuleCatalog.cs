@@ -85,6 +85,8 @@ namespace Solar.Parts
         public double CureRate { get; set; }
         public double StormHardening { get; set; }
         public double RepairSkill { get; set; }
+        public double ScanRange { get; set; }
+        public double ScanRate { get; set; }
         public double FuelProduce { get; set; }
         public double FuelDraw { get; set; }
         public double FuelCapacity { get; set; }
@@ -106,6 +108,7 @@ namespace Solar.Parts
             ScienceValue = m.ScienceValue, Torque = m.Torque, RcsThrust = m.RcsThrust, RcsIsp = m.RcsIsp,
             Reliability = m.Reliability, ShieldFactor = m.ShieldFactor, LocalShield = m.LocalShield,
             CureRate = m.CureRate, StormHardening = m.StormHardening, RepairSkill = m.RepairSkill,
+            ScanRange = m.ScanRange, ScanRate = m.ScanRate,
             FuelProduce = m.FuelProduce, FuelDraw = m.FuelDraw,
             FuelCapacity = m.FuelCapacity,
             OreProduce = m.OreProduce, OreDraw = m.OreDraw, OreCapacity = m.OreCapacity,
@@ -132,6 +135,9 @@ namespace Solar.Parts
             CureRate = CureRate > 0 ? CureRate : (Kind == ModuleKind.Medbay ? 0.02 : 0),
             StormHardening = StormHardening > 0 ? StormHardening : (Kind == ModuleKind.Radiator ? 0.6 : 0),
             RepairSkill = RepairSkill > 0 ? RepairSkill : (Kind == ModuleKind.MaintenanceDrone ? 0.4 : 0),
+            // migration-safe fallbacks so a telescope entry that omits these still works:
+            ScanRange = ScanRange > 0 ? ScanRange : (Kind == ModuleKind.Telescope ? 5e10 : 0),
+            ScanRate = ScanRate > 0 ? ScanRate : (Kind == ModuleKind.Telescope ? 0.0008 : 0),
             FuelProduce = FuelProduce, FuelDraw = FuelDraw,
             FuelCapacity = FuelCapacity,
             // migration-safe fallback: a drill authored before ore existed inherits its old FuelProduce

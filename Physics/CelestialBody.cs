@@ -22,10 +22,26 @@ namespace Solar.Physics
         public Color AtmoColor;
         public double RadBeltInner, RadBeltOuter;  // radiation belt altitude band above the surface (m); 0..0 = none
         public double RadBeltDose;                  // dose rate (units/s) crew accumulate inside the belt
+        public bool IsAsteroid;                     // a discoverable minor body (see AsteroidField); carries an authored SoiRadius
         public readonly List<CelestialBody> Children = new();
+        public readonly List<LivableNiche> Niches = new();  // natural sheltered spots that halve life-support draw
 
         /// <summary>Surface radius (m) at a body-local angle, including terrain relief.</summary>
         public double SurfaceRadiusAt(double angle) => Terrain == null ? Radius : Radius + Terrain.HeightAt(angle);
+
+        /// <summary>The livable niche whose footprint covers the given body-local angle, or null if none.
+        /// Bodies don't rotate, so a landed vessel's <c>Position.Angle()</c> is a fixed longitude.</summary>
+        public LivableNiche NicheAt(double angle)
+        {
+            foreach (var n in Niches)
+            {
+                double d = (angle - n.CenterAngle) % (Math.PI * 2);
+                if (d > Math.PI) d -= Math.PI * 2;
+                else if (d < -Math.PI) d += Math.PI * 2;
+                if (Math.Abs(d) <= n.HalfWidth) return n;
+            }
+            return null;
+        }
 
         /// <summary>Radiation dose rate (units/s) at the given altitude above this body's surface: the belt
         /// dose inside its altitude band, zero outside it (and zero for bodies with no belt).</summary>

@@ -2475,6 +2475,96 @@ namespace Solar.Tests
                 Check("solar shield needs deploy", stowed < 1e-9);
             }
 
+            // livable niche: a landed crewed vessel inside a niche consumes exactly half the life support.
+            {
+                Vessels.Vessel MakeCrewed()
+                {
+                    var v = new Vessels.Vessel();
+                    var pod = new Parts.Part(Parts.PartCatalog.Get("Pod Mk1"));
+                    pod.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("Life Support")));
+                    pod.Modules.Add(new Parts.ModuleInstance(Parts.ModuleCatalog.Get("RTG")));   // power
+                    pod.Crew.Add(new Vessels.CrewMember("T", Vessels.CrewRole.Pilot));
+                    v.Parts.Add(pod);
+                    v.Oxygen = v.OxygenCapacity; v.Water = v.WaterCapacity; v.Food = v.FoodCapacity;
+                    return v;
+                }
+                var body = new CelestialBody { Name = "Rock", Radius = 1000, Mu = 1e6 };
+                body.Niches.Add(new LivableNiche(0, 0.1, "n"));
+                var inside = MakeCrewed(); inside.Landed = true; inside.Body = body;
+                inside.Position = new Vec2d(2000, 0);                   // angle 0 -> inside the niche
+                var outside = MakeCrewed(); outside.Landed = true; outside.Body = body;
+                outside.Position = Vec2d.FromAngle(Math.PI) * 2000;     // angle pi -> outside any niche
+
+                double oIn0 = inside.Oxygen, oOut0 = outside.Oxygen;
+                inside.UpdateResources(100, 0, null);
+                outside.UpdateResources(100, 0, null);
+                double usedIn = oIn0 - inside.Oxygen, usedOut = oOut0 - outside.Oxygen;
+                bool half = usedOut > 0 && Math.Abs(usedIn - usedOut * Balance.NicheLifeSupportFactor) < 1e-6;
+                Check("livable niche", inside.InNiche && !outside.InNiche && half);
+            }
+
+            // niches are deterministic (regenerated identically) and sit on landable flat plains.
+            {
+                var u1 = SolarSystemData.Create();
+                var u2 = SolarSystemData.Create();
+                bool same = true, anyNiche = false, onPlain = true;
+                foreach (var b in u1.Bodies)
+                {
+                    var b2 = u2[b.Name];
+                    if (b2 == null || b.Niches.Count != b2.Niches.Count) { same = false; break; }
+                    for (int i = 0; i < b.Niches.Count; i++)
+                    {
+                        anyNiche = true;
+                        if (Math.Abs(b.Niches[i].CenterAngle - b2.Niches[i].CenterAngle) > 1e-9) same = false;
+                        bool isPlain = false;
+                        foreach (var pc in b.Terrain.PlainCenters)
+                            if (Math.Abs(pc - b.Niches[i].CenterAngle) < 1e-9) isPlain = true;
+                        if (!isPlain) onPlain = false;
+                    }
+                }
+                Check("niches deterministic + landable", same && anyNiche && onPlain);
+            }
+
+            // asteroid field: deterministic generation, authored SOI survives ComputeSoiRadii, discovery
+            // promotes a hidden rock into the live hierarchy (and is idempotent).
+            {
+                var u = SolarSystemData.Create();
+                var gs = GameState.NewGame("Internal_ast");
+                gs.AsteroidSeed = 12345;
+                AsteroidField.Sync(u, gs);
+                var gen2 = AsteroidField.Generate(SolarSystemData.Create().Root, 12345);
+                bool deterministic = u.AsteroidCatalog.Count > 0 && u.AsteroidCatalog.Count == gen2.Count;
+                for (int i = 0; deterministic && i < gen2.Count; i++)
+                    deterministic = u.AsteroidCatalog[i].Name == gen2[i].Name
+                                 && Math.Abs(u.AsteroidCatalog[i].Orbit.A - gen2[i].Orbit.A) < 1e-6
+                                 && Math.Abs(u.AsteroidCatalog[i].SoiRadius - gen2[i].SoiRadius) < 1e-6;
+
+                var a = u.AsteroidCatalog[0];
+                double soiBefore = a.SoiRadius;
+                bool hidden = !u.Bodies.Contains(a);          // undiscovered: outside the live hierarchy
+                u.ComputeSoiRadii();                          // must not overwrite an asteroid's authored SOI
+                bool soiKept = a.IsAsteroid && Math.Abs(a.SoiRadius - soiBefore) < 1e-6;
+
+                bool discovered = AsteroidField.Discover(u, gs, a)
+                               && u.Bodies.Contains(a) && u.Root.Children.Contains(a)
+                               && gs.DiscoveredAsteroids.Contains(a.Name);
+                bool idempotent = !AsteroidField.Discover(u, gs, a);
+                Check("asteroid field", deterministic && hidden && soiKept && discovered && idempotent);
+            }
+
+            // asteroid discovery survives a reload: re-syncing the universe re-promotes the same named rock.
+            {
+                var u = SolarSystemData.Create();
+                var gs = GameState.NewGame("Internal_ast2");
+                AsteroidField.Sync(u, gs);
+                var first = u.AsteroidCatalog[0];
+                string name = first.Name;
+                AsteroidField.Discover(u, gs, first);
+                AsteroidField.Sync(u, gs);                    // simulate reload: clear + regenerate + re-promote
+                var again = u[name];
+                Check("asteroid persist", again != null && again.IsAsteroid && again.Name == name);
+            }
+
             string res = $"Physics self-test: {pass}/{total} PASS";
             if (fails.Count > 0) res += "  FAILED: " + string.Join(", ", fails);
             return res;

@@ -23,6 +23,10 @@ namespace Solar.Core
         public List<string> ScienceCollected = new();     // experiment-situation keys already transmitted
         public List<string> SurveyedBodies = new();        // bodies an ore scanner has surveyed (richness revealed)
 
+        // ----- asteroids -----
+        public long AsteroidSeed;                          // seeds the deterministic asteroid catalog (AsteroidField)
+        public List<string> DiscoveredAsteroids = new();   // names of asteroids found (promoted into the live universe)
+
         // ----- crew -----
         public List<CrewMember> Roster = new();           // all crew (Active + KIA), shared by reference
 
@@ -50,6 +54,7 @@ namespace Solar.Core
                 Science = sandbox ? 1_000_000 : 0,
                 Roster = CrewRoster.NewPool(),
                 WeatherSeed = NewSeed(),
+                AsteroidSeed = NewSeed(),
             };
         }
 

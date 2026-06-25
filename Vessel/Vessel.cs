@@ -692,6 +692,48 @@ namespace Solar.Vessels
             }
         }
 
+        /// <summary>True when a powered, active survey telescope is aboard, so the vessel can discover asteroids.</summary>
+        public bool TelescopeOperational
+        {
+            get
+            {
+                if (ElectricCharge <= 0) return false;
+                foreach (var p in AllParts())
+                    foreach (var m in p.Modules)
+                        if (m.Def.Kind == ModuleKind.Telescope && m.Active) return true;
+                return false;
+            }
+        }
+
+        /// <summary>Best detection reach (m) among active telescopes aboard; 0 if none.</summary>
+        public double TelescopeRange
+        {
+            get
+            {
+                double r = 0;
+                foreach (var p in AllParts())
+                    foreach (var m in p.Modules)
+                        if (m.Def.Kind == ModuleKind.Telescope && m.Active && m.Def.ScanRange > r) r = m.Def.ScanRange;
+                return r;
+            }
+        }
+
+        /// <summary>Combined detection progress per second from active telescopes aboard.</summary>
+        public double TelescopeRate
+        {
+            get
+            {
+                double rate = 0;
+                foreach (var p in AllParts())
+                    foreach (var m in p.Modules)
+                        if (m.Def.Kind == ModuleKind.Telescope && m.Active) rate += m.Def.ScanRate;
+                return rate;
+            }
+        }
+
+        /// <summary>True when landed inside a body's natural livable niche, where life support is halved.</summary>
+        public bool InNiche => Landed && Body != null && Body.NicheAt(Position.Angle()) != null;
+
         public double WaterCapacity
         {
             get { double c = 0; foreach (var p in AllParts()) foreach (var m in p.Modules) c += m.Def.WaterCapacity; return c; }
@@ -878,6 +920,7 @@ namespace Solar.Vessels
                 case ModuleKind.Harvester: return m.Active && Landed && ec && (Body?.OreRichness ?? 0) > 0;
                 case ModuleKind.IsruConverter: return m.Active && ec && Ore > 0;
                 case ModuleKind.OreScanner: return m.Active && ec;
+                case ModuleKind.Telescope: return m.Active && ec;
                 case ModuleKind.ReactionWheel: return ec;
                 case ModuleKind.Science: return m.Active && ec;
                 case ModuleKind.Antenna: return m.Active && ec;
@@ -912,12 +955,14 @@ namespace Solar.Vessels
             ElectricCharge = Math.Clamp(ElectricCharge + (prod - draw) * dt, 0, Math.Max(ecCap, 0));
             bool ecOk = ElectricCharge > 0 || prod >= draw;
 
-            // life support: each crew member consumes water/oxygen/food; recyclers regen (when powered)
+            // life support: each crew member consumes water/oxygen/food; recyclers regen (when powered).
+            // A vessel landed inside a body's natural niche shelters its crew, halving consumption.
             int crew = CrewCount;
             double regenGate = ecOk ? 1 : 0;   // recyclers stop without power; stored resources still drain
-            Oxygen = Math.Clamp(Oxygen + (oxygenRegen * regenGate - crew * OxygenPerCrew) * dt, 0, OxygenCapacity);
-            Water = Math.Clamp(Water + (waterRegen * regenGate - crew * WaterPerCrew) * dt, 0, WaterCapacity);
-            Food = Math.Clamp(Food + (foodRegen * regenGate - crew * FoodPerCrew) * dt, 0, FoodCapacity);
+            double lsFactor = InNiche ? Core.Balance.NicheLifeSupportFactor : 1.0;
+            Oxygen = Math.Clamp(Oxygen + (oxygenRegen * regenGate - crew * OxygenPerCrew * lsFactor) * dt, 0, OxygenCapacity);
+            Water = Math.Clamp(Water + (waterRegen * regenGate - crew * WaterPerCrew * lsFactor) * dt, 0, WaterCapacity);
+            Food = Math.Clamp(Food + (foodRegen * regenGate - crew * FoodPerCrew * lsFactor) * dt, 0, FoodCapacity);
 
             bool depleted = crew > 0 && (Oxygen <= 0 || Water <= 0 || Food <= 0);
             LifeSupportOk = crew == 0 || !depleted;

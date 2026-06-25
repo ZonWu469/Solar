@@ -1,5 +1,20 @@
 [
   {
+    "Name": "Survey Telescope",
+    "Id": "survey-telescope",
+    "Description": "Deep-space telescope. While active and powered, surveys nearby space and discovers asteroids.",
+    "Kind": "Telescope",
+    "DryMass": 180,
+    "SlotCost": 2,
+    "Activatable": true,
+    "EcDraw": 1.2,
+    "ScanRange": 50000000000,
+    "ScanRate": 0.0008,
+    "TintR": 180,
+    "TintG": 200,
+    "TintB": 230
+  },
+  {
     "Name": "Solar Panel",
     "Id": "solar-panel",
     "Description": "Converts sunlight into electric charge. Must be deployed. Efficiency decreases with distance from the Sun.",

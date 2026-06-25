@@ -17,6 +17,7 @@ namespace Solar.UI
         public int? RequestedSas;  // set to a SasMode index when an SAS icon was clicked
         public int RightColumnBottom; // screen-Y below the last right-column panel (for overlay panels)
         public bool ToggleHelp;    // set when the "H" help button (left of the time panel) was clicked
+        public bool ToggleSystems; // set when the SYSTEMS panel collapse glyph was clicked
     }
 
     /// <summary>One SAS-mode icon's render state, computed by the flight scene.</summary>
@@ -46,7 +47,8 @@ namespace Solar.UI
     {
         public static HudResult Draw(GameContext ctx, Vessel v, Prediction pred, bool mapMode, string focusName,
                                 Maneuver node = null, double burnDirAngle = double.NaN, double burnSpent = 0, int nodeCount = 0,
-                                NavMarkers nav = default, OrbitalElements? flybyEl = null, CelestialBody flybyBody = null)
+                                NavMarkers nav = default, OrbitalElements? flybyEl = null, CelestialBody flybyBody = null,
+                                bool systemsCollapsed = false)
         {
             var result = new HudResult();
             var pb = ctx.Pb; var sb = ctx.Sb; var f = ctx.Font;
@@ -607,6 +609,8 @@ namespace Solar.UI
                         double end = v.LifeSupportEndurance();
                         SRow("Supply", v.SelfSustaining ? "self-sustaining" : UiDraw.Time(end),
                              v.SelfSustaining ? green : end < 6 * 3600 ? amber : Color.White);
+                        if (v.InNiche)
+                            SRow("Shelter", $"niche  -  life support x{Core.Balance.NicheLifeSupportFactor:0.##}", new Color(120, 210, 255));
                     }
                 }
                 if (v.RcsBlocks > 0 || v.MonopropCapacity > 0)
@@ -643,22 +647,34 @@ namespace Solar.UI
 
                 if (sysRows.Count > 0)
                 {
-                    int hh = 24;
-                    foreach (var e in sysRows) hh += e.bar ? 28 : 19;
-                    hh += 30;
+                    int hh = 26;   // title-bar height when collapsed
+                    if (!systemsCollapsed)
+                    {
+                        hh = 24;
+                        foreach (var e in sysRows) hh += e.bar ? 28 : 19;
+                        hh += 30;
+                    }
                     var rp = new Rectangle(rColX, (int)rColY, rColW, hh);
                     UiDraw.TexPanel(pb, ctx, "gameplay_modules_panel", rp);
-                    sb.DrawString(f, "SYSTEMS", new Vector2(rp.X + 12, rp.Y + 6), UiDraw.Accent);
-                    float yy = rp.Y + 26;
-                    foreach (var (label, value, c, bar, frac, barCol) in sysRows)
+                    // title bar: the left glyph toggles collapse (mirrors the MODULES/SCIENCE windows)
+                    var glyphR = new Rectangle(rp.X + 8, rp.Y + 4, 22, 18);
+                    sb.DrawString(f, systemsCollapsed ? "[+]" : "[-]", new Vector2(glyphR.X, rp.Y + 6), UiDraw.Accent);
+                    sb.DrawString(f, "SYSTEMS", new Vector2(rp.X + 34, rp.Y + 6), UiDraw.Accent);
+                    if (ctx.Input.LeftClick && glyphR.Contains((int)ctx.Input.MousePos.X, (int)ctx.Input.MousePos.Y))
+                        result.ToggleSystems = true;
+                    if (!systemsCollapsed)
                     {
-                        sb.DrawString(f, label, new Vector2(rp.X + 12, yy), UiDraw.TextDim);
-                        sb.DrawString(f, value, new Vector2(rp.X + 96, yy), c);
-                        yy += 18;
-                        if (bar)
+                        float yy = rp.Y + 26;
+                        foreach (var (label, value, c, bar, frac, barCol) in sysRows)
                         {
-                            UiDraw.TexBar(pb, progTex, new Rectangle(rp.X + 12, (int)yy, rColW - 24, 8), frac, barCol);
-                            yy += 10;
+                            sb.DrawString(f, label, new Vector2(rp.X + 12, yy), UiDraw.TextDim);
+                            sb.DrawString(f, value, new Vector2(rp.X + 96, yy), c);
+                            yy += 18;
+                            if (bar)
+                            {
+                                UiDraw.TexBar(pb, progTex, new Rectangle(rp.X + 12, (int)yy, rColW - 24, 8), frac, barCol);
+                                yy += 10;
+                            }
                         }
                     }
                     rColY = rp.Bottom + 8;

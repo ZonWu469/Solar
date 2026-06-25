@@ -2,7 +2,7 @@ using Microsoft.Xna.Framework;
 
 namespace Solar.Parts
 {
-    public enum ModuleKind { SolarPanel, Rtg, Battery, LifeSupport, Harvester, ReactionWheel, Science, Antenna, FuelCell, LandingLeg, Light, RCS, Tank, Storage, IsruConverter, OreScanner, RadShield, Medbay, Radiator, MaintenanceDrone }
+    public enum ModuleKind { SolarPanel, Rtg, Battery, LifeSupport, Harvester, ReactionWheel, Science, Antenna, FuelCell, LandingLeg, Light, RCS, Tank, Storage, IsruConverter, OreScanner, RadShield, Medbay, Radiator, MaintenanceDrone, Telescope }
 
     /// <summary>Immutable definition of a slot module attached to a part (power, life support, mining).</summary>
     public sealed class ModuleDef
@@ -43,10 +43,14 @@ namespace Solar.Parts
         public double CureRate;    // Medbay: crew illness cured per second when active + powered
         public double StormHardening;// fraction (0..1) of solar-storm electronics-fry risk removed while powered (radiator / hardened bay)
         public double RepairSkill; // MaintenanceDrone: engineer-equivalent repair capability (lets a crewless craft self-repair, slowly)
+        public double ScanRange;   // Telescope: detection reach in metres for asteroid discovery
+        public double ScanRate;    // Telescope: detection progress per second (1.0 = one discovery), accumulated while active
         public Color Tint;
 
-        private string RangeText => Range >= 1e9 ? $"{Range / 1e9:0.#} Gm"
-                                  : Range >= 1e6 ? $"{Range / 1e6:0} Mm" : $"{Range / 1e3:0} km";
+        private string RangeText => RangeFmt(Range);
+
+        private static string RangeFmt(double r) => r >= 1e9 ? $"{r / 1e9:0.#} Gm"
+                                                  : r >= 1e6 ? $"{r / 1e6:0} Mm" : $"{r / 1e3:0} km";
 
         public string StatLine => Kind switch
         {
@@ -59,6 +63,7 @@ namespace Solar.Parts
             ModuleKind.Harvester => $"+{OreProduce:0.#} ore/s — mining drill, {DryMass:0} kg",
             ModuleKind.IsruConverter => $"{OreDraw:0.#} ore/s -> {FuelProduce:0.#} fuel/s — ISRU converter, {DryMass:0} kg",
             ModuleKind.OreScanner => $"orbital ore survey, {DryMass:0} kg",
+            ModuleKind.Telescope => $"discovers asteroids (range {RangeFmt(ScanRange)}), {DryMass:0} kg",
             ModuleKind.RadShield => LocalShield
                                       ? $"-{ShieldFactor * 100:0}% radiation to this bay (any orientation) — shielded bay, {DryMass:0} kg"
                                       : $"-{ShieldFactor * 100:0}% storm dose (face the Sun) — shielding, {DryMass:0} kg",

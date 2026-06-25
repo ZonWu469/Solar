@@ -71,7 +71,7 @@ namespace Solar.Scenes
         {
             ("Power",         new[] { ModuleKind.SolarPanel, ModuleKind.Rtg, ModuleKind.Battery, ModuleKind.FuelCell }),
             ("Life Support",  new[] { ModuleKind.LifeSupport }),
-            ("Science",       new[] { ModuleKind.Science }),
+            ("Science",       new[] { ModuleKind.Science, ModuleKind.Telescope }),
             ("Comms",         new[] { ModuleKind.Antenna }),
             ("Resource",      new[] { ModuleKind.Harvester, ModuleKind.IsruConverter, ModuleKind.OreScanner, ModuleKind.Tank }),
             ("Control",       new[] { ModuleKind.ReactionWheel, ModuleKind.RCS }),

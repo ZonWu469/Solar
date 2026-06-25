@@ -28,6 +28,7 @@ namespace Solar.Scenes
             state.Design.ApplyTo(Ctx.Design);
             Ctx.Clock.UT = state.UT;
             Ctx.Clock.DropToRealtime();
+            Solar.Physics.AsteroidField.Sync(Ctx.Universe, Ctx.State);
             Ctx.Scenes.SwitchTo(new HubScene(Ctx));
         }
 

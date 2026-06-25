@@ -59,6 +59,7 @@ namespace Solar.Physics
                         // the home/launch body gets a guaranteed flat plain under the pad
                         double[] fixedPlains = d.Name == "Earth" ? new[] { LaunchPadAngle } : null;
                         b.Terrain = new Terrain(b.Radius, amp, seed, plains: plains, fixedPlains: fixedPlains);
+                        AddNiches(b, seed);
                     }
                 }
                 if (parent != null)
@@ -79,6 +80,30 @@ namespace Solar.Physics
 
             u.ComputeSoiRadii();
             return u;
+        }
+
+        /// <summary>Place this body's natural livable niches on existing flat plains (deterministic from the
+        /// terrain seed, so they regenerate identically each load — like the terrain itself). Airless/hostile
+        /// worlds, where shelter matters most, are likelier to have them. Skips the Earth launch pad so the
+        /// home site isn't a free niche.</summary>
+        private static void AddNiches(CelestialBody b, int terrainSeed)
+        {
+            var plains = b.Terrain?.PlainCenters;
+            if (plains == null || plains.Count == 0) return;
+            var rng = new System.Random(terrainSeed * 31 + 7);
+            int maxNiches = b.Atmo == null ? 2 : 1;           // airless worlds can host more
+            double chance = b.Atmo == null ? 0.6 : 0.25;
+            var used = new System.Collections.Generic.HashSet<int>();
+            for (int k = 0; k < maxNiches && used.Count < plains.Count; k++)
+            {
+                if (rng.NextDouble() >= chance) continue;
+                int idx;
+                int guard = 0;
+                do { idx = rng.Next(plains.Count); } while (!used.Add(idx) && ++guard < 16);
+                if (b.Name == "Earth" && System.Math.Abs(plains[idx] - LaunchPadAngle) < 1e-6) continue;  // not the pad
+                double half = 0.06 + rng.NextDouble() * 0.04;  // footprint within the flat well (~3.5-5.7 deg)
+                b.Niches.Add(new LivableNiche(plains[idx], half, $"{b.Name} Niche {b.Niches.Count + 1}"));
+            }
         }
     }
 }

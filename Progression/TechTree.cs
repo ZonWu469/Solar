@@ -205,8 +205,8 @@ namespace Solar.Progression
             new TechNode {
                 Id = "planetary-science", Title = "Planetary Science", Cost = 100, Prereqs = new[] { "advanced-science" },
                 Parts = new string[0],
-                Modules = new[] { "atmosphere-analyzer", "ore-scanner" },
-                Description = "Instruments tailored for planetary exploration — analyze atmospheres and scan for ore deposits.",
+                Modules = new[] { "atmosphere-analyzer", "ore-scanner", "survey-telescope" },
+                Description = "Instruments tailored for planetary exploration — analyze atmospheres, scan for ore deposits, and survey for asteroids.",
             },
             new TechNode {
                 Id = "deep-space-science", Title = "Deep Space Science", Cost = 130, Prereqs = new[] { "planetary-science" },

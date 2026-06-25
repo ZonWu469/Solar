@@ -15,5 +15,10 @@
   "OxygenPerCrew": 0.5,
   "WaterPerCrew": 0.2,
   "FoodPerCrew": 0.1,
-  "LsDeathHours": 6
+  "LsDeathHours": 6,
+  "NicheLifeSupportFactor": 0.5,
+
+  "AsteroidCount": 24,
+  "AsteroidSoiKm": 800,
+  "RadarRangeKm": 80000
 }

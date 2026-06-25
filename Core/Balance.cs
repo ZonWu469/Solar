@@ -37,6 +37,12 @@ namespace Solar.Core
         public static double WaterPerCrew  = 0.2;
         public static double FoodPerCrew   = 0.1;
         public static double LsDeathTime   = 21600;                    // 6 h of an empty resource kills one crew member
+        public static double NicheLifeSupportFactor = 0.5;             // crew consume this fraction while landed inside a niche
+
+        // ----- asteroids (lengths are post-scale metres, matching the 1/10 length scale) -----
+        public static int    AsteroidCount = 24;                       // asteroids generated per game
+        public static double AsteroidSoiM  = 80_000;                   // authored asteroid SOI (m): a capturable rendezvous bubble
+        public static double RadarRangeM   = 8_000_000;                // fly-by auto-discovery range (m): a rock you pass close to
 
         private static string FilePath => Path.Combine(System.AppContext.BaseDirectory, "Content", "balance.json");
 
@@ -63,6 +69,10 @@ namespace Solar.Core
                 if (d.WaterPerCrew is { } w && w >= 0)       WaterPerCrew = w;
                 if (d.FoodPerCrew is { } f && f >= 0)        FoodPerCrew = f;
                 if (d.LsDeathHours is { } lsh && lsh > 0)    LsDeathTime = lsh * 3600;
+                if (d.NicheLifeSupportFactor is { } nf && nf >= 0) NicheLifeSupportFactor = nf;
+                if (d.AsteroidCount is { } ac && ac >= 0)    AsteroidCount = ac;
+                if (d.AsteroidSoiKm is { } ask && ask > 0)   AsteroidSoiM = ask * 1e3 * 0.1;
+                if (d.RadarRangeKm is { } rrk && rrk > 0)    RadarRangeM = rrk * 1e3 * 0.1;
                 if (d.StormIntervalHours is { } sih && sih > 0)  StormIntervalS = sih * 3600;
                 if (d.StormDurationHours is { } sdh && sdh > 0)  StormDurationS = sdh * 3600;
                 if (d.StormFrontSpeed is { } sfs && sfs > 0)     StormFrontSpeed = sfs;
@@ -87,6 +97,10 @@ namespace Solar.Core
             public double? WaterPerCrew { get; set; }
             public double? FoodPerCrew { get; set; }
             public double? LsDeathHours { get; set; }
+            public double? NicheLifeSupportFactor { get; set; }
+            public int? AsteroidCount { get; set; }
+            public double? AsteroidSoiKm { get; set; }   // km, pre-scale (the 1/10 length scale is applied on load)
+            public double? RadarRangeKm { get; set; }    // km, pre-scale
             public double? StormIntervalHours { get; set; }
             public double? StormDurationHours { get; set; }
             public double? StormFrontSpeed { get; set; }

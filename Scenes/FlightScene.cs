@@ -97,8 +97,9 @@ namespace Solar.Scenes
         private Rectangle _crewPanelRect;    // last-drawn panel bounds (for click-through hit testing)
         private CrewMember _selectedCrew;    // crew member picked for transfer (null = none)
         private bool _showHelp;              // help overlay (keys + icons reference)
-        private bool _modulesCollapsed;      // MODULES floating panel collapsed to its title bar
-        private bool _scienceCollapsed;      // SCIENCE floating panel collapsed to its title bar
+        private bool _systemsCollapsed;      // SYSTEMS right-column panel collapsed to its title bar
+        private bool _modulesCollapsed = true;  // MODULES floating panel collapsed to its title bar (default on entry)
+        private bool _scienceCollapsed = true;  // SCIENCE floating panel collapsed to its title bar (default on entry)
         // floating, draggable MODULES / SCIENCE windows (-1 pos = default to the right edge on first open)
         private Vector2 _modPanelPos = new(-1, -1), _sciPanelPos = new(-1, -1);
         private bool _modPanelDrag, _sciPanelDrag;     // title bar being dragged
@@ -869,6 +870,7 @@ namespace Solar.Scenes
             if (hit != null) { _toast = $"+{hit.Reward:0} science  -  {hit.Title}"; _toastT = 5; }
             else CollectScience(clock.UT, realDt * clock.Warp);
             TrySurveyBody(clock.UT);
+            TryDiscoverAsteroids(clock.UT, realDt * clock.Warp);
             // threat events this tick: repairs (low priority), then malfunctions, then deaths (highest).
             if (_vessel != null && _vessel.RecentRepairs.Count > 0)
             {
@@ -2094,6 +2096,54 @@ namespace Solar.Scenes
             _toastT = 5;
         }
 
+        /// <summary>Base science awarded for discovering an asteroid (scaled by scientists aboard).</summary>
+        private const double AsteroidDiscoveryScience = 12;
+        private double _scanProgress;
+
+        /// <summary>Discover asteroids two ways: flying physically close to a hidden rock reveals it (fly-by
+        /// radar), and a powered, active survey telescope reveals the nearest hidden rock within its range as
+        /// scan time accrues. A discovery promotes the asteroid into the live universe — from then on it is
+        /// rendered, targetable, and can be encountered/landed/mined like any other body.</summary>
+        private void TryDiscoverAsteroids(double ut, double dt)
+        {
+            var v = _vessel; var gs = Ctx.State; var u = Ctx.Universe;
+            if (v == null || v.Destroyed || u == null || gs == null || u.AsteroidCatalog.Count == 0) return;
+            Vec2d vp = v.AbsolutePosition(ut);
+
+            // fly-by radar (always on): pass close enough and you spot it
+            double radar = Core.Balance.RadarRangeM;
+            foreach (var a in u.AsteroidCatalog)
+            {
+                if (gs.DiscoveredAsteroids.Contains(a.Name)) continue;
+                if ((a.AbsolutePositionAt(ut) - vp).Length <= Math.Max(radar, a.SoiRadius * 2))
+                { DiscoverAsteroid(a); return; }
+            }
+
+            // telescope survey: accumulate scan time, then reveal the nearest hidden rock in range
+            if (!v.TelescopeOperational || dt <= 0) return;
+            _scanProgress += v.TelescopeRate * dt;
+            if (_scanProgress < 1.0) return;
+            double range = v.TelescopeRange;
+            CelestialBody nearest = null; double best = double.MaxValue;
+            foreach (var a in u.AsteroidCatalog)
+            {
+                if (gs.DiscoveredAsteroids.Contains(a.Name)) continue;
+                double d = (a.AbsolutePositionAt(ut) - vp).Length;
+                if (d <= range && d < best) { best = d; nearest = a; }
+            }
+            if (nearest != null) { _scanProgress = 0; DiscoverAsteroid(nearest); }
+            else _scanProgress = 1.0;   // hold ready until one drifts into range
+        }
+
+        private void DiscoverAsteroid(CelestialBody a)
+        {
+            if (!Solar.Physics.AsteroidField.Discover(Ctx.Universe, Ctx.State, a)) return;
+            double reward = AsteroidDiscoveryScience * _vessel.CrewSkill(CrewRole.Scientist);
+            Ctx.State.Science += reward;
+            _toast = $"+{reward:0} science  -  Discovered asteroid {a.Name}";
+            _toastT = 5;
+        }
+
         private void CollectScience(double ut, double dt)
         {
             var v = _vessel;
@@ -2534,12 +2584,13 @@ namespace Solar.Scenes
             else { DrawWorld(pb, ut); DrawStormOverlay(pb, ut); DrawCrewDropTargets(pb); }
 
             OrbitalElements? flybyEl = RouteFlyby(ut, out var fEl, out var fBody) ? fEl : (OrbitalElements?)null;
-            var hud = Hud.Draw(Ctx, _vessel, _pred, _map, FocusName(), DisplayNode(ut), BurnDirAngle(ut), _burnSpent, _nodes.Count, BuildNavMarkers(ut), flybyEl, fBody);
+            var hud = Hud.Draw(Ctx, _vessel, _pred, _map, FocusName(), DisplayNode(ut), BurnDirAngle(ut), _burnSpent, _nodes.Count, BuildNavMarkers(ut), flybyEl, fBody, _systemsCollapsed);
             _rightColBottom = hud.RightColumnBottom;
             if (hud.WarpToUT.HasValue) _warpTo = hud.WarpToUT;
             if (hud.FireStage) FireNextStage();
             if (hud.RequestedSas.HasValue) SetSas((SasMode)hud.RequestedSas.Value);
             if (hud.ToggleHelp) _showHelp = !_showHelp;
+            if (hud.ToggleSystems) _systemsCollapsed = !_systemsCollapsed;
 
             if (_vessel != null && _vessel.IsEva && !_map)
             {
@@ -2693,11 +2744,15 @@ namespace Solar.Scenes
             bool canRepair = engineer > 1 && v.ElectricCharge > 0;
             double repairRate = Core.Balance.RepairPerSec * engineer;   // wear drained per second
 
-            int x = Ctx.W - 240;   // old right-column X: windows default to a stack down the right edge
+            int x = Ctx.W - 240;   // right-column X: windows default to a stack down the right edge
+            // default below the SYSTEMS panel (whose bottom is _rightColBottom, set this frame before this call)
+            float modY = _rightColBottom > 0 ? _rightColBottom : 10;
             DrawModuleWindow(pb, sb, "MODULES  [G] solar", modules, ref _modPanelPos, ref _modPanelDrag, ref _modPanelGrab,
-                ref _modScroll, ref _modScrollDrag, ref _modulesCollapsed, new Vector2(x, 10), canRepair, repairRate, out _modPanelRect);
+                ref _modScroll, ref _modScrollDrag, ref _modulesCollapsed, new Vector2(x, modY), canRepair, repairRate, out _modPanelRect);
+            // SCIENCE stacks below the MODULES window by default
+            float sciY = _modPanelRect != Rectangle.Empty ? _modPanelRect.Bottom + 6 : modY;
             DrawModuleWindow(pb, sb, "SCIENCE", science, ref _sciPanelPos, ref _sciPanelDrag, ref _sciPanelGrab,
-                ref _sciScroll, ref _sciScrollDrag, ref _scienceCollapsed, new Vector2(x, 264), canRepair, repairRate, out _sciPanelRect);
+                ref _sciScroll, ref _sciScrollDrag, ref _scienceCollapsed, new Vector2(x, sciY), canRepair, repairRate, out _sciPanelRect);
         }
 
         /// <summary>Draws one module-list window (shared by MODULES and SCIENCE). All persistent state is
@@ -3408,6 +3463,8 @@ namespace Solar.Scenes
                 PlanetRenderer.Draw(pb, _cam, b, ut, true, Ctx.Sb, Ctx.Textures.Body(b.TextureId),
                                     slopeOverlay: _slopeView);
                 DrawPlainMarkers(pb, b, ut);
+                DrawNicheMarkers(pb, b, ut);
+                if (b.IsAsteroid) DrawAsteroidMarker(pb, sb, b, ut);
             }
 
             // body labels
@@ -3524,6 +3581,47 @@ namespace Solar.Scenes
                 pb.Line(baseS, baseS + outDir * 9f, 2f, col);
                 pb.FillCircle(baseS + outDir * 13f, 3f, col);
             }
+        }
+
+        /// <summary>Cyan dome glyphs at this body's livable niches (where landing shelters the crew), in the
+        /// same disc-zoom band as the landing-site markers.</summary>
+        private void DrawNicheMarkers(PrimitiveBatch pb, Solar.Physics.CelestialBody b, double ut)
+        {
+            if (b.Niches.Count == 0) return;
+            double rPx = b.Radius / _cam.MetersPerPixel;
+            if (rPx < 18 || rPx > 4000) return;
+            Vec2d pos = b.AbsolutePositionAt(ut);
+            Vector2 cs = _cam.WorldToScreen(pos);
+            var col = new Color(120, 210, 255);   // cyan = habitable shelter
+            foreach (var n in b.Niches)
+            {
+                Vec2d dir = Vec2d.FromAngle(n.CenterAngle);
+                Vector2 baseS = _cam.WorldToScreen(pos + dir * b.SurfaceRadiusAt(n.CenterAngle));
+                if (!_cam.OnScreen(new Vec2d(baseS.X, baseS.Y), 30)) continue;
+                Vector2 outDir = baseS - cs;
+                float l = outDir.Length();
+                if (l < 1e-3f) continue;
+                outDir /= l;
+                Vector2 tangent = new Vector2(-outDir.Y, outDir.X);
+                pb.FillCircle(baseS + outDir * 4f, 4f, col * 0.85f);            // the dome
+                pb.Line(baseS - tangent * 5f, baseS + tangent * 5f, 2f, col);   // the ground line under it
+            }
+        }
+
+        /// <summary>A small diamond + name for a discovered asteroid, so it reads distinctly from a planet at
+        /// any map zoom (asteroids are sub-pixel discs otherwise).</summary>
+        private void DrawAsteroidMarker(PrimitiveBatch pb, Microsoft.Xna.Framework.Graphics.SpriteBatch sb, Solar.Physics.CelestialBody b, double ut)
+        {
+            var ss = _cam.WorldToScreenD(b.AbsolutePositionAt(ut));
+            if (!_cam.OnScreen(ss, 14)) return;
+            var p = new Vector2((float)ss.X, (float)ss.Y);
+            var col = new Color(200, 180, 150);
+            Vector2 up = new Vector2(0, -5), rt = new Vector2(5, 0);
+            pb.Line(p - up, p + rt, 1.5f, col);
+            pb.Line(p + rt, p + up, 1.5f, col);
+            pb.Line(p + up, p - rt, 1.5f, col);
+            pb.Line(p - rt, p - up, 1.5f, col);
+            sb.DrawString(Ctx.Font, b.Name, p + new Vector2(8, -8), col * 0.9f);
         }
 
         private static readonly Color TargetColor = new Color(235, 130, 235);
