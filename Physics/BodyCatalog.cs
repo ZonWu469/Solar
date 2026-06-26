@@ -12,7 +12,8 @@ namespace Solar.Physics
     {
         public string Name { get; set; }
         public string Id { get; set; }          // stable slug, used to locate a texture asset
-        public string Parent { get; set; }       // parent body name; null/empty for the root (Sun)
+        public string Parent { get; set; }       // parent body name; null/empty for the root (the galactic barycenter)
+        public bool IsStar { get; set; }          // a light-emitting star (a child of the barycenter); the barycenter itself is not a star
         public int OrbitIndex { get; set; }      // creation order; drives the ArgPe/M0 phase spread
         public double AKm { get; set; }          // semi-major axis (km, pre-scale); 0 for the root
         public double Ecc { get; set; }
@@ -63,20 +64,29 @@ namespace Solar.Physics
             int i = 0;
             BodyDef Body(string name, string parent, double aKm, double ecc, double muReal, double radiusKm,
                          int r, int g, int b,
-                         double atmoRho = 0, double atmoH = 0, double atmoTop = 0, int ar = 0, int ag = 0, int ab = 0)
+                         double atmoRho = 0, double atmoH = 0, double atmoTop = 0, int ar = 0, int ag = 0, int ab = 0,
+                         bool isStar = false)
                 => new BodyDef
                 {
-                    Name = name, Id = name.ToLowerInvariant(), Parent = parent, OrbitIndex = i++,
+                    Name = name, Id = name.ToLowerInvariant().Replace(' ', '-'), Parent = parent, OrbitIndex = i++,
                     AKm = aKm, Ecc = ecc, MuReal = muReal, RadiusKm = radiusKm,
                     R = r, G = g, B = b,
                     HasAtmosphere = atmoTop > 0,
                     AtmoSeaLevelDensity = atmoRho, AtmoScaleHeight = atmoH, AtmoTop = atmoTop,
                     AtmoR = ar, AtmoG = ag, AtmoB = ab,
+                    IsStar = isStar,
                 };
 
+            // The galactic barycenter is the universe root: a single massive, invisible focus the stars
+            // orbit. Its huge Mu (and the wide, slow star orbits below) make each star's Hill-sphere SOI
+            // come out a few times larger than its outermost planet's orbit, while keeping the two systems
+            // cleanly separated. These are the main interstellar tuning knobs (see SolarSystemData scaling).
             var bodies = new List<BodyDef>
             {
-                Body("Sun", null, 0, 0, 1.32712440018e20, 696340, 255, 220, 120),
+                Body("Galaxy", null, 0, 0, 5.0e22, 0, 0, 0, 0),
+
+                // --- The Sol system: the Sun now orbits the barycenter on a wide, slow circular orbit. ---
+                Body("Sun", "Galaxy", 1.0e11, 0.0, 1.32712440018e20, 696340, 255, 220, 120, isStar: true),
                 Body("Mercury", "Sun", 57_909e3, 0.2056, 2.2032e13, 2439.7, 150, 140, 130),
                 Body("Venus", "Sun", 108_209e3, 0.0068, 3.24859e14, 6051.8, 225, 195, 130, 65.0, 6400, 80_000, 235, 210, 150),
                 Body("Earth", "Sun", 149_596e3, 0.0167, 3.986004418e14, 6371, 70, 120, 200, 1.225, 5600, 56_000, 120, 170, 255),
@@ -91,6 +101,13 @@ namespace Solar.Physics
                 Body("Titan", "Saturn", 1_221_870, 0.0288, 8.978138e12, 2574.7, 210, 160, 90, 5.4, 9000, 90_000, 225, 180, 110),
                 Body("Uranus", "Sun", 2_872_460e3, 0.0457, 5.793939e15, 25362, 150, 210, 220),
                 Body("Neptune", "Sun", 4_495_060e3, 0.0113, 6.836529e15, 24622, 70, 100, 220),
+
+                // --- The Centauri system: a second, slightly smaller star with its own worlds. ---
+                Body("Centauri", "Galaxy", 1.5e11, 0.03, 1.0e20, 600000, 255, 180, 110, isStar: true),
+                Body("Cinder", "Centauri", 40_000e3, 0.05, 1.5e13, 2200, 200, 90, 70),
+                Body("Aurelia", "Centauri", 110_000e3, 0.02, 4.0e14, 6200, 110, 200, 160, 1.1, 5800, 58_000, 150, 220, 190),
+                Body("Brand", "Centauri", 350_000e3, 0.04, 5.0e16, 40000, 180, 200, 230),
+                Body("Brand Minor", "Brand", 500_000, 0.01, 4.0e12, 1600, 175, 175, 185),
             };
 
             // Surface ore richness: airless rock is the best mining ground, the home world is poor (no
@@ -100,6 +117,7 @@ namespace Solar.Physics
                 ["Mercury"] = 0.75, ["Venus"] = 0.30, ["Earth"] = 0.10, ["Moon"] = 0.80,
                 ["Mars"] = 0.70, ["Io"] = 0.65, ["Europa"] = 0.45, ["Ganymede"] = 0.55,
                 ["Callisto"] = 0.55, ["Titan"] = 0.40,
+                ["Cinder"] = 0.70, ["Aurelia"] = 0.20, ["Brand Minor"] = 0.55,
             };
             foreach (var b in bodies)
                 if (richness.TryGetValue(b.Name, out double r)) b.OreRichness = r;

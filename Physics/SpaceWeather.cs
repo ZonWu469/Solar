@@ -46,7 +46,7 @@ namespace Solar.Physics
         /// Convenience overload that reads tunables from <see cref="Balance"/> and the Sun/Earth from the universe.</summary>
         public static StormState ForVessel(long seed, double ut, Vec2d absPos, Universe u)
         {
-            Vec2d sunPos = u?.Root?.AbsolutePositionAt(ut) ?? Vec2d.Zero;
+            Vec2d sunPos = u?.NearestStar(absPos, ut)?.AbsolutePositionAt(ut) ?? Vec2d.Zero;
             double earthDist = u?["Earth"]?.Orbit.A ?? 1.0;
             return ForVessel(seed, ut, absPos, sunPos, earthDist,
                              Balance.StormFrontSpeed, Balance.StormIntervalS, Balance.StormDurationS, Balance.StormPeakDose);
@@ -114,7 +114,7 @@ namespace Solar.Physics
         /// over a storm's onset. Returns +inf if none is found in the near horizon.</summary>
         public static double NextArrivalUt(long seed, double ut, Vec2d absPos, Universe u)
         {
-            Vec2d sunPos = u?.Root?.AbsolutePositionAt(ut) ?? Vec2d.Zero;
+            Vec2d sunPos = u?.NearestStar(absPos, ut)?.AbsolutePositionAt(ut) ?? Vec2d.Zero;
             double travel = (sunPos - absPos).Length / Math.Max(1.0, Balance.StormFrontSpeed);
             double interval = Balance.StormIntervalS;
             if (interval <= 0) return double.PositiveInfinity;

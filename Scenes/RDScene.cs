@@ -58,6 +58,8 @@ namespace Solar.Scenes
             ("ion-prop", 5, 1), ("space-stations", 5, 7), ("deep-space-net", 5, 3), ("colonization", 5, 9),
             // Tier 5 (col=6)
             ("heavy-crew", 6, 4), ("near-future", 6, 2), ("grand-finale", 6, 6),
+            // Tier 6 — interstellar (col=7)
+            ("fusion-propulsion", 7, 2), ("interstellar-logistics", 7, 3), ("starflight-systems", 7, 4),
         };
 
         /// <summary>Build the per-frame node positions/rects from the static <see cref="Layout"/> table.</summary>

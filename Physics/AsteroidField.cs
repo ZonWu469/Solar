@@ -71,7 +71,9 @@ namespace Solar.Physics
             // weather seed so old games still get a (consistent) belt.
             if (gs.AsteroidSeed == 0) gs.AsteroidSeed = gs.WeatherSeed != 0 ? gs.WeatherSeed : 1;
             u.ClearAsteroids();
-            u.AsteroidCatalog.AddRange(Generate(u.Root, gs.AsteroidSeed));
+            // The belt orbits the home star (the Sun), not the galactic barycenter root. AU-scale orbits
+            // only make sense around a star.
+            u.AsteroidCatalog.AddRange(Generate(u["Sun"] ?? u.Root, gs.AsteroidSeed));
             if (gs.DiscoveredAsteroids != null)
                 foreach (var name in gs.DiscoveredAsteroids)
                 {

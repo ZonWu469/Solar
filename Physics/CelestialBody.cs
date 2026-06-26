@@ -23,6 +23,7 @@ namespace Solar.Physics
         public double RadBeltInner, RadBeltOuter;  // radiation belt altitude band above the surface (m); 0..0 = none
         public double RadBeltDose;                  // dose rate (units/s) crew accumulate inside the belt
         public bool IsAsteroid;                     // a discoverable minor body (see AsteroidField); carries an authored SoiRadius
+        public bool IsStar;                         // a light-emitting star (a child of the galactic barycenter). The root barycenter itself is not a star.
         public readonly List<CelestialBody> Children = new();
         public readonly List<LivableNiche> Niches = new();  // natural sheltered spots that halve life-support draw
 

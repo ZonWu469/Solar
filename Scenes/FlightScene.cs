@@ -184,7 +184,7 @@ namespace Solar.Scenes
                 Dbg(DbgShip("LOADpost", _shipName, Ctx.Clock.UT, _vessel));
                 _lastBody = b;
                 _lastCamRel = _vessel.Position;
-                _mapZoom = b.SoiRadius * 2.4 / Math.Min(Ctx.W, Ctx.H);
+                _mapZoom = DefaultMapZoom(b);
                 if (!_vessel.Landed && !_vessel.Destroyed) RefreshPrediction(Ctx.Clock.UT);
                 SpawnOthers();
                 RestoreTarget(_resume.TargetName);
@@ -221,8 +221,24 @@ namespace Solar.Scenes
             _vessel.Landed = true;
             _vessel.OnRails = false;
             _lastBody = site;
-            _mapZoom = site.SoiRadius * 2.4 / Math.Min(Ctx.W, Ctx.H);
+            _mapZoom = DefaultMapZoom(site);
             SpawnOthers();
+        }
+
+        /// <summary>A sensible initial map zoom (m/px) framing a body's SOI. For the galactic barycenter
+        /// (infinite SOI) there is no SOI to frame, so frame the whole star field instead.</summary>
+        private double DefaultMapZoom(CelestialBody b)
+        {
+            double screen = Math.Min(Ctx.W, Ctx.H);
+            if (b == null) return 1e6;
+            if (double.IsInfinity(b.SoiRadius))
+            {
+                double extent = 0;
+                foreach (var s in Ctx.Universe.Stars) extent = Math.Max(extent, s.Orbit.Apoapsis);
+                if (extent <= 0) extent = 1e13;
+                return extent * 2.4 / screen;
+            }
+            return b.SoiRadius * 2.4 / screen;
         }
 
         /// <summary>Load every other saved ship as a passive, always-on-rails co-orbiting target.</summary>
@@ -509,7 +525,7 @@ namespace Solar.Scenes
         {
             _encFocusBody = body; _encFocusUT = transUT; _mapPan = default;
             double screen = Math.Max(200, Math.Min(_cam.ScreenW, _cam.ScreenH));
-            _mapZoom = Math.Clamp(2 * body.SoiRadius / (0.6 * screen), 50, 2e9);  // SOI diameter ~ 60% of view
+            _mapZoom = Math.Clamp(2 * body.SoiRadius / (0.6 * screen), 50, 1e11);  // SOI diameter ~ 60% of view
         }
 
         /// <summary>Whether the mouse is over a route encounter marker; yields the body + transition time.</summary>
@@ -588,9 +604,9 @@ namespace Solar.Scenes
             if (inp.WheelDelta != 0 && !maneuverWheel && !overModulePanel)
             {
                 double factor = Math.Pow(1.18, -inp.WheelDelta / 120.0);
-                // max m/px (2e9) frames the whole system out to Neptune (~4.5e11 m) with margin even when
-                // the camera is focused on the vessel/an inner planet rather than the Sun
-                if (_map) _mapZoom = Math.Clamp(_mapZoom * factor, 50, 2e9);
+                // max m/px (1e11) frames the whole galaxy (the stars orbit the barycenter out to ~1.5e13 m)
+                // so the player can zoom out far enough to plan an interstellar transfer
+                if (_map) _mapZoom = Math.Clamp(_mapZoom * factor, 50, 1e11);
                 // min m/px (max zoom-in) capped at ~100 px/m so part textures (~64-135 px/m native) stay crisp
                 else _flightZoom = Math.Clamp(_flightZoom * factor, 0.01, 400);
             }
@@ -1968,7 +1984,7 @@ namespace Solar.Scenes
                     return double.IsNaN(bd) ? (double?)null : bd;
                 case SasMode.ShieldSun:
                     // point the shielded Up face at the Sun (Up = FromAngle(Heading), so hold Heading = sun angle)
-                    Vec2d toSun = (Ctx.Universe?.Root?.AbsolutePositionAt(ut) ?? Vec2d.Zero) - _vessel.AbsolutePosition(ut);
+                    Vec2d toSun = (Ctx.Universe?.StarOf(_vessel.Body)?.AbsolutePositionAt(ut) ?? Vec2d.Zero) - _vessel.AbsolutePosition(ut);
                     return toSun.Length > 1 ? toSun.Angle() : (double?)null;
                 default: return null;
             }
@@ -3417,6 +3433,7 @@ namespace Solar.Scenes
         {
             foreach (var b in Ctx.Universe.Bodies)
                 PlanetRenderer.Draw(pb, _cam, b, ut, false, Ctx.Sb, Ctx.Textures.Body(b.TextureId),
+                                    sunPos: Ctx.Universe.StarOf(b)?.AbsolutePositionAt(ut) ?? default,
                                     slopeOverlay: _slopeView);
 
             if (_vessel != null && !_vessel.Destroyed && !_vessel.Landed)
@@ -3525,6 +3542,7 @@ namespace Solar.Scenes
             foreach (var b in u.Bodies)
             {
                 PlanetRenderer.Draw(pb, _cam, b, ut, true, Ctx.Sb, Ctx.Textures.Body(b.TextureId),
+                                    sunPos: Ctx.Universe.StarOf(b)?.AbsolutePositionAt(ut) ?? default,
                                     slopeOverlay: _slopeView);
                 DrawPlainMarkers(pb, b, ut);
                 DrawNicheMarkers(pb, b, ut);

@@ -306,6 +306,28 @@ namespace Solar.Progression
                 Modules = new[] { "signal-booster" },
                 Description = "The pinnacle of aerospace research. Extends comms to the farthest reaches of the solar system.",
             },
+
+            // ════════════════════════════════════════════════════════════════
+            // TIER 6 — interstellar (500–850 science)
+            // ════════════════════════════════════════════════════════════════
+            new TechNode {
+                Id = "fusion-propulsion", Title = "Fusion Propulsion", Cost = 500, Prereqs = new[] { "near-future", "ion-prop" },
+                Parts = new[] { "fusion-torch", "vasimr", "deuterium-tank" },
+                Modules = new[] { "fusion-reactor" },
+                Description = "Deuterium fusion torches and a reactor for power between the stars. The first drives with enough dV to leave the Sun's grip and reach another star.",
+            },
+            new TechNode {
+                Id = "interstellar-logistics", Title = "Interstellar Logistics", Cost = 650, Prereqs = new[] { "fusion-propulsion", "nuclear-power", "sustainability" },
+                Parts = new string[0],
+                Modules = new[] { "closed-loop-ls", "radiation-vault", "xl-consumables-pod" },
+                Description = "Closed-loop recyclers, deep-space radiation vaults, and bulk consumables keep a crew alive through the years-long crossing between stars.",
+            },
+            new TechNode {
+                Id = "starflight-systems", Title = "Starflight Systems", Cost = 850, Prereqs = new[] { "fusion-propulsion", "deep-space-net" },
+                Parts = new[] { "antimatter-drive", "antimatter-pod" },
+                Modules = new[] { "interstellar-beacon" },
+                Description = "Antimatter propulsion and galaxy-spanning relays - the capstone of starflight, cutting the journey to another sun from a lifetime to a voyage.",
+            },
         };
 
         public static TechNode Node(string id) => Nodes.Find(n => n.Id == id);

@@ -44,11 +44,12 @@ namespace Solar.Physics
                     RadBeltInner = d.RadBeltInnerKm * 1e3 * L,
                     RadBeltOuter = d.RadBeltOuterKm * 1e3 * L,
                     RadBeltDose = d.RadBeltDose,
+                    IsStar = d.IsStar,
                 };
 
-                // Terrain: the root star is smooth; every orbiting body gets relief (default amplitude
-                // unless overridden, 0 disables it explicitly).
-                if (parent != null)
+                // Terrain: stars and the galactic barycenter are smooth (no surface); every orbiting
+                // planet/moon gets relief (default amplitude unless overridden, 0 disables it explicitly).
+                if (parent != null && !d.IsStar)
                 {
                     double ampFrac = d.TerrainAmp ?? DefaultTerrainAmpFrac;
                     if (ampFrac > 0)

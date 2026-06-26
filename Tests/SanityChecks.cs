@@ -641,16 +641,62 @@ namespace Solar.Tests
             }
 
             // 20. body catalog: the solar system builds from BodyCatalog with the parent hierarchy, the
-            //     1/10 length scale, texture ids, and finite SOIs intact.
+            //     1/10 length scale, texture ids, and finite SOIs intact. The Sun now orbits the galactic
+            //     barycenter (the root), so Earth -> Sun -> Galaxy.
             {
                 var u = SolarSystemData.Create();
-                var earth = u["Earth"]; var moon = u["Moon"];
-                bool wired = earth != null && moon != null && moon.Parent == earth
-                             && earth.Parent == u.Root && u.Root?.Name == "Sun";
+                var earth = u["Earth"]; var moon = u["Moon"]; var sun = u["Sun"];
+                bool wired = earth != null && moon != null && sun != null && moon.Parent == earth
+                             && earth.Parent == sun && sun.Parent == u.Root && u.Root?.Name == "Galaxy";
                 bool scaled = earth != null && Math.Abs(earth.Radius - 6371e3 * 0.1) < 1e-3;
                 bool tex = earth != null && earth.TextureId == "earth";
                 bool soi = moon != null && moon.SoiRadius > 0 && !double.IsInfinity(moon.SoiRadius);
                 Check("body catalog", wired && scaled && tex && soi);
+            }
+
+            // 20b. multi-system hierarchy: the barycenter is the infinite-SOI root; each star is a child of
+            //      it with a FINITE SOI bigger than its outermost planet; StarOf resolves the owning star;
+            //      escape from a star's SOI predicts a handoff to the barycenter, and a barycenter-frame
+            //      conic aimed at the other star predicts an encounter within the search horizon.
+            {
+                var u = SolarSystemData.Create();
+                var galaxy = u.Root; var sun = u["Sun"]; var centauri = u["Centauri"];
+                var earth = u["Earth"]; var neptune = u["Neptune"]; var aurelia = u["Aurelia"];
+
+                bool roots = galaxy != null && !galaxy.IsStar && double.IsInfinity(galaxy.SoiRadius);
+                bool starsFinite = sun != null && centauri != null && sun.IsStar && centauri.IsStar
+                                   && sun.SoiRadius > 0 && !double.IsInfinity(sun.SoiRadius)
+                                   && centauri.SoiRadius > 0 && !double.IsInfinity(centauri.SoiRadius);
+                bool encloses = sun != null && neptune != null && sun.SoiRadius > neptune.Orbit.A
+                                && centauri != null && aurelia != null && centauri.SoiRadius > aurelia.Orbit.A;
+
+                bool starOf = u.StarOf(earth) == sun && u.StarOf(u["Moon"]) == sun
+                              && u.StarOf(aurelia) == centauri && u.StarOf(galaxy) == null;
+
+                bool uniqueNames = true;
+                var seen = new System.Collections.Generic.HashSet<string>();
+                foreach (var b in u.Bodies) if (!seen.Add(b.Name)) uniqueNames = false;
+
+                // Hyperbolic escape from the Sun's SOI (non-radial, so a clean hyperbola) -> handoff to the
+                // barycenter.
+                var escEl = Kepler.ElementsFromState(new Vec2d(sun.SoiRadius * 0.5, 0),
+                                                     new Vec2d(40000, 30000), sun.Mu, 0);
+                var escPred = TrajectoryPredictor.Predict(escEl, sun, 0);
+                bool escapes = escPred.Type == TransitionType.Escape && escPred.NextBody == galaxy;
+
+                // A barycenter-frame approach built from Centauri's own state: start just outside its SOI and
+                // drift inward, so the conic genuinely crosses Centauri's SOI (not the Sun's) -> encounter.
+                Vec2d cPos = centauri.LocalPositionAt(0);
+                Vec2d cVel = centauri.LocalVelocityAt(0);
+                Vec2d rdir = cPos / cPos.Length;
+                Vec2d apprPos = cPos + rdir * (centauri.SoiRadius * 1.5);
+                Vec2d apprVel = cVel - rdir * 800.0;                  // co-move with Centauri, drift inward
+                var apprEl = Kepler.ElementsFromState(apprPos, apprVel, galaxy.Mu, 0);
+                var encPred = TrajectoryPredictor.Predict(apprEl, galaxy, 0);
+                bool encounters = encPred.Type == TransitionType.Encounter && encPred.NextBody == centauri;
+
+                Check("multi-system hierarchy",
+                      roots && starsFinite && encloses && starOf && uniqueNames && escapes && encounters);
             }
 
             // 21. antenna signal: full strength near home (Earth), zero far beyond range, none when the
@@ -1523,10 +1569,10 @@ namespace Solar.Tests
             }
 
             // 40. terrain wiring: orbiting bodies get relief (SurfaceRadiusAt varies, MaxRadius >= Radius)
-            //     while the root star stays a smooth sphere.
+            //     while stars stay smooth spheres.
             {
                 var u = SolarSystemData.Create();
-                var earth = u["Earth"]; var sun = u.Root;
+                var earth = u["Earth"]; var sun = u["Sun"];
                 bool sunSmooth = sun.Terrain == null
                                  && Math.Abs(sun.SurfaceRadiusAt(1.0) - sun.Radius) < 1e-9;
                 bool earthRelief = earth.Terrain != null && earth.MaxRadius > earth.Radius
@@ -2584,7 +2630,7 @@ namespace Solar.Tests
                 var gs = GameState.NewGame("Internal_ast");
                 gs.AsteroidSeed = 12345;
                 AsteroidField.Sync(u, gs);
-                var gen2 = AsteroidField.Generate(SolarSystemData.Create().Root, 12345);
+                var gen2 = AsteroidField.Generate(SolarSystemData.Create()["Sun"], 12345);
                 bool deterministic = u.AsteroidCatalog.Count > 0 && u.AsteroidCatalog.Count == gen2.Count;
                 for (int i = 0; deterministic && i < gen2.Count; i++)
                     deterministic = u.AsteroidCatalog[i].Name == gen2[i].Name
@@ -2598,7 +2644,7 @@ namespace Solar.Tests
                 bool soiKept = a.IsAsteroid && Math.Abs(a.SoiRadius - soiBefore) < 1e-6;
 
                 bool discovered = AsteroidField.Discover(u, gs, a)
-                               && u.Bodies.Contains(a) && u.Root.Children.Contains(a)
+                               && u.Bodies.Contains(a) && u["Sun"].Children.Contains(a)
                                && gs.DiscoveredAsteroids.Contains(a.Name);
                 bool idempotent = !AsteroidField.Discover(u, gs, a);
                 Check("asteroid field", deterministic && hidden && soiKept && discovered && idempotent);

@@ -17,6 +17,9 @@ namespace Solar.Rendering
                                 Microsoft.Xna.Framework.Graphics.Texture2D tex = null,
                                 Vec2d sunPos = default, bool slopeOverlay = false)
         {
+            // The galactic barycenter (the parentless, non-star root) is an invisible focus, not a body.
+            if (b.Parent == null && !b.IsStar) return;
+
             Vec2d pos = b.AbsolutePositionAt(ut);
             Vec2d sD = cam.WorldToScreenD(pos);
             double rPx = b.Radius / cam.MetersPerPixel;

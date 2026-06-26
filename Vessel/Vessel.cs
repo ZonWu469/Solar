@@ -1098,10 +1098,13 @@ namespace Solar.Vessels
         /// <summary>Sunlight intensity factor (inverse-square vs Earth's distance), clamped.</summary>
         private double SolarFactor(double ut, Universe u)
         {
-            if (u?.Root == null) return 1;
-            double d = (AbsolutePosition(ut) - u.Root.AbsolutePositionAt(ut)).Length;
+            // In a star's system use that star; coasting in interstellar space (Body == barycenter) fall
+            // back to the nearest star, so panels dim realistically with distance between the stars.
+            var star = u?.StarOf(Body) ?? u?.NearestStar(AbsolutePosition(ut), ut);
+            if (star == null) return 1;
+            double d = (AbsolutePosition(ut) - star.AbsolutePositionAt(ut)).Length;
             if (d <= 1) return 4;
-            double refD = u["Earth"]?.Orbit.A ?? d;
+            double refD = u["Earth"]?.Orbit.A ?? d;   // a universal reference distance (1 AU equivalent) for all stars
             double f = (refD / d) * (refD / d);
             return Math.Clamp(f, 0.02, 4);
         }

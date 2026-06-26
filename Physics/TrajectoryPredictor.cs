@@ -32,6 +32,7 @@ namespace Solar.Physics
     {
         private const int Samples = 800;
         private const double MaxHorizon = 3.0e8; // ~9.5 game-years cap for weird orbits
+        private const double InterstellarHorizon = 6.0e10; // barycenter-frame cap: long enough to see a star-to-star transfer
         private const int SubDiv = 16;           // refinement fan-out per subdivision level
         private const int MaxDepth = 6;          // bounded recursion depth for hidden passages
         private const double VrelMargin = 1.25;  // safety margin on the per-interval relative-speed bound
@@ -61,7 +62,11 @@ namespace Solar.Physics
             double rEntry = primary.Radius + (primary.Atmo?.Top ?? 2000);
             double? atmoT = Kepler.NextRadiusCrossingInbound(el, rEntry, utNow + 1e-6);
 
-            double horizon = utNow + (el.Hyperbolic ? MaxHorizon : Math.Min(el.Period, MaxHorizon));
+            // Interstellar transfers (a conic about the galactic barycenter, i.e. the parentless root) take
+            // far longer than any in-system coast, so the encounter search needs a much longer horizon to
+            // ever see the other star. The adaptive subdivision keeps resolution where it matters.
+            double cap = primary.Parent == null ? InterstellarHorizon : MaxHorizon;
+            double horizon = utNow + (el.Hyperbolic ? cap : Math.Min(el.Period, cap));
             if (escapeT.HasValue) horizon = Math.Min(horizon, escapeT.Value);
             if (atmoT.HasValue) horizon = Math.Min(horizon, atmoT.Value);
 
